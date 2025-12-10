@@ -1,5 +1,11 @@
 # Revit MCP - AI-Powered Revit Control
 
+<div align="right">
+
+[English](README.en.md) | [看繁體中文點我](README.md)
+
+</div>
+
 <p align="center">
   <img src="https://img.shields.io/badge/Revit-2022-blue" alt="Revit 2022">
   <img src="https://img.shields.io/badge/Node.js-LTS-green" alt="Node.js">
