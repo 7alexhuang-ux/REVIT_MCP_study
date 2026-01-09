@@ -1,20 +1,20 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\User\\Desktop\\REVIT_MCP\\REVIT_MCP_study\\MCP\\RevitMCP.2024.csproj": {}
+    "C:\\Project\\REVIT_MCP_study\\MCP\\RevitMCP.2024.csproj": {}
   },
   "projects": {
-    "C:\\Users\\User\\Desktop\\REVIT_MCP\\REVIT_MCP_study\\MCP\\RevitMCP.2024.csproj": {
+    "C:\\Project\\REVIT_MCP_study\\MCP\\RevitMCP.2024.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\User\\Desktop\\REVIT_MCP\\REVIT_MCP_study\\MCP\\RevitMCP.2024.csproj",
+        "projectUniqueName": "C:\\Project\\REVIT_MCP_study\\MCP\\RevitMCP.2024.csproj",
         "projectName": "RevitMCP",
-        "projectPath": "C:\\Users\\User\\Desktop\\REVIT_MCP\\REVIT_MCP_study\\MCP\\RevitMCP.2024.csproj",
-        "packagesPath": "C:\\Users\\User\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\User\\Desktop\\REVIT_MCP\\REVIT_MCP_study\\MCP\\obj\\",
+        "projectPath": "C:\\Project\\REVIT_MCP_study\\MCP\\RevitMCP.2024.csproj",
+        "packagesPath": "C:\\Users\\womic\\.nuget\\packages\\",
+        "outputPath": "C:\\Project\\REVIT_MCP_study\\MCP\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "C:\\Users\\User\\AppData\\Roaming\\NuGet\\NuGet.Config"
+          "C:\\Users\\womic\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net48"
@@ -32,11 +32,6 @@
           "warnAsError": [
             "NU1605"
           ]
-        },
-        "restoreAuditProperties": {
-          "enableAudit": "true",
-          "auditLevel": "low",
-          "auditMode": "direct"
         }
       },
       "frameworks": {
@@ -54,7 +49,7 @@
               "version": "[13.0.3, )"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.416\\RuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.101\\RuntimeIdentifierGraph.json"
         }
       }
     }

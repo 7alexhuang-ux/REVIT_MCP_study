@@ -296,3 +296,40 @@ npm run build
     - 取得元素的 `BoundingBox`。
     - 標註位置線應定義在 `(max + min) / 2` 的中心軌跡上，以確保標註文字不與邊界牆重疊。
     - **警告**：嚴禁在 3D 視圖中直接建立平面標註，必須先查詢 `ActiveView`。
+
+### [L-003] Revit Add-in 部署路徑陷阱 (2026-01-08)
+- **問題**：`.addin` 檔案中的 `<Assembly>` 路徑與實際複製 DLL 的位置不一致。
+- **關鍵差異**：
+    | 路徑類型 | 路徑 |
+    |---------|------|
+    | `ProgramData` (全域) | `C:\ProgramData\Autodesk\Revit\Addins\2024\RevitMCP\` |
+    | `AppData` (用戶) | `C:\Users\<user>\AppData\Roaming\Autodesk\Revit\Addins\2024\` |
+- **規則**：部署前必須先檢查 `.addin` 檔案內的路徑，確保 DLL 複製到正確位置。
+- **驗證指令**：`Get-Content "$env:APPDATA\Autodesk\Revit\Addins\2024\RevitMCP.addin" | Select-String "Assembly"`
+
+### [L-004] Revit API 的 BuiltInParameter 驗證
+- **問題**：並非所有 BuiltInParameter 名稱都存在於 Revit API 中。
+- **踩雷案例**：
+    - ❌ `BuiltInParameter.VIEW_SCALE_PULLDOWN_METRIC` — 不存在
+    - ❌ `BuiltInParameter.VIEW_UNDERLAY_ID` — 不存在
+- **規則**：新增使用 BuiltInParameter 的程式碼前，應先在 Revit API 文檔或 RevitLookup 中確認其存在性。
+- **替代方案**：直接使用物件屬性（如 `view.Scale`）或用 `try-catch` 包裹。
+
+### [L-005] PowerShell 腳本編碼問題
+- **問題**：PowerShell 在中文 Windows 環境下可能誤讀 UTF-8 檔案為 Big5，導致語法錯誤。
+- **症狀**：看似正確的程式碼出現 `MissingEndCurlyBrace`、字串變成亂碼 `?誘...`。
+- **解決方案**：使用 **UTF-8 with BOM** 格式儲存 `.ps1` 檔案。
+- **專案應用**：使用 `install-addon-bom.ps1` 而非 `install-addon.ps1`。
+
+### [L-006] 多 .csproj 專案建置
+- **問題**：當資料夾內有多個 `.csproj` 時，`dotnet build` 會報錯 `MSB1011`。
+- **規則**：必須明確指定專案檔名稱。
+- **範例**：
+    ```powershell
+    # ❌ 錯誤
+    dotnet build -c Release
+    
+    # ✅ 正確
+    dotnet build -c Release RevitMCP.2024.csproj
+    ```
+
