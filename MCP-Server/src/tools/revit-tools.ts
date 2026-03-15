@@ -861,6 +861,585 @@ export function registerRevitTools(): Tool[] {
                 },
             },
         },
+
+        // ========== 帷幕牆工具 ==========
+
+        // 38. 取得帷幕牆資訊
+        {
+            name: "get_curtain_wall_info",
+            description: "取得目前選取的帷幕牆詳細資訊，包含 Grid 排列（列數、行數）、面板尺寸、面板類型分佈等。使用前請先在 Revit 中選取一個帷幕牆。",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    elementId: {
+                        type: "number",
+                        description: "帷幕牆的 Element ID（選填，若不指定則使用目前選取的元素）",
+                    },
+                },
+            },
+        },
+
+        // 39. 取得帷幕牆面板類型
+        {
+            name: "get_curtain_panel_types",
+            description: "取得專案中所有可用的帷幕牆面板類型，包含類型名稱、族群、材料等資訊。用於選擇要套用的面板類型。",
+            inputSchema: {
+                type: "object",
+                properties: {},
+            },
+        },
+
+        // 40. 建立帷幕牆面板類型
+        {
+            name: "create_curtain_panel_type",
+            description: "建立新的帷幕牆面板類型，可指定顏色。用於實現自訂面板排列模式。",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    typeName: {
+                        type: "string",
+                        description: "新類型的名稱",
+                    },
+                    color: {
+                        type: "string",
+                        description: "面板顏色（HEX 格式，如 '#5C4033'）",
+                    },
+                    baseTypeId: {
+                        type: "number",
+                        description: "基礎類型 ID（選填，用於複製現有類型的設定）",
+                    },
+                },
+                required: ["typeName", "color"],
+            },
+        },
+
+        // 41. 套用帷幕牆面板排列模式
+        {
+            name: "apply_panel_pattern",
+            description: "將指定的面板排列模式套用到帷幕牆。需要提供類型映射表（字母對應類型 ID）和排列矩陣。",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    elementId: {
+                        type: "number",
+                        description: "帷幕牆的 Element ID",
+                    },
+                    typeMapping: {
+                        type: "object",
+                        description: "類型映射表，鍵為矩陣中的字母（如 'A', 'B'），值為對應的面板類型 ID",
+                    },
+                    matrix: {
+                        type: "array",
+                        description: "面板排列矩陣，每行是一個字串陣列，由上到下、由左到右",
+                        items: {
+                            type: "array",
+                            items: { type: "string" },
+                        },
+                    },
+                },
+                required: ["elementId", "typeMapping", "matrix"],
+            },
+        },
+
+        // ========== 立面面板工具 ==========
+
+        // 42. 建立單片立面面板
+        {
+            name: "create_facade_panel",
+            description: "在指定牆面前方建立一片立面面板（DirectShape）。支援 5 種幾何類型：curved_panel（弧形面板）、beveled_opening（斜切凹窗框）、angled_panel（傾斜平板）、rounded_opening（圓角開口）、flat_panel（平面面板）。",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    wallId: {
+                        type: "number",
+                        description: "參考牆的 Element ID（選填，若不指定則使用目前選取的牆）",
+                    },
+                    geometryType: {
+                        type: "string",
+                        enum: ["curved_panel", "beveled_opening", "angled_panel", "rounded_opening", "flat_panel"],
+                        description: "幾何類型：curved_panel=弧形面板, beveled_opening=斜切凹窗框, angled_panel=傾斜平板, rounded_opening=圓角開口, flat_panel=平面面板。預設 curved_panel",
+                    },
+                    positionAlongWall: {
+                        type: "number",
+                        description: "面板中心沿牆方向的位置（mm，從牆起點算起）",
+                    },
+                    positionZ: {
+                        type: "number",
+                        description: "面板底部的 Z 高度（mm）",
+                    },
+                    width: {
+                        type: "number",
+                        description: "面板/外框寬度（mm），預設 800",
+                    },
+                    height: {
+                        type: "number",
+                        description: "面板/外框高度（mm），預設 3400",
+                    },
+                    depth: {
+                        type: "number",
+                        description: "深度（mm）：弧形面板的弧深 / 開口類型的凹入深度，預設 150",
+                    },
+                    thickness: {
+                        type: "number",
+                        description: "板厚（mm），預設 30",
+                    },
+                    offset: {
+                        type: "number",
+                        description: "距牆面的偏移量（mm），預設 200",
+                    },
+                    color: {
+                        type: "string",
+                        description: "顏色（HEX 格式，如 '#B85C3A'）",
+                    },
+                    name: {
+                        type: "string",
+                        description: "面板名稱標識",
+                    },
+                    // curved_panel 專用
+                    curveType: {
+                        type: "string",
+                        enum: ["concave", "convex"],
+                        description: "[curved_panel] 曲線類型：concave 凹面 / convex 凸面",
+                    },
+                    // angled_panel 專用
+                    tiltAngle: {
+                        type: "number",
+                        description: "[angled_panel] 傾斜角度（度），預設 15",
+                    },
+                    tiltAxis: {
+                        type: "string",
+                        enum: ["horizontal", "vertical"],
+                        description: "[angled_panel] 傾斜軸：horizontal 前後傾 / vertical 左右傾",
+                    },
+                    // beveled_opening 專用
+                    bevelDirection: {
+                        type: "string",
+                        enum: ["center", "up", "down", "left", "right"],
+                        description: "[beveled_opening] 斜切方向：center 均勻 / up 上深 / down 下深 / left 左深 / right 右深",
+                    },
+                    bevelDepth: {
+                        type: "number",
+                        description: "[beveled_opening] 斜切凹陷深度（mm），預設 300。控制從外框到開口底部的斜面深度",
+                    },
+                    openingWidth: {
+                        type: "number",
+                        description: "[beveled_opening/rounded_opening] 內開口寬度（mm）",
+                    },
+                    openingHeight: {
+                        type: "number",
+                        description: "[beveled_opening/rounded_opening] 內開口高度（mm）",
+                    },
+                    // rounded_opening 專用
+                    cornerRadius: {
+                        type: "number",
+                        description: "[rounded_opening] 圓角半徑（mm），預設 100",
+                    },
+                    openingShape: {
+                        type: "string",
+                        enum: ["rounded_rect", "arch", "stadium", "rect"],
+                        description: "[rounded_opening] 開口形狀：rounded_rect 圓角矩形 / arch 圓拱 / stadium 跑道形 / rect 直角",
+                    },
+                },
+            },
+        },
+
+        // 44. 自動放置房間
+        {
+            name: "auto_place_rooms",
+            description: "自動偵測目前視圖樓層的所有封閉空間（PlanCircuit），並在未佔用的空間中放置 Room。使用前請切換到目標樓層的平面圖視圖。",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    levelName: {
+                        type: "string",
+                        description: "目標樓層名稱（選填，若不指定則使用目前平面圖視圖的樓層）",
+                    },
+                    skipExisting: {
+                        type: "boolean",
+                        description: "是否跳過已有 Room 的封閉空間，預設 true",
+                        default: true,
+                    },
+                    minArea: {
+                        type: "number",
+                        description: "最小面積門檻（平方公尺），小於此值的封閉空間不放置 Room，預設 0.5",
+                        default: 0.5,
+                    },
+                },
+            },
+        },
+
+        // 43. 批次建立整面立面
+        {
+            name: "create_facade_from_analysis",
+            description: "根據 AI 分析結果或預覽工具設定，一次建立整面弧形立面。在指定牆面前方批次建立多片 DirectShape 弧形面板，支援多種面板類型和排列模式。建議先使用立面預覽工具（http://localhost:10002）確認效果後再套用。",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    wallId: {
+                        type: "number",
+                        description: "目標牆的 Element ID（選填，若不指定則使用目前選取的牆）",
+                    },
+                    facadeLayers: {
+                        type: "object",
+                        description: "立面層級定義",
+                        properties: {
+                            outer: {
+                                type: "object",
+                                description: "外層弧形面板定義",
+                                properties: {
+                                    offset: {
+                                        type: "number",
+                                        description: "距牆面偏移量（mm），預設 200",
+                                    },
+                                    panelTypes: {
+                                        type: "array",
+                                        description: "面板類型定義陣列",
+                                        items: {
+                                            type: "object",
+                                            properties: {
+                                                id: {
+                                                    type: "string",
+                                                    description: "類型代號（如 'A', 'B'），用於 pattern 矩陣對應",
+                                                },
+                                                name: {
+                                                    type: "string",
+                                                    description: "類型名稱（如 'FP_Concave_800_150_Terracotta'）",
+                                                },
+                                                width: {
+                                                    type: "number",
+                                                    description: "面板寬度（mm）",
+                                                },
+                                                height: {
+                                                    type: "number",
+                                                    description: "面板高度（mm）",
+                                                },
+                                                depth: {
+                                                    type: "number",
+                                                    description: "弧形深度（mm）",
+                                                },
+                                                thickness: {
+                                                    type: "number",
+                                                    description: "板厚（mm）",
+                                                },
+                                                curveType: {
+                                                    type: "string",
+                                                    enum: ["concave", "convex"],
+                                                    description: "[curved_panel] 曲線類型",
+                                                },
+                                                color: {
+                                                    type: "string",
+                                                    description: "顏色（HEX 格式）",
+                                                },
+                                                geometryType: {
+                                                    type: "string",
+                                                    enum: ["curved_panel", "beveled_opening", "angled_panel", "rounded_opening", "flat_panel"],
+                                                    description: "幾何類型，預設 curved_panel",
+                                                },
+                                                tiltAngle: { type: "number", description: "[angled_panel] 傾斜角度" },
+                                                tiltAxis: { type: "string", description: "[angled_panel] 傾斜軸" },
+                                                bevelDirection: { type: "string", description: "[beveled_opening] 斜切方向" },
+                                                openingWidth: { type: "number", description: "[opening] 開口寬度(mm)" },
+                                                openingHeight: { type: "number", description: "[opening] 開口高度(mm)" },
+                                                cornerRadius: { type: "number", description: "[rounded_opening] 圓角半徑(mm)" },
+                                                openingShape: { type: "string", description: "[rounded_opening] 開口形狀" },
+                                            },
+                                            required: ["id", "width", "color"],
+                                        },
+                                    },
+                                    pattern: {
+                                        type: "array",
+                                        description: "排列矩陣，每個元素為一個字串代表一層（如 'ABABAB'），由上到下排列",
+                                        items: { type: "string" },
+                                    },
+                                    gap: {
+                                        type: "number",
+                                        description: "面板間水平間距（mm），預設 20",
+                                    },
+                                    horizontalBandHeight: {
+                                        type: "number",
+                                        description: "層間水平分隔帶高度（mm），0 表示不建立分隔帶",
+                                    },
+                                    floorHeight: {
+                                        type: "number",
+                                        description: "每層高度（mm），預設 3600",
+                                    },
+                                },
+                                required: ["panelTypes", "pattern"],
+                            },
+                        },
+                        required: ["outer"],
+                    },
+                },
+                required: ["facadeLayers"],
+            },
+        },
+
+        // ========== 排煙窗檢討工具 ==========
+
+        // 排煙窗檢討（Step 2+5 合併）
+        {
+            name: "check_smoke_exhaust_windows",
+            description: `排煙窗檢討：檢查天花板下 80cm 內可開啟窗面積是否 ≥ 區劃面積 2%。
+同時判定「無窗居室」（建技規§1第35款第三目 + §100②）。
+法源：建技規§101① + 消防§188③⑦。
+功能：
+- 計算每個房間天花板高度（支援 Room 參數或 Ceiling 元素兩種來源）
+- 找出天花板下 80cm 有效帶內的窗戶
+- 從族群名稱推斷開啟方式並計算折減（Casement=1.0, Sliding=0.5, Fixed=0）
+- 自動上色：綠=全開、黃=折減、紅=固定、灰=未知
+- 產生改善建議（換窗型、加窗、機械排煙）
+非居室空間（走廊、樓梯、電梯、廁所等）自動跳過，面積 ≤ 50m² 的房間自動跳過。`,
+            inputSchema: {
+                type: "object",
+                properties: {
+                    levelName: {
+                        type: "string",
+                        description: "樓層名稱",
+                    },
+                    ceilingHeightSource: {
+                        type: "string",
+                        enum: ["room_parameter", "ceiling_element"],
+                        description: "天花板高度來源：room_parameter（讀 Room 上限偏移，預設）或 ceiling_element（搜尋 Ceiling 元素）",
+                        default: "room_parameter",
+                    },
+                    colorize: {
+                        type: "boolean",
+                        description: "是否自動上色窗戶（綠=全開型、黃=折減型、紅=固定窗、灰=未知），預設 true",
+                        default: true,
+                    },
+                    smokeZoneHeight: {
+                        type: "number",
+                        description: "有效帶高度（mm），法規為天花板下 80cm，預設 800",
+                        default: 800,
+                    },
+                    excludeKeywords: {
+                        type: "array",
+                        description: "非居室排除關鍵字陣列，房間名稱包含這些關鍵字則跳過檢討。預設排除：走廊、樓梯、電梯、管道、機房、廁所、浴室、玄關、陽台等",
+                        items: { type: "string" },
+                    },
+                },
+                required: ["levelName"],
+            },
+        },
+
+        // 無開口樓層判定（Step 1）
+        {
+            name: "check_floor_effective_openings",
+            description: `無開口樓層判定（Step 1）：檢查樓層外牆有效開口面積是否 ≥ 樓地板面積 1/30。
+法源：消防設置標準§4 + §28③。
+有效開口條件：
+- 可內切直徑 ≥ 50cm 圓
+- 下緣距地板 ≤ 1.2m
+- 面臨道路或 ≥ 1m 通路（加註需人工確認）
+- 無柵欄、玻璃厚 ≤ 6mm（從族群名稱推斷 + 加註）
+- 十層以下另需至少 2 個大型開口（直徑≥1m 或 75cm×120cm）
+自動上色：綠=有效開口、紅=無效開口。
+後果：≥ 1000m² 的無開口樓層須設排煙設備。`,
+            inputSchema: {
+                type: "object",
+                properties: {
+                    levelName: {
+                        type: "string",
+                        description: "樓層名稱",
+                    },
+                    colorize: {
+                        type: "boolean",
+                        description: "是否自動上色開口（綠=有效、紅=無效），預設 true",
+                        default: true,
+                    },
+                },
+                required: ["levelName"],
+            },
+        },
+
+        // ========== 視覺化工具 ==========
+
+        // 建立剖面視圖
+        {
+            name: "create_section_view",
+            description: `建立剖面視圖（用於排煙窗檢討的立面檢視）。
+指定一面牆，建立面向該牆的剖面視圖，可用於檢視窗戶與天花板的高度關係。`,
+            inputSchema: {
+                type: "object",
+                properties: {
+                    wallId: {
+                        type: "number",
+                        description: "目標牆的 Element ID",
+                    },
+                    viewName: {
+                        type: "string",
+                        description: "視圖名稱，預設「排煙檢討剖面」",
+                        default: "排煙檢討剖面",
+                    },
+                    offset: {
+                        type: "number",
+                        description: "剖面距牆面的偏移距離（mm），預設 1000",
+                        default: 1000,
+                    },
+                    scale: {
+                        type: "number",
+                        description: "視圖比例尺（如 50 代表 1:50），預設 50",
+                        default: 50,
+                    },
+                },
+                required: ["wallId"],
+            },
+        },
+
+        // 繪製詳圖線
+        {
+            name: "create_detail_lines",
+            description: `在視圖上繪製詳圖線（如天花板線、有效帶範圍線等）。
+可指定顏色和標籤，用於排煙檢討的視覺化標註。`,
+            inputSchema: {
+                type: "object",
+                properties: {
+                    viewId: {
+                        type: "number",
+                        description: "目標視圖的 Element ID",
+                    },
+                    lines: {
+                        type: "array",
+                        description: "線段陣列",
+                        items: {
+                            type: "object",
+                            properties: {
+                                startX: { type: "number", description: "起點 X（mm）" },
+                                startY: { type: "number", description: "起點 Y（mm）" },
+                                endX: { type: "number", description: "終點 X（mm）" },
+                                endY: { type: "number", description: "終點 Y（mm）" },
+                                color: {
+                                    type: "object",
+                                    description: "線條顏色 RGB",
+                                    properties: {
+                                        r: { type: "number" },
+                                        g: { type: "number" },
+                                        b: { type: "number" },
+                                    },
+                                },
+                                lineStyle: { type: "string", description: "線條樣式名稱（選填）" },
+                                label: { type: "string", description: "標籤說明（選填）" },
+                            },
+                            required: ["startX", "startY", "endX", "endY"],
+                        },
+                    },
+                },
+                required: ["viewId", "lines"],
+            },
+        },
+
+        // 建立填充區域
+        {
+            name: "create_filled_region",
+            description: `建立填充區域（如排煙有效帶的半透明色塊）。
+在指定視圖上以多邊形邊界建立填充區域，可設定顏色和透明度。`,
+            inputSchema: {
+                type: "object",
+                properties: {
+                    viewId: {
+                        type: "number",
+                        description: "目標視圖的 Element ID",
+                    },
+                    points: {
+                        type: "array",
+                        description: "多邊形頂點陣列（至少 3 個點，自動封閉）",
+                        items: {
+                            type: "object",
+                            properties: {
+                                x: { type: "number", description: "X 座標（mm）" },
+                                y: { type: "number", description: "Y 座標（mm）" },
+                            },
+                            required: ["x", "y"],
+                        },
+                    },
+                    color: {
+                        type: "object",
+                        description: "填充顏色 RGB",
+                        properties: {
+                            r: { type: "number" },
+                            g: { type: "number" },
+                            b: { type: "number" },
+                        },
+                    },
+                    transparency: {
+                        type: "number",
+                        description: "透明度 0-100，預設 50",
+                        default: 50,
+                    },
+                    regionType: {
+                        type: "string",
+                        description: "填充區域類型名稱（選填，預設使用第一個可用類型）",
+                    },
+                },
+                required: ["viewId", "points"],
+            },
+        },
+
+        // 建立文字標註
+        {
+            name: "create_text_note",
+            description: `在視圖上建立文字標註（如排煙檢討統計摘要）。`,
+            inputSchema: {
+                type: "object",
+                properties: {
+                    viewId: {
+                        type: "number",
+                        description: "目標視圖的 Element ID",
+                    },
+                    x: {
+                        type: "number",
+                        description: "文字位置 X 座標（mm）",
+                    },
+                    y: {
+                        type: "number",
+                        description: "文字位置 Y 座標（mm）",
+                    },
+                    text: {
+                        type: "string",
+                        description: "文字內容",
+                    },
+                    textSize: {
+                        type: "number",
+                        description: "文字大小（mm），預設 2.5",
+                        default: 2.5,
+                    },
+                },
+                required: ["viewId", "x", "y", "text"],
+            },
+        },
+
+        // ========== Excel 匯出 ==========
+
+        // 匯出排煙窗檢討 Excel
+        {
+            name: "export_smoke_review_excel",
+            description: `匯出排煙窗檢討結果為 Excel (.xlsx) 報告。
+包含四個區段：
+1. 樓層總覽（無開口樓層判定）
+2. 房間排煙檢討明細（天花板高度、有效面積、合規判定）
+3. 窗戶明細（每扇窗的尺寸、位置、開啟方式、有效面積）
+4. 改善建議（不合規房間的具體改善方案）`,
+            inputSchema: {
+                type: "object",
+                properties: {
+                    levelName: {
+                        type: "string",
+                        description: "樓層名稱",
+                    },
+                    ceilingHeightSource: {
+                        type: "string",
+                        enum: ["room_parameter", "ceiling_element"],
+                        description: "天花板高度來源，預設 room_parameter",
+                        default: "room_parameter",
+                    },
+                    outputPath: {
+                        type: "string",
+                        description: "輸出檔案路徑（選填，預設存在專案資料夾）",
+                    },
+                },
+                required: ["levelName"],
+            },
+        },
     ];
 }
 
