@@ -23,6 +23,9 @@ namespace RevitMCP.Core.Grading
     {
         private const string AbsoluteFinishUnavailableMessage =
             "Revit 2024 公開 API 無法可靠設定此 Toposolid 的絕對完成面";
+        private const int MaximumCurveSubdivisionDepth = 32;
+        private const int MaximumDiscretizedPointCount = 100000;
+        private const double ChordLengthToleranceFactor = 1e-9;
 
         private static readonly Guid AssociationSchemaGuid =
             new Guid("9B4B16C7-4C9C-4B73-9D13-B44F88650D29");
@@ -237,12 +240,10 @@ namespace RevitMCP.Core.Grading
             var cut = ReadVolumeParameter(
                 design,
                 BuiltInParameter.VOLUME_CUT,
-                new[] { "Cut", "挖方", "挖方體積" },
                 "CUT");
             var fill = ReadVolumeParameter(
                 design,
                 BuiltInParameter.VOLUME_FILL,
-                new[] { "Fill", "填方", "填方體積" },
                 "FILL");
 
             if (Math.Abs(cut) <= 1e-12 && Math.Abs(fill) <= 1e-12)
@@ -320,15 +321,30 @@ namespace RevitMCP.Core.Grading
             var points = new List<Point2D>();
             foreach (var curve in loop)
             {
-                var segmentCount = curve is Line
-                    ? 1
-                    : Math.Max(1, (int)Math.Ceiling(curve.Length / maximumChordLength));
-
-                for (var segment = 0; segment <= segmentCount; segment++)
+                if (curve is Line)
                 {
-                    var parameter = segment / (double)segmentCount;
-                    var xyz = curve.Evaluate(parameter, true);
-                    AddDistinctPoint(points, new Point2D(xyz.X, xyz.Y));
+                    AddDistinctPoint(points, ToPoint2D(curve.GetEndPoint(0)));
+                    AddDistinctPoint(points, ToPoint2D(curve.GetEndPoint(1)));
+                    EnsurePointLimit(points.Count);
+                    continue;
+                }
+
+                var curvePoints = new List<XYZ> { curve.Evaluate(0, true) };
+                AppendAdaptiveCurvePoints(
+                    curve,
+                    0,
+                    curvePoints[0],
+                    1,
+                    curve.Evaluate(1, true),
+                    0,
+                    maximumChordLength,
+                    curvePoints);
+                ValidateChordLengths(curvePoints, maximumChordLength);
+
+                foreach (var curvePoint in curvePoints)
+                {
+                    AddDistinctPoint(points, ToPoint2D(curvePoint));
+                    EnsurePointLimit(points.Count);
                 }
             }
 
@@ -338,6 +354,104 @@ namespace RevitMCP.Core.Grading
             }
 
             return points;
+        }
+
+        private static void AppendAdaptiveCurvePoints(
+            Curve curve,
+            double startParameter,
+            XYZ startPoint,
+            double endParameter,
+            XYZ endPoint,
+            int depth,
+            double maximumChordLength,
+            ICollection<XYZ> points)
+        {
+            var tolerance = maximumChordLength * ChordLengthToleranceFactor;
+            var subcurveLength = GetSubcurveLength(curve, startParameter, endParameter);
+            var chordLength = startPoint.DistanceTo(endPoint);
+            if (subcurveLength <= maximumChordLength + tolerance
+                && chordLength <= maximumChordLength + tolerance)
+            {
+                EnsurePointLimit(points.Count + 1);
+                points.Add(endPoint);
+                return;
+            }
+
+            if (depth >= MaximumCurveSubdivisionDepth)
+            {
+                throw new InvalidOperationException(
+                    $"曲線離散化超過最大遞迴深度 {MaximumCurveSubdivisionDepth}，"
+                    + "無法保證 300 mm 最大弦長。");
+            }
+
+            var middleParameter = (startParameter + endParameter) / 2.0;
+            if (middleParameter <= startParameter || middleParameter >= endParameter)
+            {
+                throw new InvalidOperationException("曲線參數無法繼續細分，無法保證 300 mm 最大弦長。");
+            }
+
+            var middlePoint = curve.Evaluate(middleParameter, true);
+            AppendAdaptiveCurvePoints(
+                curve,
+                startParameter,
+                startPoint,
+                middleParameter,
+                middlePoint,
+                depth + 1,
+                maximumChordLength,
+                points);
+            AppendAdaptiveCurvePoints(
+                curve,
+                middleParameter,
+                middlePoint,
+                endParameter,
+                endPoint,
+                depth + 1,
+                maximumChordLength,
+                points);
+        }
+
+        private static double GetSubcurveLength(
+            Curve curve,
+            double startParameter,
+            double endParameter)
+        {
+            using (var subcurve = curve.Clone())
+            {
+                subcurve.MakeBound(
+                    curve.ComputeRawParameter(startParameter),
+                    curve.ComputeRawParameter(endParameter));
+                return subcurve.Length;
+            }
+        }
+
+        private static void ValidateChordLengths(
+            IReadOnlyList<XYZ> points,
+            double maximumChordLength)
+        {
+            var maximumWithTolerance = maximumChordLength
+                * (1 + ChordLengthToleranceFactor);
+            for (var index = 1; index < points.Count; index++)
+            {
+                if (points[index - 1].DistanceTo(points[index]) > maximumWithTolerance)
+                {
+                    throw new InvalidOperationException("曲線離散化產生超過 300 mm 的弦長。");
+                }
+            }
+        }
+
+        private static Point2D ToPoint2D(XYZ point)
+        {
+            return new Point2D(point.X, point.Y);
+        }
+
+        private static void EnsurePointLimit(int pointCount)
+        {
+            if (pointCount > MaximumDiscretizedPointCount)
+            {
+                throw new InvalidOperationException(
+                    $"曲線離散化超過最大點數 {MaximumDiscretizedPointCount}，已中止處理。");
+            }
         }
 
         private static void AddDistinctPoint(ICollection<Point2D> points, Point2D candidate)
@@ -471,25 +585,15 @@ namespace RevitMCP.Core.Grading
         private static double ReadVolumeParameter(
             Toposolid design,
             BuiltInParameter builtInParameter,
-            IEnumerable<string> fallbackNames,
             string displayName)
         {
             var parameter = design.get_Parameter(builtInParameter);
-            if (parameter == null)
+            if (parameter == null
+                || !parameter.HasValue
+                || parameter.StorageType != StorageType.Double)
             {
-                foreach (var name in fallbackNames)
-                {
-                    parameter = design.LookupParameter(name);
-                    if (parameter != null)
-                    {
-                        break;
-                    }
-                }
-            }
-
-            if (parameter == null || parameter.StorageType != StorageType.Double)
-            {
-                throw new InvalidOperationException($"設計 Toposolid 缺少可讀取的 {displayName} 體積參數。");
+                throw new InvalidOperationException(
+                    $"設計 Toposolid 缺少有值且可讀取的內建 {displayName} 體積參數。");
             }
 
             var value = parameter.AsDouble();
