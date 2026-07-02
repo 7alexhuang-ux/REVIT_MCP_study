@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node --test build/tools/*.test.js",
     "start": "node build/index.js",
     "dev": "tsc && node build/index.js",
     "watch": "tsc --watch",
