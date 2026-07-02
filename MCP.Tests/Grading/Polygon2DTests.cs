@@ -54,6 +54,24 @@ namespace RevitMCP.Tests.Grading
             Assert.That(Polygon2D.Overlaps(a, b, Tolerance), Is.False);
         }
 
+        [Test]
+        public void Overlaps_相同Footprint有實際面積交集_回傳真()
+        {
+            var a = Rect(0, 0, 10, 10);
+            var b = Rect(0, 0, 10, 10);
+
+            Assert.That(Polygon2D.Overlaps(a, b, Tolerance), Is.True);
+        }
+
+        [Test]
+        public void Overlaps_矩形貼齊邊界且位於內部_回傳真()
+        {
+            var outer = Rect(0, 0, 10, 10);
+            var inner = Rect(0, 0, 5, 10);
+
+            Assert.That(Polygon2D.Overlaps(outer, inner, Tolerance), Is.True);
+        }
+
         private static IReadOnlyList<Point2D> Rect(double minX, double minY, double maxX, double maxY)
         {
             return new[]

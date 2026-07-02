@@ -54,6 +54,8 @@ namespace RevitMCP.Core.Grading
             }
 
             tolerance = Math.Abs(tolerance);
+            var firstWinding = Math.Sign(SignedArea(first));
+            var secondWinding = Math.Sign(SignedArea(second));
             for (var firstIndex = 0; firstIndex < first.Count; firstIndex++)
             {
                 var firstStart = first[firstIndex];
@@ -68,6 +70,18 @@ namespace RevitMCP.Core.Grading
                         firstEnd,
                         secondStart,
                         secondEnd,
+                        tolerance))
+                    {
+                        return true;
+                    }
+
+                    if (HasCollinearOverlapOnSameInteriorSide(
+                        firstStart,
+                        firstEnd,
+                        secondStart,
+                        secondEnd,
+                        firstWinding,
+                        secondWinding,
                         tolerance))
                     {
                         return true;
@@ -95,6 +109,48 @@ namespace RevitMCP.Core.Grading
             }
 
             return false;
+        }
+
+        private static bool HasCollinearOverlapOnSameInteriorSide(
+            Point2D firstStart,
+            Point2D firstEnd,
+            Point2D secondStart,
+            Point2D secondEnd,
+            int firstWinding,
+            int secondWinding,
+            double tolerance)
+        {
+            var firstLength = Distance(firstStart, firstEnd);
+            var secondLength = Distance(secondStart, secondEnd);
+            if (firstLength == 0 || secondLength == 0 || firstWinding == 0 || secondWinding == 0)
+            {
+                return false;
+            }
+
+            if (Math.Abs(Cross(firstStart, firstEnd, secondStart)) > tolerance * firstLength
+                || Math.Abs(Cross(firstStart, firstEnd, secondEnd)) > tolerance * firstLength)
+            {
+                return false;
+            }
+
+            var firstDirectionX = (firstEnd.X - firstStart.X) / firstLength;
+            var firstDirectionY = (firstEnd.Y - firstStart.Y) / firstLength;
+            var secondStartProjection = ((secondStart.X - firstStart.X) * firstDirectionX)
+                + ((secondStart.Y - firstStart.Y) * firstDirectionY);
+            var secondEndProjection = ((secondEnd.X - firstStart.X) * firstDirectionX)
+                + ((secondEnd.Y - firstStart.Y) * firstDirectionY);
+            var overlapLength = Math.Min(firstLength, Math.Max(secondStartProjection, secondEndProjection))
+                - Math.Max(0, Math.Min(secondStartProjection, secondEndProjection));
+            if (overlapLength <= tolerance)
+            {
+                return false;
+            }
+
+            var secondDirectionX = (secondEnd.X - secondStart.X) / secondLength;
+            var secondDirectionY = (secondEnd.Y - secondStart.Y) / secondLength;
+            var interiorNormalDot = firstWinding * secondWinding
+                * ((firstDirectionX * secondDirectionX) + (firstDirectionY * secondDirectionY));
+            return interiorNormalDot > 0;
         }
 
         private static bool IsOnBoundary(
@@ -188,6 +244,19 @@ namespace RevitMCP.Core.Grading
             var deltaX = second.X - first.X;
             var deltaY = second.Y - first.Y;
             return (deltaX * deltaX) + (deltaY * deltaY);
+        }
+
+        private static double SignedArea(IReadOnlyList<Point2D> polygon)
+        {
+            var doubledArea = 0.0;
+            for (var i = 0; i < polygon.Count; i++)
+            {
+                var current = polygon[i];
+                var next = polygon[(i + 1) % polygon.Count];
+                doubledArea += (current.X * next.Y) - (next.X * current.Y);
+            }
+
+            return doubledArea / 2.0;
         }
     }
 }
