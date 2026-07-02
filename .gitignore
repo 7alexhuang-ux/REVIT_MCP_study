@@ -101,3 +101,6 @@ docs/fork-audit/
 # Personal knowledge vault (see templates/personal-vault/ and docs/BIM_MCP/reference/personal-llm-wiki.html)
 /vault/
 /.obsidian/
+
+# Codex 隔離工作目錄
+.worktrees/
