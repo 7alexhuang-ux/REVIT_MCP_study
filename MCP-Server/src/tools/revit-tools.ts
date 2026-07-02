@@ -18,7 +18,10 @@ import { registerRevitTools as registerProfileTools } from "./index.js";
  */
 export function registerRevitTools(): Tool[] {
     const tools = registerProfileTools();
-    const profile = process.env.MCP_PROFILE || "full";
+    const requestedProfile = process.env.MCP_PROFILE || "full";
+    const profile = ["full", "architect", "mep", "structural", "fire-safety"].includes(requestedProfile)
+        ? requestedProfile
+        : "full";
 
     return ["full", "architect", "structural"].includes(profile)
         ? [...tools, ...gradingTools]

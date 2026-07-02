@@ -47,3 +47,18 @@ test("整地工具只註冊於核准的 Profile", () => {
         }
     }
 });
+
+test("未知 Profile 回退 full 時仍包含整地工具", () => {
+    const originalProfile = process.env.MCP_PROFILE;
+
+    try {
+        process.env.MCP_PROFILE = "unknown-profile";
+        assert.ok(registerRevitTools().some(tool => tool.name === "grade_toposolid_to_floors"));
+    } finally {
+        if (originalProfile === undefined) {
+            delete process.env.MCP_PROFILE;
+        } else {
+            process.env.MCP_PROFILE = originalProfile;
+        }
+    }
+});
