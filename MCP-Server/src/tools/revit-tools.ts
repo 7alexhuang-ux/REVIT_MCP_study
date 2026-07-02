@@ -9,9 +9,21 @@
  */
 
 import { RevitSocketClient } from "../socket.js";
+import { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { gradingTools } from "./grading-tools.js";
+import { registerRevitTools as registerProfileTools } from "./index.js";
 
-// Re-export from new module system
-export { registerRevitTools } from "./index.js";
+/**
+ * 依 Profile 註冊工具，並將 Toposolid 整地限制於建築與結構相關 Profile。
+ */
+export function registerRevitTools(): Tool[] {
+    const tools = registerProfileTools();
+    const profile = process.env.MCP_PROFILE || "full";
+
+    return ["full", "architect", "structural"].includes(profile)
+        ? [...tools, ...gradingTools]
+        : tools;
+}
 
 /**
  * 執行 Revit 工具
