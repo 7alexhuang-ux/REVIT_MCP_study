@@ -16,5 +16,6 @@
     <Compile Include="..\MCP\Core\Grading\GradingSchemeRecord.cs" Link="Core\Grading\GradingSchemeRecord.cs" />
     <Compile Include="..\MCP\Core\Grading\EarthworkLedger.cs" Link="Core\Grading\EarthworkLedger.cs" />
     <Compile Include="..\MCP\Core\Grading\BalanceSolver.cs" Link="Core\Grading\BalanceSolver.cs" />
+    <Compile Include="..\MCP\Core\Grading\EarthworkGrid.cs" Link="Core\Grading\EarthworkGrid.cs" />
   </ItemGroup>
 </Project>
