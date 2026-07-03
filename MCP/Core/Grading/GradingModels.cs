@@ -23,6 +23,8 @@ namespace RevitMCP.Core.Grading
         public double? OffsetDistanceMeters { get; set; }
         public string SlopeRatio { get; set; }
         public double? MaxExtensionMeters { get; set; }
+        public double? LooseFactor { get; set; }
+        public double? CompactionFactor { get; set; }
 
         public void Validate()
         {
@@ -33,6 +35,15 @@ namespace RevitMCP.Core.Grading
                 throw new ArgumentException("目前僅支援樓板底面 bottom。");
             if (UpdateExisting)
                 throw new ArgumentException("目前尚未支援 updateExisting=true。");
+            if (LooseFactor.HasValue || CompactionFactor.HasValue)
+            {
+                if (!(LooseFactor > 0) || !(CompactionFactor > 0))
+                {
+                    throw new ArgumentException(
+                        "鬆實方係數必須成對提供且大於 0（looseFactor 與 compactionFactor）。");
+                }
+            }
+
             TransitionSettings.FromRequest(this);
         }
     }

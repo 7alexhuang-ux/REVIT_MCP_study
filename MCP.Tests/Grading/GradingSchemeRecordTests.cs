@@ -7,9 +7,12 @@ namespace RevitMCP.Tests.Grading
     public class GradingSchemeRecordTests
     {
         [Test]
-        public void 記錄模型_預設SchemaVersion為1()
+        public void 記錄模型_預設SchemaVersion為2()
         {
-            Assert.AreEqual(1, new GradingSchemeRecord().SchemaVersion);
+            // v2：新增鬆實方三本帳 Ledger（可為 null）。
+            var record = new GradingSchemeRecord();
+            Assert.AreEqual(2, record.SchemaVersion);
+            Assert.IsNull(record.Ledger);
         }
 
         [Test]

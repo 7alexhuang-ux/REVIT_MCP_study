@@ -58,6 +58,34 @@ namespace RevitMCP.Tests.Grading
         }
 
         [Test]
+        public void Validate_鬆實方係數成對且為正_不拋出例外()
+        {
+            Assert.DoesNotThrow(() => new GradingRequest
+            {
+                ToposolidId = 6278563,
+                FloorIds = new[] { 7512796L },
+                Mode = "footprint_only",
+                TargetFace = "bottom",
+                LooseFactor = 1.25,
+                CompactionFactor = 0.9
+            }.Validate());
+        }
+
+        [Test]
+        public void Validate_鬆實方係數只給一個_拒絕執行()
+        {
+            var error = Assert.Throws<System.ArgumentException>(() => new GradingRequest
+            {
+                ToposolidId = 6278563,
+                FloorIds = new[] { 7512796L },
+                Mode = "footprint_only",
+                TargetFace = "bottom",
+                LooseFactor = 1.25
+            }.Validate());
+            StringAssert.Contains("成對", error.Message);
+        }
+
+        [Test]
         public void Validate_offset_transition_合法參數_不拋出例外()
         {
             Assert.DoesNotThrow(() => new GradingRequest

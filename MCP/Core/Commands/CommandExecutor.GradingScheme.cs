@@ -58,7 +58,9 @@ namespace RevitMCP.Core
                 {
                     "方案名稱", "時間", "模式", "Offset(m)", "坡度", "放坡上限(m)",
                     "原地形ID", "設計地形ID", "樓板IDs", "CUT(m³)", "FILL(m³)", "淨土方(m³)",
-                    "最大挖深(m)", "最大填高(m)", "擾動面積(m²)", "警告"
+                    "最大挖深(m)", "最大填高(m)", "擾動面積(m²)",
+                    "鬆方係數", "壓實係數", "運土鬆方(m³)", "填方所需自然方(m³)", "實質淨土方(m³)",
+                    "警告"
                 };
                 for (var column = 0; column < headers.Length; column++)
                 {
@@ -104,7 +106,17 @@ namespace RevitMCP.Core
                             ? $"≈{disturbedArea.Value:#,##0.00}"
                             : disturbedArea.Value.ToString("#,##0.00"))
                         : string.Empty;
-                    sheet.Cell(row, 16).Value = string.Join("；",
+                    var ledger = scheme["Ledger"] as JObject;
+                    if (ledger != null)
+                    {
+                        SetNumber(row, 16, ledger.Value<double?>("LooseFactor"));
+                        SetNumber(row, 17, ledger.Value<double?>("CompactionFactor"));
+                        SetNumber(row, 18, ledger.Value<double?>("HaulVolumeLooseCubicMeters"));
+                        SetNumber(row, 19, ledger.Value<double?>("RequiredBankForFillCubicMeters"));
+                        SetNumber(row, 20, ledger.Value<double?>("EffectiveNetCubicMeters"));
+                    }
+
+                    sheet.Cell(row, 21).Value = string.Join("；",
                         (scheme["Warnings"] as JArray)?.Select(warning => warning.ToString())
                             ?? Enumerable.Empty<string>());
                     if (index % 2 == 1)
@@ -117,6 +129,7 @@ namespace RevitMCP.Core
                 used.Style.Border.SetOutsideBorder(ClosedXML.Excel.XLBorderStyleValues.Thin);
                 used.Style.Border.SetInsideBorder(ClosedXML.Excel.XLBorderStyleValues.Thin);
                 sheet.Range(2, 10, schemes.Count + 1, 14).Style.NumberFormat.SetFormat("#,##0.00");
+                sheet.Range(2, 18, schemes.Count + 1, 20).Style.NumberFormat.SetFormat("#,##0.00");
                 sheet.SheetView.FreezeRows(1);
                 sheet.ColumnsUsed().AdjustToContents();
                 workbook.SaveAs(outputPath);

@@ -32,7 +32,9 @@ namespace RevitMCP.Core
                 UpdateExisting = parameters["updateExisting"]?.Value<bool>() ?? false,
                 OffsetDistanceMeters = parameters["offsetDistance"]?.Value<double?>(),
                 SlopeRatio = parameters["slopeRatio"]?.Value<string>(),
-                MaxExtensionMeters = parameters["maxExtension"]?.Value<double?>()
+                MaxExtensionMeters = parameters["maxExtension"]?.Value<double?>(),
+                LooseFactor = parameters["looseFactor"]?.Value<double?>(),
+                CompactionFactor = parameters["compactionFactor"]?.Value<double?>()
             };
             request.Validate();
 
@@ -64,6 +66,7 @@ namespace RevitMCP.Core
             Toposolid design = null!;
             string associationId = null!;
             GradingOutcome outcome = null!;
+            EarthworkLedger ledger = null;
             var cutCubicMeters = 0.0;
             var fillCubicMeters = 0.0;
 
@@ -148,6 +151,13 @@ namespace RevitMCP.Core
 
                         using (timeline.Measure("方案登記與標籤"))
                         {
+                            ledger = request.LooseFactor.HasValue
+                                ? EarthworkLedger.Compute(
+                                    cutCubicMeters,
+                                    fillCubicMeters,
+                                    request.LooseFactor.Value,
+                                    request.CompactionFactor.Value)
+                                : null;
                             var record = new GradingSchemeRecord
                             {
                                 AssociationId = associationId,
@@ -173,7 +183,8 @@ namespace RevitMCP.Core
                                 DisturbedAreaIsApproximate = outcome.DisturbedAreaIsApproximate,
                                 FloorMetrics = BuildFloorMetrics(floors, footprints),
                                 Warnings = warnings.ToArray(),
-                                ElevationBasis = "專案內部原點起算（公尺）"
+                                ElevationBasis = "專案內部原點起算（公尺）",
+                                Ledger = ledger
                             };
                             adapter.WriteSchemeRecord(
                                 doc, design, JsonConvert.SerializeObject(record), associationId);
@@ -276,6 +287,7 @@ namespace RevitMCP.Core
                 MaxFillHeightMeters = FeetToMeters(outcome.MaxFillHeightFeet),
                 DisturbedAreaSquareMeters = SquareFeetToSquareMeters(outcome.DisturbedAreaSquareFeet),
                 outcome.DisturbedAreaIsApproximate,
+                Ledger = ledger,
                 result.CutCubicMeters,
                 result.FillCubicMeters,
                 result.NetCubicMeters,
