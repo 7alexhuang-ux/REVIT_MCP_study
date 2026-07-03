@@ -322,6 +322,14 @@ namespace RevitMCP.Core.Grading
                 }
             }
 
+            // 邊界摺線：以分割線把樓板邊界刻成網格稜線，邊界內外的三角形都止於邊界，
+            // 杜絕外部高處地形的三角形跨越樓板上空。
+            using (_timeline.Measure("邊界摺線"))
+            {
+                DrawBoundarySplitLines(editor, footprints, xyTolerance);
+                doc.Regenerate();
+            }
+
             // 分類全部頂點：XY 位於樓板投影內或邊界上者，目標高程為該處樓板底面。
             var targets = new List<VertexTarget>();
             var classifyScope = _timeline.Measure("頂點分類");
@@ -389,6 +397,19 @@ namespace RevitMCP.Core.Grading
                         throw new InvalidOperationException(AbsoluteFinishUnavailableMessage);
                     }
                 }
+            }
+
+            // 表面抽樣驗收：控制點正確不代表點間表面正確，
+            // 以網格射線抽樣投影內實際表面，偏離板底超過 2 mm 即回滾。
+            using (_timeline.Measure("表面抽樣驗收"))
+            {
+                VerifySurfaceAgainstFootprints(
+                    design,
+                    footprints,
+                    elevationTolerance,
+                    xyTolerance,
+                    rayBottomZ,
+                    rayTopZ);
             }
 
             return targets.Count;
@@ -618,6 +639,172 @@ namespace RevitMCP.Core.Grading
             }
 
             return elevations;
+        }
+
+        private static void DrawBoundarySplitLines(
+            SlabShapeEditor editor,
+            IReadOnlyList<FloorFootprint> footprints,
+            double xyTolerance)
+        {
+            var vertices = new List<SlabShapeVertex>();
+            foreach (SlabShapeVertex vertex in editor.SlabShapeVertices)
+            {
+                if (vertex != null && vertex.IsValidObject)
+                {
+                    vertices.Add(vertex);
+                }
+            }
+
+            var matchTolerance = VertexMatchTolerance;
+            foreach (var footprint in footprints)
+            {
+                var loop = footprint.OuterLoop;
+                for (var index = 0; index < loop.Count; index++)
+                {
+                    var startVertex = FindNearestVertex(vertices, loop[index], matchTolerance);
+                    var endVertex = FindNearestVertex(vertices, loop[(index + 1) % loop.Count], matchTolerance);
+                    if (startVertex == null || endVertex == null)
+                    {
+                        // 邊界點可能因超出地形未建立（規則 7），跳過該段；完整性由表面抽樣驗收把關。
+                        continue;
+                    }
+
+                    if (XYDistanceSquared(startVertex.Position, endVertex.Position) <= xyTolerance * xyTolerance)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        editor.DrawSplitLine(startVertex, endVertex);
+                    }
+                    catch (Autodesk.Revit.Exceptions.ApplicationException)
+                    {
+                        // 既有摺線或退化線段會被 Revit 拒絕；缺段風險由表面抽樣驗收把關。
+                        continue;
+                    }
+                }
+            }
+        }
+
+        private static SlabShapeVertex FindNearestVertex(
+            IReadOnlyList<SlabShapeVertex> vertices,
+            Point2D point,
+            double matchTolerance)
+        {
+            SlabShapeVertex nearest = null;
+            var nearestDistanceSquared = double.MaxValue;
+            foreach (var vertex in vertices)
+            {
+                var position = vertex.Position;
+                var deltaX = position.X - point.X;
+                var deltaY = position.Y - point.Y;
+                var distanceSquared = deltaX * deltaX + deltaY * deltaY;
+                if (distanceSquared < nearestDistanceSquared)
+                {
+                    nearestDistanceSquared = distanceSquared;
+                    nearest = vertex;
+                }
+            }
+
+            return nearestDistanceSquared <= matchTolerance * matchTolerance ? nearest : null;
+        }
+
+        private static void VerifySurfaceAgainstFootprints(
+            Toposolid design,
+            IReadOnlyList<FloorFootprint> footprints,
+            double elevationTolerance,
+            double xyTolerance,
+            double rayBottomZ,
+            double rayTopZ)
+        {
+            var solids = CollectSolids(design);
+            if (solids.Count == 0)
+            {
+                throw new InvalidOperationException("整地後設計 Toposolid 沒有可用的實體幾何。");
+            }
+
+            var boundaryMargin = UnitUtils.ConvertToInternalUnits(300, UnitTypeId.Millimeters);
+            var sampleStep = UnitUtils.ConvertToInternalUnits(2000, UnitTypeId.Millimeters);
+            foreach (var footprint in footprints)
+            {
+                var loop = footprint.OuterLoop;
+                var minX = double.MaxValue;
+                var minY = double.MaxValue;
+                var maxX = double.MinValue;
+                var maxY = double.MinValue;
+                foreach (var point in loop)
+                {
+                    minX = Math.Min(minX, point.X);
+                    minY = Math.Min(minY, point.Y);
+                    maxX = Math.Max(maxX, point.X);
+                    maxY = Math.Max(maxY, point.Y);
+                }
+
+                for (var x = minX + sampleStep / 2; x <= maxX; x += sampleStep)
+                {
+                    for (var y = minY + sampleStep / 2; y <= maxY; y += sampleStep)
+                    {
+                        var sample = new Point2D(x, y);
+                        if (!Polygon2D.Contains(loop, sample, xyTolerance))
+                        {
+                            continue;
+                        }
+
+                        if (DistanceToBoundary(loop, sample) < boundaryMargin)
+                        {
+                            continue;
+                        }
+
+                        var surfaceZ = IntersectTerrainTopZ(solids, sample, rayBottomZ, rayTopZ);
+                        if (!surfaceZ.HasValue)
+                        {
+                            // 超出地形的投影部分不檢查（規則 7）。
+                            continue;
+                        }
+
+                        var bottomZ = footprint.BottomElevationAt(x, y);
+                        if (Math.Abs(surfaceZ.Value - bottomZ) > elevationTolerance)
+                        {
+                            var deviationMillimeters = UnitUtils.ConvertFromInternalUnits(
+                                Math.Abs(surfaceZ.Value - bottomZ),
+                                UnitTypeId.Millimeters);
+                            throw new InvalidOperationException(
+                                $"樓板 ID {footprint.FloorId} 投影內表面抽樣偏離板底 "
+                                + $"{deviationMillimeters:F1} mm，超過 2 mm 容許，已回滾整地。");
+                        }
+                    }
+                }
+            }
+        }
+
+        private static double DistanceToBoundary(IReadOnlyList<Point2D> loop, Point2D point)
+        {
+            var minDistanceSquared = double.MaxValue;
+            for (var index = 0; index < loop.Count; index++)
+            {
+                var start = loop[index];
+                var end = loop[(index + 1) % loop.Count];
+                var edgeX = end.X - start.X;
+                var edgeY = end.Y - start.Y;
+                var lengthSquared = edgeX * edgeX + edgeY * edgeY;
+                double t = 0;
+                if (lengthSquared > 0)
+                {
+                    t = ((point.X - start.X) * edgeX + (point.Y - start.Y) * edgeY) / lengthSquared;
+                    t = Math.Max(0, Math.Min(1, t));
+                }
+
+                var deltaX = point.X - (start.X + t * edgeX);
+                var deltaY = point.Y - (start.Y + t * edgeY);
+                var distanceSquared = deltaX * deltaX + deltaY * deltaY;
+                if (distanceSquared < minDistanceSquared)
+                {
+                    minDistanceSquared = distanceSquared;
+                }
+            }
+
+            return Math.Sqrt(minDistanceSquared);
         }
 
         public (double cutCubicMeters, double fillCubicMeters) ReadCutFill(Toposolid design)
