@@ -65,6 +65,101 @@ export const gradingTools: Tool[] = [
                     description:
                         "方案名稱（寫入登記簿與設計地形 Comments 標籤）；未提供時預設「方案N」（N 為既有方案數+1）",
                 },
+                looseFactor: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    description:
+                        "鬆方係數（如 1.25）；與 compactionFactor 成對提供時，登記簿與回應加記鬆實方三本帳",
+                },
+                compactionFactor: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    description: "壓實係數（如 0.9）；須與 looseFactor 成對提供",
+                },
+            },
+            required: ["toposolidId", "floorIds"],
+        },
+    },
+    {
+        name: "solve_balanced_elevation",
+        description:
+            "平衡高程反求：以二分法試算控制樓板的統一升降量，使整地淨土方逼近目標（預設 0＝挖填平衡）。每次試算完整跑整地管線後回滾、不留痕；apply=true 且收斂時把偏移寫入樓板並落成方案（含登記簿）。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                toposolidId: {
+                    type: "integer",
+                    description: "要整地的 Toposolid 元素 ID",
+                },
+                floorIds: {
+                    type: "array",
+                    minItems: 1,
+                    items: { type: "integer" },
+                    description: "作為整地範圍來源的樓板元素 ID；至少提供一筆",
+                },
+                mode: {
+                    type: "string",
+                    enum: ["footprint_only", "offset_transition", "slope_transition"],
+                    default: "footprint_only",
+                    description: "整地模式（同 grade_toposolid_to_floors）",
+                },
+                offsetDistance: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    description: "offset_transition 模式的外延距離（公尺）",
+                },
+                slopeRatio: {
+                    type: "string",
+                    description: "slope_transition 模式的目標坡度，格式 1:n（例如 1:12）",
+                },
+                maxExtension: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    description: "slope_transition 模式的放坡延伸上限（公尺），預設 20",
+                },
+                targetNetCubicMeters: {
+                    type: "number",
+                    default: 0,
+                    description: "目標淨土方（m³，Fill−Cut，負值＝餘土）；預設 0 求挖填平衡",
+                },
+                toleranceCubicMeters: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    default: 10,
+                    description: "收斂容差（m³）；淨土方與目標差距小於此值即停",
+                },
+                maxAdjustMeters: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    default: 10,
+                    description: "樓板升降試算區間 ±此值（公尺）；區間端點無法夾住目標時誠實回報並中止",
+                },
+                maxIterations: {
+                    type: "integer",
+                    minimum: 1,
+                    maximum: 30,
+                    default: 10,
+                    description: "二分法最大迭代次數（每次迭代重跑一次整地試算，約數秒）",
+                },
+                apply: {
+                    type: "boolean",
+                    default: false,
+                    description: "true 且收斂時：把解出的偏移寫入樓板並落成整地方案；false 僅試算不動模型",
+                },
+                schemeName: {
+                    type: "string",
+                    description: "apply=true 時落成方案的名稱；未提供時預設「平衡方案（±X.XX m）」",
+                },
+                looseFactor: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    description: "apply=true 時傳遞給落成方案的鬆方係數（與 compactionFactor 成對）",
+                },
+                compactionFactor: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    description: "apply=true 時傳遞給落成方案的壓實係數（與 looseFactor 成對）",
+                },
             },
             required: ["toposolidId", "floorIds"],
         },

@@ -32,6 +32,30 @@ test("登記簿工具存在且參數正確", () => {
     assert.equal(properties.outputPath.type, "string");
 });
 
+test("整地工具支援鬆實方係數（成對）", () => {
+    const tool = gradingTools.find(item => item.name === "grade_toposolid_to_floors");
+    assert.ok(tool);
+    const properties = tool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(properties.looseFactor.type, "number");
+    assert.equal(properties.looseFactor.exclusiveMinimum, 0);
+    assert.match(String(properties.looseFactor.description), /成對/);
+    assert.equal(properties.compactionFactor.type, "number");
+    assert.match(String(properties.compactionFactor.description), /成對/);
+});
+
+test("平衡高程反求工具存在且預設值正確", () => {
+    const tool = gradingTools.find(item => item.name === "solve_balanced_elevation");
+    assert.ok(tool);
+    assert.deepEqual(tool.inputSchema.required, ["toposolidId", "floorIds"]);
+    const properties = tool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(properties.targetNetCubicMeters.default, 0);
+    assert.equal(properties.toleranceCubicMeters.default, 10);
+    assert.equal(properties.maxAdjustMeters.default, 10);
+    assert.equal(properties.maxIterations.default, 10);
+    assert.equal(properties.apply.default, false);
+    assert.match(String(tool.description), /二分法/);
+});
+
 test("整地工具限制整數 ID、非空樓板清單與預設值", () => {
     const tool = gradingTools.find(item => item.name === "grade_toposolid_to_floors");
     assert.ok(tool);
@@ -54,6 +78,7 @@ test("整地工具只註冊於核准的 Profile", () => {
         "grade_toposolid_to_floors",
         "list_grading_schemes",
         "export_grading_comparison",
+        "solve_balanced_elevation",
     ];
 
     try {
