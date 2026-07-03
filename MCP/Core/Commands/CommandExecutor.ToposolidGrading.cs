@@ -41,6 +41,12 @@ namespace RevitMCP.Core
             var failuresPreprocessor = new GradingFailuresPreprocessor();
             var doc = _uiApp.ActiveUIDocument.Document;
             IToposolidGradingAdapter adapter = new RevitToposolidGradingAdapter(timeline);
+            var schemeName = parameters["schemeName"]?.Value<string>();
+            if (string.IsNullOrWhiteSpace(schemeName))
+            {
+                schemeName = $"方案{adapter.CountSchemeRecords(doc) + 1}";
+            }
+
             Toposolid original;
             IReadOnlyList<Floor> floors;
             IReadOnlyList<FloorFootprint> footprints;
@@ -57,7 +63,7 @@ namespace RevitMCP.Core
 
             Toposolid design = null!;
             string associationId = null!;
-            var modifiedPointCount = 0;
+            GradingOutcome outcome = null!;
             var cutCubicMeters = 0.0;
             var fillCubicMeters = 0.0;
 
@@ -105,7 +111,7 @@ namespace RevitMCP.Core
                             throw new InvalidOperationException("無法啟動套用樓板投影交易。");
                         }
 
-                        modifiedPointCount = adapter.ApplyGrading(
+                        outcome = adapter.ApplyGrading(
                             doc, original, design, footprints, settings, warnings);
                         using (timeline.Measure("整地後重生"))
                         {
@@ -122,6 +128,68 @@ namespace RevitMCP.Core
                             if (gradingTransaction.Commit() != TransactionStatus.Committed)
                             {
                                 throw new InvalidOperationException("套用樓板投影交易未能提交。");
+                            }
+                        }
+                    }
+
+                    // 交易一、二的可忽略警告已被消化，先併入警告清單，讓登記簿記到完整警告。
+                    foreach (var dismissed in failuresPreprocessor.DismissedWarnings.Distinct())
+                    {
+                        warnings.Add($"已自動略過 Revit 警告：{dismissed}");
+                    }
+
+                    using (var recordTransaction = new Transaction(doc, "寫入整地方案登記"))
+                    {
+                        GradingFailuresPreprocessor.Attach(recordTransaction, failuresPreprocessor);
+                        if (recordTransaction.Start() != TransactionStatus.Started)
+                        {
+                            throw new InvalidOperationException("無法啟動寫入整地方案登記交易。");
+                        }
+
+                        using (timeline.Measure("方案登記與標籤"))
+                        {
+                            var record = new GradingSchemeRecord
+                            {
+                                AssociationId = associationId,
+                                SchemeName = schemeName,
+                                Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                                DocumentTitle = doc.Title,
+                                Mode = request.Mode,
+                                OffsetDistanceMeters = request.OffsetDistanceMeters,
+                                SlopeRatio = request.SlopeRatio,
+                                MaxExtensionMeters = settings.Mode == GradingMode.SlopeTransition
+                                    ? settings.MaxExtensionMeters
+                                    : (double?)null,
+                                OriginalToposolidId = request.ToposolidId,
+                                DesignToposolidId = design.Id.GetIdValue(),
+                                FloorIds = request.FloorIds,
+                                CutCubicMeters = cutCubicMeters,
+                                FillCubicMeters = fillCubicMeters,
+                                NetCubicMeters = fillCubicMeters - cutCubicMeters,
+                                MaxCutDepthMeters = FeetToMeters(outcome.MaxCutDepthFeet),
+                                MaxFillHeightMeters = FeetToMeters(outcome.MaxFillHeightFeet),
+                                DisturbedAreaSquareMeters =
+                                    SquareFeetToSquareMeters(outcome.DisturbedAreaSquareFeet),
+                                DisturbedAreaIsApproximate = outcome.DisturbedAreaIsApproximate,
+                                FloorMetrics = BuildFloorMetrics(floors, footprints),
+                                Warnings = warnings.ToArray(),
+                                ElevationBasis = "專案內部原點起算（公尺）"
+                            };
+                            adapter.WriteSchemeRecord(
+                                doc, design, JsonConvert.SerializeObject(record), associationId);
+                            var commentsParameter = design.get_Parameter(
+                                BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
+                            if (commentsParameter != null && !commentsParameter.IsReadOnly)
+                            {
+                                commentsParameter.Set($"RevitMCP {schemeName}");
+                            }
+                        }
+
+                        using (timeline.Measure("交易三提交"))
+                        {
+                            if (recordTransaction.Commit() != TransactionStatus.Committed)
+                            {
+                                throw new InvalidOperationException("寫入整地方案登記交易未能提交。");
                             }
                         }
                     }
@@ -161,11 +229,6 @@ namespace RevitMCP.Core
                 }
             }
 
-            foreach (var dismissed in failuresPreprocessor.DismissedWarnings.Distinct())
-            {
-                warnings.Add($"已自動略過 Revit 警告：{dismissed}");
-            }
-
             var result = new GradingResult
             {
                 OriginalToposolidId = request.ToposolidId,
@@ -173,7 +236,7 @@ namespace RevitMCP.Core
                 FloorIds = request.FloorIds,
                 CutCubicMeters = cutCubicMeters,
                 FillCubicMeters = fillCubicMeters,
-                ModifiedPointCount = modifiedPointCount,
+                ModifiedPointCount = outcome.ModifiedPointCount,
                 AssociationId = associationId,
                 Warnings = warnings
             };
@@ -208,6 +271,11 @@ namespace RevitMCP.Core
                 result.DesignToposolidId,
                 result.FloorIds,
                 request.Mode,
+                SchemeName = schemeName,
+                MaxCutDepthMeters = FeetToMeters(outcome.MaxCutDepthFeet),
+                MaxFillHeightMeters = FeetToMeters(outcome.MaxFillHeightFeet),
+                DisturbedAreaSquareMeters = SquareFeetToSquareMeters(outcome.DisturbedAreaSquareFeet),
+                outcome.DisturbedAreaIsApproximate,
                 result.CutCubicMeters,
                 result.FillCubicMeters,
                 result.NetCubicMeters,
@@ -217,6 +285,51 @@ namespace RevitMCP.Core
                 Timing = timing,
                 Message = $"樓板投影整地完成（{request.Mode}）。"
             };
+        }
+
+        private static double FeetToMeters(double feet)
+        {
+            return UnitUtils.ConvertFromInternalUnits(feet, UnitTypeId.Meters);
+        }
+
+        private static double SquareFeetToSquareMeters(double squareFeet)
+        {
+            return UnitUtils.ConvertFromInternalUnits(squareFeet, UnitTypeId.SquareMeters);
+        }
+
+        /// <summary>建立每片控制樓板的登記指標（面積讀內建參數、板底高程掃邊界離散點取極值）。</summary>
+        private static IReadOnlyList<FloorMetric> BuildFloorMetrics(
+            IReadOnlyList<Floor> floors,
+            IReadOnlyList<FloorFootprint> footprints)
+        {
+            var metrics = new List<FloorMetric>(footprints.Count);
+            for (var index = 0; index < footprints.Count; index++)
+            {
+                var footprint = footprints[index];
+                var floor = floors[index];
+                var minZ = double.MaxValue;
+                var maxZ = double.MinValue;
+                foreach (var point in footprint.OuterLoop)
+                {
+                    var z = footprint.BottomElevationAt(point.X, point.Y);
+                    minZ = Math.Min(minZ, z);
+                    maxZ = Math.Max(maxZ, z);
+                }
+
+                var areaParameter = floor.get_Parameter(BuiltInParameter.HOST_AREA_COMPUTED);
+                var areaSquareMeters = areaParameter != null && areaParameter.HasValue
+                    ? UnitUtils.ConvertFromInternalUnits(areaParameter.AsDouble(), UnitTypeId.SquareMeters)
+                    : 0.0;
+                metrics.Add(new FloorMetric
+                {
+                    FloorId = footprint.FloorId,
+                    AreaSquareMeters = areaSquareMeters,
+                    BottomZMinMeters = FeetToMeters(minZ),
+                    BottomZMaxMeters = FeetToMeters(maxZ)
+                });
+            }
+
+            return metrics;
         }
 
         /// <summary>
