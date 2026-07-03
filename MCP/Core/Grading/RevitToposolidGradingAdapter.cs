@@ -751,7 +751,7 @@ namespace RevitMCP.Core.Grading
                             continue;
                         }
 
-                        if (DistanceToBoundary(loop, sample) < boundaryMargin)
+                        if (Polygon2D.DistanceToBoundary(loop, sample) < boundaryMargin)
                         {
                             continue;
                         }
@@ -776,35 +776,6 @@ namespace RevitMCP.Core.Grading
                     }
                 }
             }
-        }
-
-        private static double DistanceToBoundary(IReadOnlyList<Point2D> loop, Point2D point)
-        {
-            var minDistanceSquared = double.MaxValue;
-            for (var index = 0; index < loop.Count; index++)
-            {
-                var start = loop[index];
-                var end = loop[(index + 1) % loop.Count];
-                var edgeX = end.X - start.X;
-                var edgeY = end.Y - start.Y;
-                var lengthSquared = edgeX * edgeX + edgeY * edgeY;
-                double t = 0;
-                if (lengthSquared > 0)
-                {
-                    t = ((point.X - start.X) * edgeX + (point.Y - start.Y) * edgeY) / lengthSquared;
-                    t = Math.Max(0, Math.Min(1, t));
-                }
-
-                var deltaX = point.X - (start.X + t * edgeX);
-                var deltaY = point.Y - (start.Y + t * edgeY);
-                var distanceSquared = deltaX * deltaX + deltaY * deltaY;
-                if (distanceSquared < minDistanceSquared)
-                {
-                    minDistanceSquared = distanceSquared;
-                }
-            }
-
-            return Math.Sqrt(minDistanceSquared);
         }
 
         public (double cutCubicMeters, double fillCubicMeters) ReadCutFill(Toposolid design)

@@ -43,6 +43,89 @@ namespace RevitMCP.Core.Grading
             return inside;
         }
 
+        public static double DistanceToBoundary(IReadOnlyList<Point2D> polygon, Point2D point)
+        {
+            return NearestBoundaryPoint(polygon, point).Distance;
+        }
+
+        public static (Point2D Point, double Distance) NearestBoundaryPoint(
+            IReadOnlyList<Point2D> polygon,
+            Point2D point)
+        {
+            if (polygon == null || polygon.Count < 2)
+            {
+                throw new ArgumentException("多邊形至少需要兩個頂點。", nameof(polygon));
+            }
+
+            var best = polygon[0];
+            var bestDistanceSquared = double.MaxValue;
+            for (var index = 0; index < polygon.Count; index++)
+            {
+                var start = polygon[index];
+                var end = polygon[(index + 1) % polygon.Count];
+                var edgeX = end.X - start.X;
+                var edgeY = end.Y - start.Y;
+                var lengthSquared = (edgeX * edgeX) + (edgeY * edgeY);
+                double t = 0;
+                if (lengthSquared > 0)
+                {
+                    t = (((point.X - start.X) * edgeX) + ((point.Y - start.Y) * edgeY)) / lengthSquared;
+                    t = Math.Max(0, Math.Min(1, t));
+                }
+
+                var candidate = new Point2D(start.X + (t * edgeX), start.Y + (t * edgeY));
+                var distanceSquared = DistanceSquared(candidate, point);
+                if (distanceSquared < bestDistanceSquared)
+                {
+                    bestDistanceSquared = distanceSquared;
+                    best = candidate;
+                }
+            }
+
+            return (best, Math.Sqrt(bestDistanceSquared));
+        }
+
+        public static IReadOnlyList<Point2D> OutwardDirections(IReadOnlyList<Point2D> polygon)
+        {
+            if (polygon == null || polygon.Count < 3)
+            {
+                throw new ArgumentException("多邊形至少需要三個頂點。", nameof(polygon));
+            }
+
+            // CCW（SignedArea>0）時邊 (dx,dy) 的外法線為 (dy,-dx)；CW 則相反。
+            var orientation = SignedArea(polygon) >= 0 ? 1.0 : -1.0;
+            var directions = new List<Point2D>(polygon.Count);
+            for (var index = 0; index < polygon.Count; index++)
+            {
+                var previous = polygon[(index - 1 + polygon.Count) % polygon.Count];
+                var current = polygon[index];
+                var next = polygon[(index + 1) % polygon.Count];
+                var incoming = EdgeOutwardNormal(previous, current, orientation);
+                var outgoing = EdgeOutwardNormal(current, next, orientation);
+                var sumX = incoming.X + outgoing.X;
+                var sumY = incoming.Y + outgoing.Y;
+                var length = Math.Sqrt((sumX * sumX) + (sumY * sumY));
+                directions.Add(length > 1e-12
+                    ? new Point2D(sumX / length, sumY / length)
+                    : outgoing);
+            }
+
+            return directions;
+        }
+
+        private static Point2D EdgeOutwardNormal(Point2D start, Point2D end, double orientation)
+        {
+            var edgeX = end.X - start.X;
+            var edgeY = end.Y - start.Y;
+            var length = Math.Sqrt((edgeX * edgeX) + (edgeY * edgeY));
+            if (length <= 1e-12)
+            {
+                return new Point2D(0, 0);
+            }
+
+            return new Point2D(orientation * edgeY / length, orientation * -edgeX / length);
+        }
+
         public static bool Overlaps(
             IReadOnlyList<Point2D> first,
             IReadOnlyList<Point2D> second,
