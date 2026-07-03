@@ -33,6 +33,7 @@ namespace RevitMCP.Core
             };
             request.Validate();
 
+            var failuresPreprocessor = new GradingFailuresPreprocessor();
             var doc = _uiApp.ActiveUIDocument.Document;
             IToposolidGradingAdapter adapter = new RevitToposolidGradingAdapter(timeline);
             Toposolid original;
@@ -66,6 +67,7 @@ namespace RevitMCP.Core
 
                     using (var setupTransaction = new Transaction(doc, "建立整地設計副本"))
                     {
+                        GradingFailuresPreprocessor.Attach(setupTransaction, failuresPreprocessor);
                         if (setupTransaction.Start() != TransactionStatus.Started)
                         {
                             throw new InvalidOperationException("無法啟動建立整地設計副本交易。");
@@ -92,6 +94,7 @@ namespace RevitMCP.Core
 
                     using (var gradingTransaction = new Transaction(doc, "套用樓板投影並計算挖填方"))
                     {
+                        GradingFailuresPreprocessor.Attach(gradingTransaction, failuresPreprocessor);
                         if (gradingTransaction.Start() != TransactionStatus.Started)
                         {
                             throw new InvalidOperationException("無法啟動套用樓板投影交易。");
@@ -151,6 +154,12 @@ namespace RevitMCP.Core
                 }
             }
 
+            var warnings = new List<string>();
+            foreach (var dismissed in failuresPreprocessor.DismissedWarnings.Distinct())
+            {
+                warnings.Add($"已自動略過 Revit 警告：{dismissed}");
+            }
+
             var result = new GradingResult
             {
                 OriginalToposolidId = request.ToposolidId,
@@ -160,7 +169,7 @@ namespace RevitMCP.Core
                 FillCubicMeters = fillCubicMeters,
                 ModifiedPointCount = modifiedPointCount,
                 AssociationId = associationId,
-                Warnings = new string[0]
+                Warnings = warnings
             };
 
             var timing = new
