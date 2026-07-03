@@ -18,6 +18,18 @@ test("整地工具暴露三種模式與銜接參數", () => {
     assert.match(String(properties.slopeRatio.description), /1:n/);
     assert.equal(properties.maxExtension.type, "number");
     assert.match(String(properties.maxExtension.description), /20/);
+    assert.equal(properties.schemeName.type, "string");
+    assert.match(String(properties.schemeName.description), /方案/);
+});
+
+test("登記簿工具存在且參數正確", () => {
+    const listTool = gradingTools.find(item => item.name === "list_grading_schemes");
+    assert.ok(listTool);
+
+    const exportTool = gradingTools.find(item => item.name === "export_grading_comparison");
+    assert.ok(exportTool);
+    const properties = exportTool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(properties.outputPath.type, "string");
 });
 
 test("整地工具限制整數 ID、非空樓板清單與預設值", () => {
@@ -38,16 +50,27 @@ test("整地工具限制整數 ID、非空樓板清單與預設值", () => {
 
 test("整地工具只註冊於核准的 Profile", () => {
     const originalProfile = process.env.MCP_PROFILE;
+    const gradingToolNames = [
+        "grade_toposolid_to_floors",
+        "list_grading_schemes",
+        "export_grading_comparison",
+    ];
 
     try {
         for (const profile of ["full", "architect", "structural"]) {
             process.env.MCP_PROFILE = profile;
-            assert.ok(registerRevitTools().some(tool => tool.name === "grade_toposolid_to_floors"), profile);
+            const registered = registerRevitTools();
+            for (const name of gradingToolNames) {
+                assert.ok(registered.some(tool => tool.name === name), `${profile}:${name}`);
+            }
         }
 
         for (const profile of ["mep", "fire-safety"]) {
             process.env.MCP_PROFILE = profile;
-            assert.ok(!registerRevitTools().some(tool => tool.name === "grade_toposolid_to_floors"), profile);
+            const registered = registerRevitTools();
+            for (const name of gradingToolNames) {
+                assert.ok(!registered.some(tool => tool.name === name), `${profile}:${name}`);
+            }
         }
     } finally {
         if (originalProfile === undefined) {
