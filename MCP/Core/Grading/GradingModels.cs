@@ -20,18 +20,116 @@ namespace RevitMCP.Core.Grading
         public string TargetFace { get; set; }
         public bool AllowPhaseSetup { get; set; }
         public bool UpdateExisting { get; set; }
+        public double? OffsetDistanceMeters { get; set; }
+        public string SlopeRatio { get; set; }
+        public double? MaxExtensionMeters { get; set; }
 
         public void Validate()
         {
             if (ToposolidId <= 0) throw new ArgumentException("地形 ID 必須大於 0。");
             if (FloorIds == null || FloorIds.Count == 0) throw new ArgumentException("至少一片樓板才能執行整地。");
             if (FloorIds.Any(id => id <= 0)) throw new ArgumentException("樓板 ID 必須大於 0。");
-            if (!string.Equals(Mode, "footprint_only", StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("本次試跑僅支援 footprint_only。");
             if (!string.Equals(TargetFace, "bottom", StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("本次試跑僅支援樓板底面 bottom。");
+                throw new ArgumentException("目前僅支援樓板底面 bottom。");
             if (UpdateExisting)
-                throw new ArgumentException("本次試跑尚未支援 updateExisting=true。");
+                throw new ArgumentException("目前尚未支援 updateExisting=true。");
+            TransitionSettings.FromRequest(this);
+        }
+    }
+
+    public enum GradingMode
+    {
+        FootprintOnly,
+        OffsetTransition,
+        SlopeTransition
+    }
+
+    /// <summary>整地邊界銜接設定；由 GradingRequest 驗證並轉出。</summary>
+    public sealed class TransitionSettings
+    {
+        public const double DefaultMaxExtensionMeters = 20.0;
+
+        private TransitionSettings() { }
+
+        public GradingMode Mode { get; private set; }
+        public double OffsetDistanceMeters { get; private set; }
+        public double RunPerRise { get; private set; }
+        public double MaxExtensionMeters { get; private set; }
+
+        public static TransitionSettings FromRequest(GradingRequest request)
+        {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+            var mode = ParseMode(request.Mode);
+            switch (mode)
+            {
+                case GradingMode.FootprintOnly:
+                    RejectParameter(request.OffsetDistanceMeters.HasValue, "offsetDistance", "footprint_only");
+                    RejectParameter(!string.IsNullOrWhiteSpace(request.SlopeRatio), "slopeRatio", "footprint_only");
+                    RejectParameter(request.MaxExtensionMeters.HasValue, "maxExtension", "footprint_only");
+                    return new TransitionSettings { Mode = mode };
+                case GradingMode.OffsetTransition:
+                    if (!(request.OffsetDistanceMeters > 0))
+                        throw new ArgumentException("offset_transition 模式必須提供大於 0 的 offsetDistance（公尺）。");
+                    RejectParameter(!string.IsNullOrWhiteSpace(request.SlopeRatio), "slopeRatio", "offset_transition");
+                    RejectParameter(request.MaxExtensionMeters.HasValue, "maxExtension", "offset_transition");
+                    return new TransitionSettings
+                    {
+                        Mode = mode,
+                        OffsetDistanceMeters = request.OffsetDistanceMeters.Value
+                    };
+                case GradingMode.SlopeTransition:
+                    RejectParameter(request.OffsetDistanceMeters.HasValue, "offsetDistance", "slope_transition");
+                    var runPerRise = ParseSlopeRatio(request.SlopeRatio);
+                    var maxExtension = request.MaxExtensionMeters ?? DefaultMaxExtensionMeters;
+                    if (!(maxExtension > 0))
+                        throw new ArgumentException("maxExtension 必須大於 0（公尺）。");
+                    return new TransitionSettings
+                    {
+                        Mode = mode,
+                        RunPerRise = runPerRise,
+                        MaxExtensionMeters = maxExtension
+                    };
+                default:
+                    throw new ArgumentException($"不支援的整地 mode：{request.Mode}。");
+            }
+        }
+
+        public static double ParseSlopeRatio(string slopeRatio)
+        {
+            if (string.IsNullOrWhiteSpace(slopeRatio))
+                throw new ArgumentException("slope_transition 模式必須提供 slopeRatio，格式 1:n（例如 1:12）。");
+            var parts = slopeRatio.Split(':');
+            if (parts.Length == 2
+                && parts[0].Trim() == "1"
+                && double.TryParse(
+                    parts[1],
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var run)
+                && run > 0)
+            {
+                return run;
+            }
+
+            throw new ArgumentException("slopeRatio 格式必須為 1:n 且 n 大於 0（例如 1:12）。");
+        }
+
+        private static GradingMode ParseMode(string mode)
+        {
+            if (string.Equals(mode, "footprint_only", StringComparison.OrdinalIgnoreCase))
+                return GradingMode.FootprintOnly;
+            if (string.Equals(mode, "offset_transition", StringComparison.OrdinalIgnoreCase))
+                return GradingMode.OffsetTransition;
+            if (string.Equals(mode, "slope_transition", StringComparison.OrdinalIgnoreCase))
+                return GradingMode.SlopeTransition;
+            throw new ArgumentException(
+                $"不支援的整地 mode：{mode}；可用值為 footprint_only、offset_transition、slope_transition。");
+        }
+
+        private static void RejectParameter(bool provided, string parameterName, string mode)
+        {
+            if (provided)
+                throw new ArgumentException($"{mode} 模式不接受 {parameterName} 參數。");
         }
     }
 

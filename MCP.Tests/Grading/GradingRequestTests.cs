@@ -32,7 +32,7 @@ namespace RevitMCP.Tests.Grading
         }
 
         [Test]
-        public void Validate_非本次模式_拒絕執行()
+        public void Validate_slope_transition_缺坡度_拒絕執行()
         {
             var error = Assert.Throws<System.ArgumentException>(() => new GradingRequest
             {
@@ -41,7 +41,33 @@ namespace RevitMCP.Tests.Grading
                 Mode = "slope_transition",
                 TargetFace = "bottom"
             }.Validate());
-            StringAssert.Contains("footprint_only", error.Message);
+            StringAssert.Contains("slopeRatio", error.Message);
+        }
+
+        [Test]
+        public void Validate_未知模式_拒絕執行()
+        {
+            var error = Assert.Throws<System.ArgumentException>(() => new GradingRequest
+            {
+                ToposolidId = 6278563,
+                FloorIds = new[] { 7512796L },
+                Mode = "banana",
+                TargetFace = "bottom"
+            }.Validate());
+            StringAssert.Contains("mode", error.Message);
+        }
+
+        [Test]
+        public void Validate_offset_transition_合法參數_不拋出例外()
+        {
+            Assert.DoesNotThrow(() => new GradingRequest
+            {
+                ToposolidId = 6278563,
+                FloorIds = new[] { 7512796L },
+                Mode = "offset_transition",
+                TargetFace = "bottom",
+                OffsetDistanceMeters = 3.0
+            }.Validate());
         }
 
         [Test]
