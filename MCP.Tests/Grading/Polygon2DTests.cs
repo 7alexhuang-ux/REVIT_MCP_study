@@ -72,6 +72,54 @@ namespace RevitMCP.Tests.Grading
             Assert.That(Polygon2D.Overlaps(outer, inner, Tolerance), Is.True);
         }
 
+        private static readonly Point2D[] UnitSquare =
+        {
+            new Point2D(0, 0), new Point2D(10, 0), new Point2D(10, 10), new Point2D(0, 10)
+        };
+
+        [Test]
+        public void DistanceToBoundary_內外點皆回傳到邊界最短距離()
+        {
+            Assert.AreEqual(3.0, Polygon2D.DistanceToBoundary(UnitSquare, new Point2D(5, 3)), 1e-9);
+            Assert.AreEqual(2.0, Polygon2D.DistanceToBoundary(UnitSquare, new Point2D(12, 5)), 1e-9);
+            Assert.AreEqual(5.0, Polygon2D.DistanceToBoundary(UnitSquare, new Point2D(13, 14)), 1e-9);
+        }
+
+        [Test]
+        public void NearestBoundaryPoint_回傳邊界上最近點()
+        {
+            var (point, distance) = Polygon2D.NearestBoundaryPoint(UnitSquare, new Point2D(12, 5));
+            Assert.AreEqual(10.0, point.X, 1e-9);
+            Assert.AreEqual(5.0, point.Y, 1e-9);
+            Assert.AreEqual(2.0, distance, 1e-9);
+        }
+
+        [Test]
+        public void OutwardDirections_正方形四角指向對角外側()
+        {
+            var directions = Polygon2D.OutwardDirections(UnitSquare);
+            Assert.AreEqual(4, directions.Count);
+            // 頂點 (0,0)：相鄰邊外法線 (0,-1) 與 (-1,0)，角平分 = (-√2/2, -√2/2)。
+            Assert.AreEqual(-System.Math.Sqrt(2) / 2, directions[0].X, 1e-9);
+            Assert.AreEqual(-System.Math.Sqrt(2) / 2, directions[0].Y, 1e-9);
+            // 頂點 (10,10)：角平分 = (+√2/2, +√2/2)。
+            Assert.AreEqual(System.Math.Sqrt(2) / 2, directions[2].X, 1e-9);
+            Assert.AreEqual(System.Math.Sqrt(2) / 2, directions[2].Y, 1e-9);
+        }
+
+        [Test]
+        public void OutwardDirections_順時針多邊形結果一致()
+        {
+            var clockwise = new[]
+            {
+                new Point2D(0, 10), new Point2D(10, 10), new Point2D(10, 0), new Point2D(0, 0)
+            };
+            var directions = Polygon2D.OutwardDirections(clockwise);
+            // clockwise[3] = (0,0)，外向仍應指向 (-,-)。
+            Assert.Less(directions[3].X, 0);
+            Assert.Less(directions[3].Y, 0);
+        }
+
         private static IReadOnlyList<Point2D> Rect(double minX, double minY, double maxX, double maxY)
         {
             return new[]

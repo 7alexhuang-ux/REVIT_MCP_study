@@ -3,12 +3,21 @@ import assert from "node:assert/strict";
 import { gradingTools } from "./grading-tools.js";
 import { registerRevitTools } from "./revit-tools.js";
 
-test("整地工具只暴露本次核准模式", () => {
+test("整地工具暴露三種模式與銜接參數", () => {
     const tool = gradingTools.find(item => item.name === "grade_toposolid_to_floors");
     assert.ok(tool);
     assert.deepEqual(tool.inputSchema.required, ["toposolidId", "floorIds"]);
-    assert.deepEqual((tool.inputSchema.properties?.mode as { enum: string[] }).enum, ["footprint_only"]);
-    assert.deepEqual((tool.inputSchema.properties?.targetFace as { enum: string[] }).enum, ["bottom"]);
+    const properties = tool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.deepEqual((properties.mode as { enum: string[] }).enum,
+        ["footprint_only", "offset_transition", "slope_transition"]);
+    assert.deepEqual((properties.targetFace as { enum: string[] }).enum, ["bottom"]);
+    assert.equal(properties.offsetDistance.type, "number");
+    assert.equal(properties.offsetDistance.exclusiveMinimum, 0);
+    assert.match(String(properties.offsetDistance.description), /公尺/);
+    assert.equal(properties.slopeRatio.type, "string");
+    assert.match(String(properties.slopeRatio.description), /1:n/);
+    assert.equal(properties.maxExtension.type, "number");
+    assert.match(String(properties.maxExtension.description), /20/);
 });
 
 test("整地工具限制整數 ID、非空樓板清單與預設值", () => {

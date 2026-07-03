@@ -15,7 +15,13 @@ namespace RevitMCP.Core.Grading
         IReadOnlyList<FloorFootprint> ExtractBottomFootprints(IReadOnlyList<Floor> floors);
         Toposolid CreateDesignCopy(Document doc, Toposolid original, bool allowPhaseSetup);
         string WriteAssociation(Document doc, Toposolid design, long originalId, IReadOnlyList<long> floorIds);
-        int ApplyFootprintOnly(Document doc, Toposolid design, IReadOnlyList<FloorFootprint> footprints);
+        int ApplyGrading(
+            Document doc,
+            Toposolid original,
+            Toposolid design,
+            IReadOnlyList<FloorFootprint> footprints,
+            TransitionSettings settings,
+            ICollection<string> warnings);
         (double cutCubicMeters, double fillCubicMeters) ReadCutFill(Toposolid design);
     }
 
@@ -213,12 +219,20 @@ namespace RevitMCP.Core.Grading
             return associationId;
         }
 
-        public int ApplyFootprintOnly(
+        public int ApplyGrading(
             Document doc,
+            Toposolid original,
             Toposolid design,
-            IReadOnlyList<FloorFootprint> footprints)
+            IReadOnlyList<FloorFootprint> footprints,
+            TransitionSettings settings,
+            ICollection<string> warnings)
         {
             EnsureModifiable(doc);
+            if (original == null || !doc.Equals(original.Document))
+            {
+                throw new ArgumentException("原始 Toposolid 必須屬於指定文件。", nameof(original));
+            }
+
             if (design == null || !doc.Equals(design.Document))
             {
                 throw new ArgumentException("設計 Toposolid 必須屬於指定文件。", nameof(design));
@@ -227,6 +241,16 @@ namespace RevitMCP.Core.Grading
             if (footprints == null || footprints.Count == 0)
             {
                 throw new ArgumentException("至少需要一個樓板投影。", nameof(footprints));
+            }
+
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+
+            if (warnings == null)
+            {
+                throw new ArgumentNullException(nameof(warnings));
             }
 
             var editor = design.GetSlabShapeEditor();
@@ -330,11 +354,55 @@ namespace RevitMCP.Core.Grading
                 doc.Regenerate();
             }
 
+            // 銜接帶：投影外一圈依模式外推 daylight 圈點並刻摺線，讓銜接帶成為網格硬邊。
+            if (settings.Mode != GradingMode.FootprintOnly)
+            {
+                IReadOnlyList<IReadOnlyList<XYZ>> transitionRings;
+                using (_timeline.Measure("銜接帶外圈取樣"))
+                {
+                    transitionRings = BuildTransitionRings(
+                        solids, footprints, settings, xyTolerance, elevationTolerance,
+                        rayBottomZ, rayTopZ, warnings);
+                }
+
+                var positionsAfterBoundary = CollectVertexPositions(editor);
+                var ringPoints = new List<XYZ>();
+                foreach (var candidate in transitionRings.SelectMany(ring => ring))
+                {
+                    if (HasNearbyXY(positionsAfterBoundary, candidate, xyTolerance)
+                        || HasNearbyXY(ringPoints, candidate, xyTolerance))
+                    {
+                        continue;
+                    }
+
+                    ringPoints.Add(candidate);
+                }
+
+                if (ringPoints.Count > 0)
+                {
+                    using (_timeline.Measure("銜接帶外圈加入與重生"))
+                    {
+                        EnsurePointLimit(positionsAfterBoundary.Count + ringPoints.Count);
+                        editor.AddPoints(ringPoints);
+                        doc.Regenerate();
+                    }
+                }
+
+                using (_timeline.Measure("銜接帶摺線"))
+                {
+                    DrawRingSplitLines(editor, transitionRings, xyTolerance);
+                    doc.Regenerate();
+                }
+            }
+
             // 分類全部頂點：XY 位於樓板投影內或邊界上者，目標高程為該處樓板底面。
             var targets = new List<VertexTarget>();
             var classifyScope = _timeline.Measure("頂點分類");
-            foreach (var position in CollectVertexPositions(editor))
+            var allPositions = CollectVertexPositions(editor);
+            var assignedIndices = new HashSet<int>();
+            for (var positionIndex = 0; positionIndex < allPositions.Count; positionIndex++)
             {
+                var position = allPositions[positionIndex];
                 double? targetZ = null;
                 foreach (var footprint in footprints)
                 {
@@ -355,10 +423,68 @@ namespace RevitMCP.Core.Grading
                 if (targetZ.HasValue)
                 {
                     targets.Add(new VertexTarget(position, targetZ.Value));
+                    assignedIndices.Add(positionIndex);
                 }
             }
 
             classifyScope.Dispose();
+
+            // 銜接帶頂點分類：投影外、距最近樓板邊界在帶寬內者，依距離場計算銜接目標高程。
+            if (settings.Mode != GradingMode.FootprintOnly)
+            {
+                var bandCandidateWidth = ToInternalMeters(
+                    settings.Mode == GradingMode.OffsetTransition
+                        ? settings.OffsetDistanceMeters
+                        : settings.MaxExtensionMeters);
+                var offsetWidthFeet = settings.Mode == GradingMode.OffsetTransition
+                    ? ToInternalMeters(settings.OffsetDistanceMeters)
+                    : 0.0;
+                var bandScope = _timeline.Measure("銜接帶頂點分類");
+                for (var positionIndex = 0; positionIndex < allPositions.Count; positionIndex++)
+                {
+                    if (assignedIndices.Contains(positionIndex))
+                    {
+                        continue;
+                    }
+
+                    var position = allPositions[positionIndex];
+                    var sample = ToPoint2D(position);
+                    FloorFootprint nearestFootprint = null;
+                    var nearestDistance = double.MaxValue;
+                    var nearestBoundary = default(Point2D);
+                    foreach (var footprint in footprints)
+                    {
+                        var (boundaryPoint, distance) = Polygon2D.NearestBoundaryPoint(footprint.OuterLoop, sample);
+                        if (distance < nearestDistance)
+                        {
+                            nearestDistance = distance;
+                            nearestFootprint = footprint;
+                            nearestBoundary = boundaryPoint;
+                        }
+                    }
+
+                    if (nearestFootprint == null || nearestDistance > bandCandidateWidth + xyTolerance)
+                    {
+                        continue;
+                    }
+
+                    var boundaryBottomZ = nearestFootprint.BottomElevationAt(nearestBoundary.X, nearestBoundary.Y);
+                    var localTerrainZ = position.Z;
+                    var targetZ = settings.Mode == GradingMode.OffsetTransition
+                        ? TransitionGeometry.OffsetTargetZ(
+                            boundaryBottomZ, localTerrainZ, nearestDistance, offsetWidthFeet)
+                        : TransitionGeometry.SlopeTargetZ(
+                            boundaryBottomZ, localTerrainZ, nearestDistance, settings.RunPerRise);
+                    if (Math.Abs(targetZ - localTerrainZ) <= elevationTolerance)
+                    {
+                        continue;
+                    }
+
+                    targets.Add(new VertexTarget(position, targetZ));
+                }
+
+                bandScope.Dispose();
+            }
 
             if (targets.Count == 0)
             {
@@ -410,6 +536,16 @@ namespace RevitMCP.Core.Grading
                     xyTolerance,
                     rayBottomZ,
                     rayTopZ);
+            }
+
+            if (settings.Mode != GradingMode.FootprintOnly)
+            {
+                using (_timeline.Measure("銜接帶包絡驗收"))
+                {
+                    VerifyTransitionBand(
+                        original, design, footprints, settings,
+                        elevationTolerance, xyTolerance, rayBottomZ, rayTopZ);
+                }
             }
 
             return targets.Count;
@@ -710,6 +846,252 @@ namespace RevitMCP.Core.Grading
             return nearestDistanceSquared <= matchTolerance * matchTolerance ? nearest : null;
         }
 
+        private static double ToInternalMeters(double meters)
+        {
+            return UnitUtils.ConvertToInternalUnits(meters, UnitTypeId.Meters);
+        }
+
+        private IReadOnlyList<IReadOnlyList<XYZ>> BuildTransitionRings(
+            IReadOnlyList<Solid> solids,
+            IReadOnlyList<FloorFootprint> footprints,
+            TransitionSettings settings,
+            double xyTolerance,
+            double elevationTolerance,
+            double rayBottomZ,
+            double rayTopZ,
+            ICollection<string> warnings)
+        {
+            var offsetFeet = settings.Mode == GradingMode.OffsetTransition
+                ? ToInternalMeters(settings.OffsetDistanceMeters)
+                : 0.0;
+            var maxExtensionFeet = settings.Mode == GradingMode.SlopeTransition
+                ? ToInternalMeters(settings.MaxExtensionMeters)
+                : 0.0;
+            var rings = new List<IReadOnlyList<XYZ>>(footprints.Count);
+            foreach (var footprint in footprints)
+            {
+                var loop = footprint.OuterLoop;
+                var directions = Polygon2D.OutwardDirections(loop);
+                var ring = new List<XYZ>(loop.Count);
+                var cappedCount = 0;
+                var maxResidualFeet = 0.0;
+                for (var index = 0; index < loop.Count; index++)
+                {
+                    var boundaryPoint = loop[index];
+                    var direction = directions[index];
+                    var boundaryBottomZ = footprint.BottomElevationAt(boundaryPoint.X, boundaryPoint.Y);
+                    double extension;
+                    if (settings.Mode == GradingMode.OffsetTransition)
+                    {
+                        extension = offsetFeet;
+                    }
+                    else
+                    {
+                        // 定點迭代：放坡與地形相交距離依地形起伏而變，迭代 8 輪足夠收斂；
+                        // 未收斂不報錯——最終高程由距離場函式決定，圈點只是網格密度控制。
+                        extension = maxExtensionFeet;
+                        for (var iteration = 0; iteration < 8; iteration++)
+                        {
+                            var probe = new Point2D(
+                                boundaryPoint.X + (direction.X * extension),
+                                boundaryPoint.Y + (direction.Y * extension));
+                            var probeTerrainZ = IntersectTerrainTopZ(solids, probe, rayBottomZ, rayTopZ);
+                            if (!probeTerrainZ.HasValue)
+                            {
+                                break;
+                            }
+
+                            var needed = TransitionGeometry.SlopeExtensionNeeded(
+                                boundaryBottomZ, probeTerrainZ.Value, settings.RunPerRise);
+                            extension = Math.Min(needed, maxExtensionFeet);
+                        }
+
+                        if (extension < xyTolerance)
+                        {
+                            continue; // 地形已在板底高程，無帶可放。
+                        }
+                    }
+
+                    var ringXY = new Point2D(
+                        boundaryPoint.X + (direction.X * extension),
+                        boundaryPoint.Y + (direction.Y * extension));
+                    if (footprints.Any(other => Polygon2D.Contains(other.OuterLoop, ringXY, xyTolerance)))
+                    {
+                        continue; // 凹角或鄰板：圈點落回投影內時跳過，缺段由摺線 try-catch 與包絡驗收把關。
+                    }
+
+                    var terrainZ = IntersectTerrainTopZ(solids, ringXY, rayBottomZ, rayTopZ);
+                    if (!terrainZ.HasValue)
+                    {
+                        continue; // 規則 7：超出地形不處理。
+                    }
+
+                    if (settings.Mode == GradingMode.SlopeTransition)
+                    {
+                        var targetAtRing = TransitionGeometry.SlopeTargetZ(
+                            boundaryBottomZ, terrainZ.Value, extension, settings.RunPerRise);
+                        var residual = Math.Abs(targetAtRing - terrainZ.Value);
+                        if (extension >= maxExtensionFeet - xyTolerance && residual > elevationTolerance)
+                        {
+                            cappedCount++;
+                            maxResidualFeet = Math.Max(maxResidualFeet, residual);
+                        }
+                    }
+
+                    ring.Add(new XYZ(ringXY.X, ringXY.Y, terrainZ.Value));
+                }
+
+                if (cappedCount > 0)
+                {
+                    var residualMeters = UnitUtils.ConvertFromInternalUnits(maxResidualFeet, UnitTypeId.Meters);
+                    warnings.Add(
+                        $"樓板 ID {footprint.FloorId} 放坡有 {cappedCount} 個邊界點在 maxExtension 上限截止，"
+                        + $"殘留高差最大 {residualMeters:F2} m。");
+                }
+
+                rings.Add(ring);
+            }
+
+            return rings;
+        }
+
+        private static void DrawRingSplitLines(
+            SlabShapeEditor editor,
+            IReadOnlyList<IReadOnlyList<XYZ>> rings,
+            double xyTolerance)
+        {
+            var vertices = new List<SlabShapeVertex>();
+            foreach (SlabShapeVertex vertex in editor.SlabShapeVertices)
+            {
+                if (vertex != null && vertex.IsValidObject)
+                {
+                    vertices.Add(vertex);
+                }
+            }
+
+            var matchTolerance = VertexMatchTolerance;
+            foreach (var ring in rings)
+            {
+                for (var index = 0; index < ring.Count; index++)
+                {
+                    var startVertex = FindNearestVertex(vertices, ToPoint2D(ring[index]), matchTolerance);
+                    var endVertex = FindNearestVertex(
+                        vertices, ToPoint2D(ring[(index + 1) % ring.Count]), matchTolerance);
+                    if (startVertex == null || endVertex == null)
+                    {
+                        continue;
+                    }
+
+                    if (XYDistanceSquared(startVertex.Position, endVertex.Position) <= xyTolerance * xyTolerance)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        editor.DrawSplitLine(startVertex, endVertex);
+                    }
+                    catch (Autodesk.Revit.Exceptions.ApplicationException)
+                    {
+                        continue; // 既有摺線或退化線段；缺段風險由包絡驗收把關。
+                    }
+                }
+            }
+        }
+
+        // 銜接帶粗閘門：帶內為近似銜接面（非 2 mm 工程保證），此閘門抓「跨越樓板上空／
+        // 漏摺線」級錯誤；土方量以實際網格計算，數字仍精確。
+        private const double TransitionBandToleranceMillimeters = 500.0;
+
+        private static void VerifyTransitionBand(
+            Toposolid original,
+            Toposolid design,
+            IReadOnlyList<FloorFootprint> footprints,
+            TransitionSettings settings,
+            double elevationTolerance,
+            double xyTolerance,
+            double rayBottomZ,
+            double rayTopZ)
+        {
+            var originalSolids = CollectSolids(original);
+            var designSolids = CollectSolids(design);
+            if (originalSolids.Count == 0 || designSolids.Count == 0)
+            {
+                throw new InvalidOperationException("包絡驗收無法取得原地形或設計地形的實體幾何。");
+            }
+
+            var bandTolerance = UnitUtils.ConvertToInternalUnits(
+                TransitionBandToleranceMillimeters, UnitTypeId.Millimeters);
+            var boundaryMargin = UnitUtils.ConvertToInternalUnits(300, UnitTypeId.Millimeters);
+            var sampleStep = UnitUtils.ConvertToInternalUnits(2000, UnitTypeId.Millimeters);
+            var bandWidth = ToInternalMeters(settings.Mode == GradingMode.OffsetTransition
+                ? settings.OffsetDistanceMeters
+                : settings.MaxExtensionMeters);
+            foreach (var footprint in footprints)
+            {
+                var loop = footprint.OuterLoop;
+                var minX = double.MaxValue;
+                var minY = double.MaxValue;
+                var maxX = double.MinValue;
+                var maxY = double.MinValue;
+                foreach (var point in loop)
+                {
+                    minX = Math.Min(minX, point.X);
+                    minY = Math.Min(minY, point.Y);
+                    maxX = Math.Max(maxX, point.X);
+                    maxY = Math.Max(maxY, point.Y);
+                }
+
+                for (var x = minX - bandWidth + (sampleStep / 2); x <= maxX + bandWidth; x += sampleStep)
+                {
+                    for (var y = minY - bandWidth + (sampleStep / 2); y <= maxY + bandWidth; y += sampleStep)
+                    {
+                        var sample = new Point2D(x, y);
+                        if (footprints.Any(any => Polygon2D.Contains(any.OuterLoop, sample, xyTolerance)))
+                        {
+                            continue; // 投影內由既有 2 mm 抽樣把關。
+                        }
+
+                        var (boundaryPoint, distance) = Polygon2D.NearestBoundaryPoint(loop, sample);
+                        if (distance < boundaryMargin || distance > bandWidth - boundaryMargin)
+                        {
+                            continue;
+                        }
+
+                        var terrainZ = IntersectTerrainTopZ(originalSolids, sample, rayBottomZ, rayTopZ);
+                        var designZ = IntersectTerrainTopZ(designSolids, sample, rayBottomZ, rayTopZ);
+                        if (!terrainZ.HasValue || !designZ.HasValue)
+                        {
+                            continue; // 規則 7：超出地形不檢查。
+                        }
+
+                        var boundaryBottomZ = footprint.BottomElevationAt(boundaryPoint.X, boundaryPoint.Y);
+                        if (settings.Mode == GradingMode.SlopeTransition)
+                        {
+                            var targetZ = TransitionGeometry.SlopeTargetZ(
+                                boundaryBottomZ, terrainZ.Value, distance, settings.RunPerRise);
+                            if (Math.Abs(targetZ - terrainZ.Value) <= elevationTolerance)
+                            {
+                                continue; // 帶外：放坡已在此距離前貼合地形。
+                            }
+                        }
+
+                        var lower = Math.Min(boundaryBottomZ, terrainZ.Value) - bandTolerance;
+                        var upper = Math.Max(boundaryBottomZ, terrainZ.Value) + bandTolerance;
+                        if (designZ.Value < lower || designZ.Value > upper)
+                        {
+                            var deviationMeters = UnitUtils.ConvertFromInternalUnits(
+                                designZ.Value > upper ? designZ.Value - upper : lower - designZ.Value,
+                                UnitTypeId.Meters);
+                            throw new InvalidOperationException(
+                                $"樓板 ID {footprint.FloorId} 銜接帶抽樣超出包絡 {deviationMeters:F2} m"
+                                + "（容許 0.5 m），疑似網格跨越或摺線缺漏，已回滾整地。");
+                        }
+                    }
+                }
+            }
+        }
+
         private static void VerifySurfaceAgainstFootprints(
             Toposolid design,
             IReadOnlyList<FloorFootprint> footprints,
@@ -751,7 +1133,7 @@ namespace RevitMCP.Core.Grading
                             continue;
                         }
 
-                        if (DistanceToBoundary(loop, sample) < boundaryMargin)
+                        if (Polygon2D.DistanceToBoundary(loop, sample) < boundaryMargin)
                         {
                             continue;
                         }
@@ -776,35 +1158,6 @@ namespace RevitMCP.Core.Grading
                     }
                 }
             }
-        }
-
-        private static double DistanceToBoundary(IReadOnlyList<Point2D> loop, Point2D point)
-        {
-            var minDistanceSquared = double.MaxValue;
-            for (var index = 0; index < loop.Count; index++)
-            {
-                var start = loop[index];
-                var end = loop[(index + 1) % loop.Count];
-                var edgeX = end.X - start.X;
-                var edgeY = end.Y - start.Y;
-                var lengthSquared = edgeX * edgeX + edgeY * edgeY;
-                double t = 0;
-                if (lengthSquared > 0)
-                {
-                    t = ((point.X - start.X) * edgeX + (point.Y - start.Y) * edgeY) / lengthSquared;
-                    t = Math.Max(0, Math.Min(1, t));
-                }
-
-                var deltaX = point.X - (start.X + t * edgeX);
-                var deltaY = point.Y - (start.Y + t * edgeY);
-                var distanceSquared = deltaX * deltaX + deltaY * deltaY;
-                if (distanceSquared < minDistanceSquared)
-                {
-                    minDistanceSquared = distanceSquared;
-                }
-            }
-
-            return Math.Sqrt(minDistanceSquared);
         }
 
         public (double cutCubicMeters, double fillCubicMeters) ReadCutFill(Toposolid design)
