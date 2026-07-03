@@ -29,10 +29,15 @@ namespace RevitMCP.Core
                 // 預設自動設定階段：一般使用者的地形建立於「新建」階段，
                 // 整地需要它成為既有地貌；除非明確傳入 false，工具自動調整。
                 AllowPhaseSetup = parameters["allowPhaseSetup"]?.Value<bool>() ?? true,
-                UpdateExisting = parameters["updateExisting"]?.Value<bool>() ?? false
+                UpdateExisting = parameters["updateExisting"]?.Value<bool>() ?? false,
+                OffsetDistanceMeters = parameters["offsetDistance"]?.Value<double?>(),
+                SlopeRatio = parameters["slopeRatio"]?.Value<string>(),
+                MaxExtensionMeters = parameters["maxExtension"]?.Value<double?>()
             };
             request.Validate();
 
+            var settings = TransitionSettings.FromRequest(request);
+            var warnings = new List<string>();
             var failuresPreprocessor = new GradingFailuresPreprocessor();
             var doc = _uiApp.ActiveUIDocument.Document;
             IToposolidGradingAdapter adapter = new RevitToposolidGradingAdapter(timeline);
@@ -100,7 +105,8 @@ namespace RevitMCP.Core
                             throw new InvalidOperationException("無法啟動套用樓板投影交易。");
                         }
 
-                        modifiedPointCount = adapter.ApplyFootprintOnly(doc, design, footprints);
+                        modifiedPointCount = adapter.ApplyGrading(
+                            doc, original, design, footprints, settings, warnings);
                         using (timeline.Measure("整地後重生"))
                         {
                             doc.Regenerate();
@@ -142,6 +148,7 @@ namespace RevitMCP.Core
                         Document = doc.Title,
                         Success = false,
                         Error = exception.Message,
+                        request.Mode,
                         request.ToposolidId,
                         FloorIds = request.FloorIds,
                         TotalMilliseconds = stopwatch.ElapsedMilliseconds,
@@ -154,7 +161,6 @@ namespace RevitMCP.Core
                 }
             }
 
-            var warnings = new List<string>();
             foreach (var dismissed in failuresPreprocessor.DismissedWarnings.Distinct())
             {
                 warnings.Add($"已自動略過 Revit 警告：{dismissed}");
@@ -186,6 +192,7 @@ namespace RevitMCP.Core
                 Document = doc.Title,
                 Success = true,
                 Error = (string)null,
+                request.Mode,
                 request.ToposolidId,
                 FloorIds = request.FloorIds,
                 DesignToposolidId = result.DesignToposolidId,
@@ -200,6 +207,7 @@ namespace RevitMCP.Core
                 result.OriginalToposolidId,
                 result.DesignToposolidId,
                 result.FloorIds,
+                request.Mode,
                 result.CutCubicMeters,
                 result.FillCubicMeters,
                 result.NetCubicMeters,
@@ -207,7 +215,7 @@ namespace RevitMCP.Core
                 result.AssociationId,
                 result.Warnings,
                 Timing = timing,
-                Message = "樓板投影整地完成。"
+                Message = $"樓板投影整地完成（{request.Mode}）。"
             };
         }
 
