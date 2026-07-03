@@ -108,6 +108,17 @@ namespace RevitMCP.Tests.Grading
         }
 
         [Test]
+        public void Area_正方形回傳絕對面積且與繞向無關()
+        {
+            Assert.AreEqual(100.0, Polygon2D.Area(UnitSquare), 1e-9);
+            var clockwise = new[]
+            {
+                new Point2D(0, 10), new Point2D(10, 10), new Point2D(10, 0), new Point2D(0, 0)
+            };
+            Assert.AreEqual(100.0, Polygon2D.Area(clockwise), 1e-9);
+        }
+
+        [Test]
         public void OutwardDirections_順時針多邊形結果一致()
         {
             var clockwise = new[]

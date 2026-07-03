@@ -201,6 +201,16 @@ namespace RevitMCP.Core.Grading
         }
     }
 
+    /// <summary>ApplyGrading 的執行結果指標（Revit 內部單位英呎，由命令層轉換）。</summary>
+    public sealed class GradingOutcome
+    {
+        public int ModifiedPointCount { get; set; }
+        public double MaxCutDepthFeet { get; set; }
+        public double MaxFillHeightFeet { get; set; }
+        public double DisturbedAreaSquareFeet { get; set; }
+        public bool DisturbedAreaIsApproximate { get; set; }
+    }
+
     public sealed class GradingResult
     {
         public long OriginalToposolidId { get; set; }

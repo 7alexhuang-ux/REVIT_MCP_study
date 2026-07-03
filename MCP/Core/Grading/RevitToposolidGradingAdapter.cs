@@ -15,13 +15,15 @@ namespace RevitMCP.Core.Grading
         IReadOnlyList<FloorFootprint> ExtractBottomFootprints(IReadOnlyList<Floor> floors);
         Toposolid CreateDesignCopy(Document doc, Toposolid original, bool allowPhaseSetup);
         string WriteAssociation(Document doc, Toposolid design, long originalId, IReadOnlyList<long> floorIds);
-        int ApplyGrading(
+        GradingOutcome ApplyGrading(
             Document doc,
             Toposolid original,
             Toposolid design,
             IReadOnlyList<FloorFootprint> footprints,
             TransitionSettings settings,
             ICollection<string> warnings);
+        void WriteSchemeRecord(Document doc, Toposolid design, string json, string associationId);
+        int CountSchemeRecords(Document doc);
         (double cutCubicMeters, double fillCubicMeters) ReadCutFill(Toposolid design);
     }
 
@@ -219,7 +221,90 @@ namespace RevitMCP.Core.Grading
             return associationId;
         }
 
-        public int ApplyGrading(
+        public void WriteSchemeRecord(Document doc, Toposolid design, string json, string associationId)
+        {
+            EnsureModifiable(doc);
+            if (design == null || !doc.Equals(design.Document))
+            {
+                throw new ArgumentException("設計 Toposolid 必須屬於指定文件。", nameof(design));
+            }
+
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                throw new ArgumentException("方案記錄 JSON 不可空白。", nameof(json));
+            }
+
+            var schema = GetOrCreateSchemeSchema();
+            var entity = new Entity(schema);
+            entity.Set("AssociationId", associationId ?? string.Empty);
+            entity.Set("SchemeJson", json);
+            design.SetEntity(entity);
+        }
+
+        public int CountSchemeRecords(Document doc)
+        {
+            return ReadSchemeRecords(doc).Count;
+        }
+
+        /// <summary>讀取模型內全部方案記錄 JSON（依設計地形逐一掃描）。</summary>
+        public static IReadOnlyList<string> ReadSchemeRecords(Document doc)
+        {
+            if (doc == null)
+            {
+                throw new ArgumentNullException(nameof(doc));
+            }
+
+            var records = new List<string>();
+            var schema = Schema.Lookup(SchemeSchemaGuid);
+            if (schema == null)
+            {
+                return records;
+            }
+
+            foreach (var element in new FilteredElementCollector(doc).OfClass(typeof(Toposolid)))
+            {
+                var entity = element.GetEntity(schema);
+                if (entity == null || !entity.IsValid())
+                {
+                    continue;
+                }
+
+                var json = entity.Get<string>("SchemeJson");
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    records.Add(json);
+                }
+            }
+
+            return records;
+        }
+
+        private static readonly Guid SchemeSchemaGuid =
+            new Guid("3F8A9D2C-71B4-4E5A-9C86-2D4E5F6A7B80");
+
+        private static Schema GetOrCreateSchemeSchema()
+        {
+            var schema = Schema.Lookup(SchemeSchemaGuid);
+            if (schema != null)
+            {
+                if (schema.GetField("AssociationId") == null || schema.GetField("SchemeJson") == null)
+                {
+                    throw new InvalidOperationException("既有 RevitMCP_GradingScheme schema 欄位不相容。");
+                }
+
+                return schema;
+            }
+
+            var builder = new SchemaBuilder(SchemeSchemaGuid);
+            builder.SetSchemaName("RevitMCP_GradingScheme");
+            builder.SetReadAccessLevel(AccessLevel.Public);
+            builder.SetWriteAccessLevel(AccessLevel.Public);
+            builder.AddSimpleField("AssociationId", typeof(string));
+            builder.AddSimpleField("SchemeJson", typeof(string));
+            return builder.Finish();
+        }
+
+        public GradingOutcome ApplyGrading(
             Document doc,
             Toposolid original,
             Toposolid design,
@@ -355,9 +440,9 @@ namespace RevitMCP.Core.Grading
             }
 
             // 銜接帶：投影外一圈依模式外推 daylight 圈點並刻摺線，讓銜接帶成為網格硬邊。
+            IReadOnlyList<IReadOnlyList<XYZ>> transitionRings = null;
             if (settings.Mode != GradingMode.FootprintOnly)
             {
-                IReadOnlyList<IReadOnlyList<XYZ>> transitionRings;
                 using (_timeline.Measure("銜接帶外圈取樣"))
                 {
                     transitionRings = BuildTransitionRings(
@@ -548,7 +633,38 @@ namespace RevitMCP.Core.Grading
                 }
             }
 
-            return targets.Count;
+            // 方案指標：最大挖深/填高取自控制點原高程與目標高程差；
+            // 擾動面積 = 樓板投影面積（精確）＋銜接帶外圈面積（近似，圈點缺段時取樣不全）。
+            var disturbedArea = footprints.Sum(fp => Polygon2D.Area(fp.OuterLoop));
+            var disturbedAreaIsApproximate = false;
+            if (settings.Mode != GradingMode.FootprintOnly && transitionRings != null)
+            {
+                disturbedAreaIsApproximate = true;
+                for (var footprintIndex = 0; footprintIndex < footprints.Count; footprintIndex++)
+                {
+                    var ring = transitionRings[footprintIndex];
+                    if (ring.Count < 3)
+                    {
+                        continue;
+                    }
+
+                    var ringLoop = ring.Select(ToPoint2D).ToList();
+                    disturbedArea += Math.Max(
+                        Polygon2D.Area(ringLoop) - Polygon2D.Area(footprints[footprintIndex].OuterLoop),
+                        0);
+                }
+            }
+
+            return new GradingOutcome
+            {
+                ModifiedPointCount = targets.Count,
+                MaxCutDepthFeet = SchemeMetrics.MaxCutDepth(
+                    targets.Select(target => (target.Position.Z, target.TargetZ))),
+                MaxFillHeightFeet = SchemeMetrics.MaxFillHeight(
+                    targets.Select(target => (target.Position.Z, target.TargetZ))),
+                DisturbedAreaSquareFeet = disturbedArea,
+                DisturbedAreaIsApproximate = disturbedAreaIsApproximate
+            };
         }
 
         private readonly struct VertexTarget

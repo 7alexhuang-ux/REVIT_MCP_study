@@ -159,11 +159,14 @@ Revit 2024 + TOPO_example 模型實機驗證。三個整地方案皆以原地形
 
 ### 多方案紀錄與輸出
 
-- 方案登記簿：擴充既有 `AssociationId` Extensible Storage，每次執行記錄一筆（欄位見下）。
-- Excel 比較表：一列一方案，數值欄位加嵌入該方案視圖的截圖，讓數值與畫面同表比對；沿用 `export_smoke_review_excel` 的既有基礎設施。
-- 結果截圖：以 `ImageExportOptions` 匯出方案 3D 視圖 PNG，嵌入 Excel 並同時輸出獨立圖片檔。
+- 方案登記簿（**已實作 2026-07-04**）：設計地形上第二個 Extensible Storage entity（schema `RevitMCP_GradingScheme`，欄位 `AssociationId`＋`SchemeJson`；JSON 承載完整記錄，結構演進靠 `SchemaVersion`，現為 1）。每次整地於交易三自動寫入，並寫設計地形 Comments 標籤 `RevitMCP {方案名}`；方案名可由 `schemeName` 參數指定，預設「方案N」。查詢工具：`list_grading_schemes`。
+- Excel 比較表（**數值版已實作 2026-07-04**）：`export_grading_comparison`，一列一方案（名稱、時間、模式與參數、元素 ID、CUT/FILL/淨土方、最大挖深/填高、擾動面積、警告）；ClosedXML 沿用排煙匯出樣式。截圖嵌入待方案視圖（Phase 4）完成後補上。
+- 結果截圖：以 `ImageExportOptions` 匯出方案 3D 視圖 PNG，嵌入 Excel 並同時輸出獨立圖片檔。（Phase 4）
+- 工具計數口徑：三個 grading 工具皆經 `revit-tools.ts` 外層包裝註冊，內層 `tools/index.ts` 計數維持 96，計數文件不需變更（沿用 2026-07-02 合併時定案的口徑）。
 
 ### 登記欄位完整度清單
+
+（2026-07-04 落地狀態：SchemaVersion=1 已涵蓋下列 1、2、3 的 CUT/FILL/淨土方、4、5；鬆實方三本帳屬 Phase 3。擾動面積於銜接模式為外圈多邊形近似值，記錄帶 `DisturbedAreaIsApproximate` 旗標；高程基準記為「專案內部原點起算（公尺）」。）
 
 每筆方案記錄應包含：
 

@@ -43,6 +43,17 @@ namespace RevitMCP.Core.Grading
             return inside;
         }
 
+        /// <summary>多邊形絕對面積（與頂點繞向無關）。</summary>
+        public static double Area(IReadOnlyList<Point2D> polygon)
+        {
+            if (polygon == null || polygon.Count < 3)
+            {
+                throw new ArgumentException("多邊形至少需要三個頂點。", nameof(polygon));
+            }
+
+            return Math.Abs(SignedArea(polygon));
+        }
+
         public static double DistanceToBoundary(IReadOnlyList<Point2D> polygon, Point2D point)
         {
             return NearestBoundaryPoint(polygon, point).Distance;

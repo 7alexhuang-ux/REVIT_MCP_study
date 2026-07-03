@@ -438,6 +438,14 @@ namespace RevitMCP.Core
                     case "grade_toposolid_to_floors":
                         result = GradeToposolidToFloors(parameters);
                         break;
+
+                    case "list_grading_schemes":
+                        result = ListGradingSchemes(parameters);
+                        break;
+
+                    case "export_grading_comparison":
+                        result = ExportGradingComparison(parameters);
+                        break;
 #endif
 
                     default:

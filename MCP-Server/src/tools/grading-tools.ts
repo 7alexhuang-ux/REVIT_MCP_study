@@ -60,8 +60,36 @@ export const gradingTools: Tool[] = [
                     default: false,
                     description: "是否更新既有整地結果；本次只接受 false",
                 },
+                schemeName: {
+                    type: "string",
+                    description:
+                        "方案名稱（寫入登記簿與設計地形 Comments 標籤）；未提供時預設「方案N」（N 為既有方案數+1）",
+                },
             },
             required: ["toposolidId", "floorIds"],
+        },
+    },
+    {
+        name: "list_grading_schemes",
+        description:
+            "列出目前模型的整地方案登記簿：每筆含方案名稱、時間、模式與參數、元素 ID、CUT/FILL/淨土方、最大挖深/填高、擾動面積、樓板指標與警告。",
+        inputSchema: {
+            type: "object",
+            properties: {},
+        },
+    },
+    {
+        name: "export_grading_comparison",
+        description:
+            "把整地方案登記簿匯出為 Excel 比較表（.xlsx，一列一方案，數值版）；未指定 outputPath 時存於專案目錄。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                outputPath: {
+                    type: "string",
+                    description: "輸出檔完整路徑（.xlsx）；未提供時預設專案目錄＋時間戳檔名",
+                },
+            },
         },
     },
 ];
