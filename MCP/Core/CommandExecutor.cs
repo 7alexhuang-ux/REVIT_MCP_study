@@ -446,6 +446,10 @@ namespace RevitMCP.Core
                     case "export_grading_comparison":
                         result = ExportGradingComparison(parameters);
                         break;
+
+                    case "solve_balanced_elevation":
+                        result = SolveBalancedElevation(parameters);
+                        break;
 #endif
 
                     default:

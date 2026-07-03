@@ -24,6 +24,7 @@ namespace RevitMCP.Core.Grading
             ICollection<string> warnings);
         void WriteSchemeRecord(Document doc, Toposolid design, string json, string associationId);
         int CountSchemeRecords(Document doc);
+        void ShiftFloorHeights(Document doc, IReadOnlyList<Floor> floors, double deltaFeet);
         (double cutCubicMeters, double fillCubicMeters) ReadCutFill(Toposolid design);
     }
 
@@ -244,6 +245,35 @@ namespace RevitMCP.Core.Grading
         public int CountSchemeRecords(Document doc)
         {
             return ReadSchemeRecords(doc).Count;
+        }
+
+        /// <summary>把全部控制樓板的「自標高偏移」統一加上 deltaFeet（保留樓板間相對高差）。</summary>
+        public void ShiftFloorHeights(Document doc, IReadOnlyList<Floor> floors, double deltaFeet)
+        {
+            EnsureModifiable(doc);
+            if (floors == null || floors.Count == 0)
+            {
+                throw new ArgumentException("至少需要一片樓板。", nameof(floors));
+            }
+
+            foreach (var floor in floors)
+            {
+                var offsetParameter = floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM);
+                if (offsetParameter == null
+                    || offsetParameter.IsReadOnly
+                    || offsetParameter.StorageType != StorageType.Double)
+                {
+                    throw new InvalidOperationException(
+                        $"樓板 ID {floor.Id.Value} 缺少可寫入的「自標高偏移」參數，無法試算升降。");
+                }
+
+                if (!offsetParameter.Set(offsetParameter.AsDouble() + deltaFeet))
+                {
+                    throw new InvalidOperationException($"樓板 ID {floor.Id.Value} 的自標高偏移寫入失敗。");
+                }
+            }
+
+            doc.Regenerate();
         }
 
         /// <summary>讀取模型內全部方案記錄 JSON（依設計地形逐一掃描）。</summary>

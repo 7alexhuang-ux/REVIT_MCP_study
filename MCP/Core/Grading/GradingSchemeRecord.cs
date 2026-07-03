@@ -10,7 +10,7 @@ namespace RevitMCP.Core.Grading
     /// </summary>
     public sealed class GradingSchemeRecord
     {
-        public int SchemaVersion { get; set; } = 1;
+        public int SchemaVersion { get; set; } = 2;
         public string AssociationId { get; set; }
         public string SchemeName { get; set; }
         public string Timestamp { get; set; }
@@ -32,6 +32,9 @@ namespace RevitMCP.Core.Grading
         public IReadOnlyList<FloorMetric> FloorMetrics { get; set; }
         public IReadOnlyList<string> Warnings { get; set; }
         public string ElevationBasis { get; set; }
+
+        /// <summary>鬆實方三本帳（v2 新增）；未提供係數時為 null。</summary>
+        public EarthworkLedger Ledger { get; set; }
     }
 
     /// <summary>單一控制樓板的登記指標。</summary>
