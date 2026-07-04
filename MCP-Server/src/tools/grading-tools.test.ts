@@ -43,6 +43,41 @@ test("整地工具支援鬆實方係數（成對）", () => {
     assert.match(String(properties.compactionFactor.description), /成對/);
 });
 
+test("Phase4 表現層工具存在且預設值正確", () => {
+    const viewTool = gradingTools.find(item => item.name === "create_grading_scheme_view");
+    assert.ok(viewTool);
+    assert.deepEqual(viewTool.inputSchema.required, ["designToposolidId"]);
+    const viewProps = viewTool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(viewProps.exportPng.default, true);
+
+    const heatmapTool = gradingTools.find(item => item.name === "create_cutfill_heatmap");
+    assert.ok(heatmapTool);
+    const heatmapProps = heatmapTool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(heatmapProps.sampleStepMeters.default, 2);
+
+    const annotateTool = gradingTools.find(item => item.name === "annotate_grading_scheme");
+    assert.ok(annotateTool);
+    const annotateProps = annotateTool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(annotateProps.annotateFloors.default, true);
+    assert.equal(annotateProps.annotateDaylight.default, false);
+
+    const restoreTool = gradingTools.find(item => item.name === "restore_grading_scheme");
+    assert.ok(restoreTool);
+    const restoreProps = restoreTool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(restoreProps.rerunGrading.default, false);
+
+    const gridTool = gradingTools.find(item => item.name === "export_earthwork_gridsheet");
+    assert.ok(gridTool);
+    const gridProps = gridTool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(gridProps.cellSizeMeters.default, 10);
+    assert.match(String(gridTool.description), /方格法/);
+
+    const exportTool = gradingTools.find(item => item.name === "export_grading_comparison");
+    assert.ok(exportTool);
+    const exportProps = exportTool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(exportProps.includeScreenshots.default, true);
+});
+
 test("平衡高程反求工具存在且預設值正確", () => {
     const tool = gradingTools.find(item => item.name === "solve_balanced_elevation");
     assert.ok(tool);
@@ -79,6 +114,11 @@ test("整地工具只註冊於核准的 Profile", () => {
         "list_grading_schemes",
         "export_grading_comparison",
         "solve_balanced_elevation",
+        "create_grading_scheme_view",
+        "create_cutfill_heatmap",
+        "annotate_grading_scheme",
+        "restore_grading_scheme",
+        "export_earthwork_gridsheet",
     ];
 
     try {

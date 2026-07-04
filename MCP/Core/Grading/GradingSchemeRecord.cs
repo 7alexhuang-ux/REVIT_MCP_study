@@ -10,7 +10,7 @@ namespace RevitMCP.Core.Grading
     /// </summary>
     public sealed class GradingSchemeRecord
     {
-        public int SchemaVersion { get; set; } = 2;
+        public int SchemaVersion { get; set; } = 3;
         public string AssociationId { get; set; }
         public string SchemeName { get; set; }
         public string Timestamp { get; set; }
@@ -35,6 +35,12 @@ namespace RevitMCP.Core.Grading
 
         /// <summary>鬆實方三本帳（v2 新增）；未提供係數時為 null。</summary>
         public EarthworkLedger Ledger { get; set; }
+
+        /// <summary>方案鎖定 3D 視圖的元素 ID（v3 新增；create_grading_scheme_view 回寫）。</summary>
+        public long? SchemeViewId { get; set; }
+
+        /// <summary>方案截圖檔路徑（v3 新增；create_grading_scheme_view 回寫）。</summary>
+        public string ScreenshotPath { get; set; }
     }
 
     /// <summary>單一控制樓板的登記指標。</summary>
@@ -44,6 +50,9 @@ namespace RevitMCP.Core.Grading
         public double AreaSquareMeters { get; set; }
         public double BottomZMinMeters { get; set; }
         public double BottomZMaxMeters { get; set; }
+
+        /// <summary>樓板「自標高偏移」（公尺，v3 新增）；方案還原的寫回依據。</summary>
+        public double? HeightOffsetMeters { get; set; }
     }
 
     /// <summary>方案幾何指標的純計算。</summary>

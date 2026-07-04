@@ -332,12 +332,16 @@ namespace RevitMCP.Core
                 var areaSquareMeters = areaParameter != null && areaParameter.HasValue
                     ? UnitUtils.ConvertFromInternalUnits(areaParameter.AsDouble(), UnitTypeId.SquareMeters)
                     : 0.0;
+                var heightOffsetParameter = floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM);
                 metrics.Add(new FloorMetric
                 {
                     FloorId = footprint.FloorId,
                     AreaSquareMeters = areaSquareMeters,
                     BottomZMinMeters = FeetToMeters(minZ),
-                    BottomZMaxMeters = FeetToMeters(maxZ)
+                    BottomZMaxMeters = FeetToMeters(maxZ),
+                    HeightOffsetMeters = heightOffsetParameter != null && heightOffsetParameter.HasValue
+                        ? (double?)FeetToMeters(heightOffsetParameter.AsDouble())
+                        : null
                 });
             }
 

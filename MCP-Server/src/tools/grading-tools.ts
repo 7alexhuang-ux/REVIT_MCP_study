@@ -176,7 +176,7 @@ export const gradingTools: Tool[] = [
     {
         name: "export_grading_comparison",
         description:
-            "把整地方案登記簿匯出為 Excel 比較表（.xlsx，一列一方案，數值版）；未指定 outputPath 時存於專案目錄。",
+            "把整地方案登記簿匯出為 Excel 比較表（.xlsx，一列一方案，含鬆實方三本帳欄位與方案截圖）；未指定 outputPath 時存於專案目錄。",
         inputSchema: {
             type: "object",
             properties: {
@@ -184,7 +184,136 @@ export const gradingTools: Tool[] = [
                     type: "string",
                     description: "輸出檔完整路徑（.xlsx）；未提供時預設專案目錄＋時間戳檔名",
                 },
+                includeScreenshots: {
+                    type: "boolean",
+                    default: true,
+                    description:
+                        "是否嵌入方案截圖（來自 create_grading_scheme_view 的記錄）；無截圖的方案顯示提示文字",
+                },
             },
+        },
+    },
+    {
+        name: "create_grading_scheme_view",
+        description:
+            "為整地方案建立鎖定 3D 視圖：隔離顯示設計地形與控制樓板、鎖定方位（可放 Spot Elevation）、可選匯出 PNG 截圖；視圖 ID 與截圖路徑回寫方案記錄，視圖即方案書籤。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                designToposolidId: {
+                    type: "integer",
+                    description: "方案的設計地形元素 ID（記錄掛在其上）",
+                },
+                exportPng: {
+                    type: "boolean",
+                    default: true,
+                    description: "是否同時匯出視圖 PNG 截圖",
+                },
+                outputPath: {
+                    type: "string",
+                    description: "截圖輸出完整路徑（.png）；未提供時預設專案目錄＋「整地-{方案名}.png」",
+                },
+            },
+            required: ["designToposolidId"],
+        },
+    },
+    {
+        name: "create_cutfill_heatmap",
+        description:
+            "挖填熱區圖：在方案視圖上以 AVF 為設計地形頂面著色，值＝原地形Z−設計Z（公尺，正=挖紅、負=填藍）。僅視覺化定位挖填集中區，土方量以登記簿為準。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                designToposolidId: {
+                    type: "integer",
+                    description: "方案的設計地形元素 ID",
+                },
+                viewId: {
+                    type: "integer",
+                    description: "要著色的視圖 ID；未提供時用方案記錄的 SchemeViewId（需先建方案視圖）",
+                },
+                sampleStepMeters: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    default: 2,
+                    description: "取樣網格步距（公尺）",
+                },
+            },
+            required: ["designToposolidId"],
+        },
+    },
+    {
+        name: "annotate_grading_scheme",
+        description:
+            "整地方案標高標註：在鎖定 3D 方案視圖為控制樓板頂面（中心＋角點內縮 300mm）與設計地形 daylight 取樣點建立 Spot Elevation；逐點容錯並回報成敗數。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                designToposolidId: {
+                    type: "integer",
+                    description: "方案的設計地形元素 ID",
+                },
+                viewId: {
+                    type: "integer",
+                    description: "標註載體視圖 ID；未提供時用方案記錄的 SchemeViewId",
+                },
+                annotateFloors: {
+                    type: "boolean",
+                    default: true,
+                    description: "是否標註控制樓板頂面（中心與角點）",
+                },
+                annotateDaylight: {
+                    type: "boolean",
+                    default: false,
+                    description: "是否標註設計地形沿樓板邊界的取樣點（銜接模式的放坡起點）",
+                },
+            },
+            required: ["designToposolidId"],
+        },
+    },
+    {
+        name: "restore_grading_scheme",
+        description:
+            "方案還原：把方案記錄的樓板「自標高偏移」寫回模型（僅支援樓板高程不同型方案；輪廓不同型會拒絕並引導 Design Option）；可選重跑整地落成新方案。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                designToposolidId: {
+                    type: "integer",
+                    description: "要還原的方案設計地形元素 ID",
+                },
+                rerunGrading: {
+                    type: "boolean",
+                    default: false,
+                    description: "寫回樓板高程後是否以原參數重跑整地（落成「{方案名}-還原重跑」新方案）",
+                },
+            },
+            required: ["designToposolidId"],
+        },
+    },
+    {
+        name: "export_earthwork_gridsheet",
+        description:
+            "方格法土方計算書：固定格徑對原/設計地形取樣，輸出原GL、設計GL、挖填深三張矩陣工作表與總表；方格法加總與 Revit 正式 CUT/FILL 並列、差額（離散誤差）誠實揭露。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                designToposolidId: {
+                    type: "integer",
+                    description: "方案的設計地形元素 ID",
+                },
+                cellSizeMeters: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    default: 10,
+                    description: "方格格徑（公尺）；台灣水保計畫常用 10m 方格",
+                },
+                outputPath: {
+                    type: "string",
+                    description: "輸出檔完整路徑（.xlsx）；未提供時預設專案目錄＋時間戳檔名",
+                },
+            },
+            required: ["designToposolidId"],
         },
     },
 ];

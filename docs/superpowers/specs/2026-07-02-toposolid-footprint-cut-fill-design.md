@@ -161,12 +161,13 @@ Revit 2024 + TOPO_example 模型實機驗證。三個整地方案皆以原地形
 
 - 方案登記簿（**已實作 2026-07-04**）：設計地形上第二個 Extensible Storage entity（schema `RevitMCP_GradingScheme`，欄位 `AssociationId`＋`SchemeJson`；JSON 承載完整記錄，結構演進靠 `SchemaVersion`，現為 1）。每次整地於交易三自動寫入，並寫設計地形 Comments 標籤 `RevitMCP {方案名}`；方案名可由 `schemeName` 參數指定，預設「方案N」。查詢工具：`list_grading_schemes`。
 - Excel 比較表（**數值版已實作 2026-07-04**）：`export_grading_comparison`，一列一方案（名稱、時間、模式與參數、元素 ID、CUT/FILL/淨土方、最大挖深/填高、擾動面積、警告）；ClosedXML 沿用排煙匯出樣式。截圖嵌入待方案視圖（Phase 4）完成後補上。
-- 結果截圖：以 `ImageExportOptions` 匯出方案 3D 視圖 PNG，嵌入 Excel 並同時輸出獨立圖片檔。（Phase 4）
+- 方案視圖（**已實作 2026-07-04**）：`create_grading_scheme_view`——每方案建立鎖定 3D 視圖（隔離設計地形＋控制樓板、命名「整地-{方案名}」、`SaveOrientationAndLock`），視圖 ID 回寫記錄 `SchemeViewId`，視圖即方案書籤與標註載體。
+- 結果截圖（**已實作 2026-07-04**）：`ImageExportOptions` 匯出方案視圖 PNG（獨立圖片檔＋路徑回寫記錄 `ScreenshotPath`）；`export_grading_comparison` 的 `includeScreenshots`（預設 true）把截圖嵌入比較表每方案列。
 - 工具計數口徑：三個 grading 工具皆經 `revit-tools.ts` 外層包裝註冊，內層 `tools/index.ts` 計數維持 96，計數文件不需變更（沿用 2026-07-02 合併時定案的口徑）。
 
 ### 登記欄位完整度清單
 
-（2026-07-04 落地狀態：SchemaVersion=1 已涵蓋下列 1、2、3 的 CUT/FILL/淨土方、4、5；鬆實方三本帳屬 Phase 3。擾動面積於銜接模式為外圈多邊形近似值，記錄帶 `DisturbedAreaIsApproximate` 旗標；高程基準記為「專案內部原點起算（公尺）」。）
+（2026-07-04 落地狀態：SchemaVersion=3 全數涵蓋——v1 基礎欄位、v2 鬆實方三本帳 `Ledger`、v3 `SchemeViewId`/`ScreenshotPath` 與 `FloorMetrics[].HeightOffsetMeters`（還原依據）。擾動面積於銜接模式為外圈多邊形近似值，記錄帶 `DisturbedAreaIsApproximate` 旗標；高程基準記為「專案內部原點起算（公尺）」。）
 
 每筆方案記錄應包含：
 
@@ -178,14 +179,15 @@ Revit 2024 + TOPO_example 模型實機驗證。三個整地方案皆以原地形
 
 ### 方案還原策略
 
-- 方案間僅樓板高程不同（最常見）：登記簿已記錄各樓板高程參數，還原＝工具寫回參數，一鍵完成。
-- 方案間樓板輪廓不同：API 完整還原草圖成本過高；改以 Design Option 作手動幾何容器（使用者自行放入並切換），或接受「數值與截圖留檔、幾何不還原」。
+- 方案間僅樓板高程不同（最常見，**已實作 2026-07-04**）：`restore_grading_scheme`——記錄 v3 的 `FloorMetrics[].HeightOffsetMeters` 寫回樓板「自標高偏移」，一鍵完成；`rerunGrading=true` 時以原參數重跑落成「{方案名}-還原重跑」新方案。舊記錄（v3 之前，無高程欄位）明確拒絕。
+- 方案間樓板輪廓不同：API 完整還原草圖成本過高；工具偵測到控制樓板已不存在即拒絕，並引導以 Design Option 作手動幾何容器（使用者自行放入並切換），或接受「數值與截圖留檔、幾何不還原」。
 
 ### 樓板與圖面標註
 
-- 樓板高程標註：以 `NewSpotElevation` 建立 Spot Elevation，隨模型變動更新；不以文字註記取代。3D 視圖須先鎖定才能放置（配合方案視圖設計）。
+- 樓板高程標註（**已實作 2026-07-04**）：`annotate_grading_scheme`——在鎖定方案視圖以 `NewSpotElevation` 標註樓板頂面（中心＋角點內縮 300mm），隨模型變動更新；逐點容錯回報成敗數。
 - 樓板面積：讀取內建面積參數（現有 `get_element_info` 已支援，無需新工具）。
-- 周邊關鍵高程：於地形邊界與放坡起訖點建立 Spot Elevation。
+- 周邊關鍵高程（**已實作 2026-07-04**）：`annotateDaylight=true` 於設計地形沿樓板邊界取樣點（放坡起點）建立 Spot Elevation。
+- 邊界剖面（既有工具組合，不另寫程式）：以 `get_element_geometry`（或登記簿樓板指標）取得邊界座標後，呼叫既有 `create_section_view` 沿放坡邊界建立剖面，顯示原地形線與設計地形線；此為 AI 工作流組合，符合「原子工具可組合」原則。
 
 ### 樓板底面通用化（2026-07-03 討論定案）
 
@@ -200,9 +202,9 @@ Revit 2024 + TOPO_example 模型實機驗證。三個整地方案皆以原地形
 
 - 平衡高程反求（**已實作 2026-07-04**）：`solve_balanced_elevation`——二分法試算樓板統一升降量使淨土方逼近目標（預設 0）；每次試算單一交易內跑完整整地管線後無條件回滾（不留痕），數字一律 Revit 內建 CUT/FILL；區間端點無法夾住目標時誠實回報兩端淨值並中止；`apply=true` 且收斂才把偏移寫入樓板並轉呼叫整地命令落成方案（含登記簿）。參數：`targetNetCubicMeters`（預設 0）、`toleranceCubicMeters`（預設 10）、`maxAdjustMeters`（預設 ±10）、`maxIterations`（預設 10、上限 30）。
 - 鬆實方係數（**已實作 2026-07-04**）：grade 工具可選 `looseFactor`/`compactionFactor`（成對、皆 >0），登記簿（SchemaVersion 2 的 `Ledger`）與 Excel 比較表加記三本帳：運土鬆方＝CUT×鬆方係數、填方所需自然方＝FILL÷壓實係數、實質淨土方＝FILL÷壓實係數−CUT（同號誌：負值＝餘土），避免帳面平衡實際不平衡。
-- 挖填熱區圖：地形差異上色（紅為挖、藍為填、深淺表深度），快速定位土方集中區。
-- 邊界剖面：沿放坡邊界以 `create_section_view` 自動建立剖面，顯示原地形線與設計地形線，供送審與溝通。
-- 土方計算書格式：Excel 匯出排版成主管機關（水保、雜項執照）要求的斷面法或方格法計算書。
+- 挖填熱區圖（**已實作 2026-07-04**）：`create_cutfill_heatmap`——AVF（SpatialFieldManager）在方案視圖為設計地形頂面著色，值＝原地形Z−設計Z（正=挖紅、負=填藍，漸層＋圖例）；僅視覺化定位土方集中區，土方量以登記簿為準。
+- 邊界剖面：既有工具組合工作流（見「樓板與圖面標註」節），不另寫程式。
+- 土方計算書格式（**方格法已實作 2026-07-04**）：`export_earthwork_gridsheet`——固定格徑（預設 10m，水保常用）雙射線取樣，輸出原GL、設計GL、挖填深三張矩陣工作表＋總表；方格法加總與 Revit 正式 CUT/FILL 並列、差額（離散誤差）誠實揭露，不取代正式報表值。斷面法格式未排程。
 
 ### 實作優先順序
 
@@ -235,3 +237,5 @@ Revit 2024 + TOPO_example 模型實機驗證。三個整地方案皆以原地形
 | Phase 3 | 平衡高程反求；鬆實方三本帳 | 進階決策 |
 | Phase 4 | 方案視圖（鎖定 3D、截圖、嵌入 Excel）；挖填熱區圖；標高標註；邊界剖面；方案還原；土方計算書格式 | 表現與送審輸出 |
 | 模組外 | 地形建立/編輯（未來獨立模組）、擋土牆、道路舖面、`IUpdater` 即時更新 | 不在本模組範圍 |
+
+完成狀態（2026-07-04）：四階段程式開發與自動化測試全數完成——Phase 1（警告消化＋模式 2/3 放坡）、Phase 2（登記簿＋Excel 比較表）、Phase 3（平衡反求＋三本帳）、Phase 4（方案視圖/熱區圖/標註/還原/方格法計算書/Excel 嵌圖；邊界剖面為既有工具組合）。grading 工具共 9 個（advertised 105、內層計數 96 不變）。待辦：各階段實機驗證（需 Revit＋TOPO_example）。
