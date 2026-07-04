@@ -31,6 +31,7 @@ namespace RevitMCP.Core
         {
             var doc = _uiApp.ActiveUIDocument.Document;
             var outputPath = parameters["outputPath"]?.Value<string>();
+            var includeScreenshots = parameters["includeScreenshots"]?.Value<bool?>() ?? true;
             var schemes = RevitToposolidGradingAdapter.ReadSchemeRecords(doc)
                 .Select(JObject.Parse)
                 .ToList();
@@ -60,7 +61,7 @@ namespace RevitMCP.Core
                     "原地形ID", "設計地形ID", "樓板IDs", "CUT(m³)", "FILL(m³)", "淨土方(m³)",
                     "最大挖深(m)", "最大填高(m)", "擾動面積(m²)",
                     "鬆方係數", "壓實係數", "運土鬆方(m³)", "填方所需自然方(m³)", "實質淨土方(m³)",
-                    "警告"
+                    "警告", "方案截圖"
                 };
                 for (var column = 0; column < headers.Length; column++)
                 {
@@ -122,6 +123,22 @@ namespace RevitMCP.Core
                     if (index % 2 == 1)
                     {
                         sheet.Range(row, 1, row, headers.Length).Style.Fill.SetBackgroundColor(altRowBg);
+                    }
+
+                    var screenshotPath = scheme.Value<string>("ScreenshotPath");
+                    if (includeScreenshots
+                        && !string.IsNullOrEmpty(screenshotPath)
+                        && System.IO.File.Exists(screenshotPath))
+                    {
+                        sheet.Row(row).Height = 90;
+                        sheet.Column(22).Width = 24;
+                        var picture = sheet.AddPicture(screenshotPath);
+                        picture.MoveTo(sheet.Cell(row, 22), 2, 2);
+                        picture.WithSize(160, 112);
+                    }
+                    else if (includeScreenshots)
+                    {
+                        sheet.Cell(row, 22).Value = "（尚未建立方案視圖）";
                     }
                 }
 

@@ -276,6 +276,36 @@ namespace RevitMCP.Core.Grading
             doc.Regenerate();
         }
 
+        /// <summary>讀取指定設計地形上的方案記錄 JSON；無記錄回 null。</summary>
+        public static string TryReadSchemeRecord(Document doc, long designToposolidId)
+        {
+            if (doc == null)
+            {
+                throw new ArgumentNullException(nameof(doc));
+            }
+
+            var schema = Schema.Lookup(SchemeSchemaGuid);
+            if (schema == null)
+            {
+                return null;
+            }
+
+            var element = doc.GetElement(new ElementId(CheckedElementId(designToposolidId)));
+            if (!(element is Toposolid design))
+            {
+                return null;
+            }
+
+            var entity = design.GetEntity(schema);
+            if (entity == null || !entity.IsValid())
+            {
+                return null;
+            }
+
+            var json = entity.Get<string>("SchemeJson");
+            return string.IsNullOrWhiteSpace(json) ? null : json;
+        }
+
         /// <summary>讀取模型內全部方案記錄 JSON（依設計地形逐一掃描）。</summary>
         public static IReadOnlyList<string> ReadSchemeRecords(Document doc)
         {
@@ -763,7 +793,7 @@ namespace RevitMCP.Core.Grading
             return false;
         }
 
-        private static IReadOnlyList<Solid> CollectSolids(Toposolid toposolid)
+        internal static IReadOnlyList<Solid> CollectSolids(Toposolid toposolid)
         {
             var solids = new List<Solid>();
             var geometry = toposolid.get_Geometry(new Options());
@@ -781,7 +811,7 @@ namespace RevitMCP.Core.Grading
             return solids;
         }
 
-        private static double? IntersectTerrainTopZ(
+        internal static double? IntersectTerrainTopZ(
             IReadOnlyList<Solid> solids,
             Point2D point,
             double rayBottomZ,

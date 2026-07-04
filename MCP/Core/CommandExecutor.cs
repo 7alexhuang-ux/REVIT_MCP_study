@@ -450,6 +450,26 @@ namespace RevitMCP.Core
                     case "solve_balanced_elevation":
                         result = SolveBalancedElevation(parameters);
                         break;
+
+                    case "create_grading_scheme_view":
+                        result = CreateGradingSchemeView(parameters);
+                        break;
+
+                    case "create_cutfill_heatmap":
+                        result = CreateCutfillHeatmap(parameters);
+                        break;
+
+                    case "annotate_grading_scheme":
+                        result = AnnotateGradingScheme(parameters);
+                        break;
+
+                    case "restore_grading_scheme":
+                        result = RestoreGradingScheme(parameters);
+                        break;
+
+                    case "export_earthwork_gridsheet":
+                        result = ExportEarthworkGridsheet(parameters);
+                        break;
 #endif
 
                     default:
