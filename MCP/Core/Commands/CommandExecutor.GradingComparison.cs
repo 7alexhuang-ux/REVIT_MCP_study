@@ -427,10 +427,62 @@ namespace RevitMCP.Core
             return $"GRD-C{Guid.NewGuid().ToString("N").Substring(0, 4)}";
         }
 
-        // Task 7 佔位：實作於後續任務替換為完整刪除方案邏輯。
+        /// <summary>
+        /// 刪除整地方案（破壞性）：刪設計地形（記錄隨 ES 一併消失）＋方案相關視圖；
+        /// 若刪後登記簿為空，解除原地形的「拆除」階段設定使其復原顯示。
+        /// </summary>
         private object RemoveGradingScheme(JObject parameters)
         {
-            throw new NotImplementedException("remove_grading_scheme 尚未實作");
+            if (parameters["confirm"]?.Value<bool?>() != true)
+            {
+                throw new InvalidOperationException(
+                    "remove_grading_scheme 為破壞性操作，須帶 confirm=true。");
+            }
+
+            var doc = _uiApp.ActiveUIDocument.Document;
+            var (design, record) = RequireSchemeRecord(doc, parameters);
+            var schemeName = record.Value<string>("SchemeName") ?? design.Id.GetIdValue().ToString();
+            var originalId = record.Value<long?>("OriginalToposolidId") ?? 0;
+
+            // 蒐集要刪的視圖：記錄的方案視圖＋名稱前綴「整地-{方案名}」的衍生視圖
+            var prefix = GradingNames.SanitizeElementName($"整地-{schemeName}");
+            var viewIds = new FilteredElementCollector(doc)
+                .OfClass(typeof(View)).Cast<View>()
+                .Where(view => !view.IsTemplate && view.Name.StartsWith(prefix, StringComparison.Ordinal))
+                .Select(view => view.Id)
+                .ToList();
+
+            var deleted = new List<long>();
+            using (var transaction = new Transaction(doc, $"刪除整地方案 {schemeName}"))
+            {
+                GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
+                transaction.Start();
+                foreach (var viewId in viewIds)
+                {
+                    try { doc.Delete(viewId); deleted.Add(viewId.GetIdValue()); }
+                    catch (Autodesk.Revit.Exceptions.ApplicationException) { /* 已被圖紙相依刪除 */ }
+                }
+
+                deleted.Add(design.Id.GetIdValue());
+                doc.Delete(design.Id); // 記錄在設計地形的 ES 上，隨元素一併刪除
+                doc.Regenerate();
+
+                var remaining = RevitToposolidGradingAdapter.ReadSchemeRecords(doc).Count;
+                if (remaining == 0 && originalId > 0
+                    && doc.GetElement(new ElementId(checked((int)originalId))) is Toposolid original)
+                {
+                    original.get_Parameter(BuiltInParameter.PHASE_DEMOLISHED)?.Set(ElementId.InvalidElementId);
+                }
+
+                transaction.Commit();
+                return new
+                {
+                    SchemeName = schemeName,
+                    DeletedElementIds = deleted,
+                    RemainingSchemes = remaining,
+                    Message = $"方案「{schemeName}」已刪除（{deleted.Count} 個元素）；剩餘 {remaining} 筆方案。"
+                };
+            }
         }
     }
 }
