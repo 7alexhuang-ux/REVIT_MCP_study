@@ -90,6 +90,11 @@ test("V2 比較出圖與刪除方案工具存在且參數正確", () => {
     assert.deepEqual(removeTool.inputSchema.required, ["designToposolidId", "confirm"]);
     const removeProps = removeTool.inputSchema.properties as Record<string, Record<string, unknown>>;
     assert.equal(removeProps.confirm.type, "boolean");
+
+    const viewerTool = gradingTools.find(item => item.name === "show_grading_terrain");
+    assert.ok(viewerTool);
+    const viewerProps = viewerTool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(viewerProps.designToposolidId.type, "integer");
 });
 
 test("平衡高程反求工具存在且預設值正確", () => {
@@ -140,6 +145,7 @@ test("整地工具只註冊於核准的 Profile", () => {
         "create_grading_presentation",
         "create_grading_comparison_sheet",
         "remove_grading_scheme",
+        "show_grading_terrain",
     ];
 
     try {

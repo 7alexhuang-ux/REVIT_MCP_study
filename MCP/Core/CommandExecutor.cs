@@ -496,6 +496,10 @@ namespace RevitMCP.Core
                     case "remove_grading_scheme":
                         result = RemoveGradingScheme(parameters);
                         break;
+
+                    case "show_grading_terrain":
+                        result = ShowGradingTerrain(parameters);
+                        break;
 #endif
 
                     default:

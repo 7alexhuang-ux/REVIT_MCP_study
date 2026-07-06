@@ -65,6 +65,9 @@ namespace RevitMCP
                 AddGradingButton(gradingPanel, assemblyPath, "SchemeOverview", "方案\n總覽",
                     "RevitMCP.Commands.SchemeOverviewCommand",
                     "檢視登記簿全部方案（數字/視圖/還原/刪除/匯出）");
+                AddGradingButton(gradingPanel, assemblyPath, "GradingTerrainView", "整地\n檢視",
+                    "RevitMCP.Commands.GradingTerrainViewCommand",
+                    "選單挑「原地形/某方案」→ 在專用視圖顯示（保留樓板），視圖標題顯示編號＋名稱");
                 AddGradingButton(gradingPanel, assemblyPath, "GradingComparison", "比較\n出圖",
                     "RevitMCP.Commands.GradingComparisonCommand",
                     "把全部方案排成 A0 單張總比較圖紙（3D/坡度/剖面/剖面立體/明細表）並匯 PDF");

@@ -1,11 +1,13 @@
 #if REVIT2024_OR_GREATER
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using Newtonsoft.Json.Linq;
 using RevitMCP.Core;
+using RevitMCP.Core.Grading;
 using RevitMCP.Models;
 
 namespace RevitMCP.Commands
@@ -211,6 +213,50 @@ namespace RevitMCP.Commands
         {
             return GradingRibbonHelper.Run(
                 commandData.Application, "create_grading_comparison_sheet", new JObject(), "比較出圖");
+        }
+    }
+
+    /// <summary>整地檢視：選單挑「原地形／某方案」→ 專用視圖顯示（保留樓板），視圖標題含編號＋名稱。</summary>
+    [Transaction(TransactionMode.Manual)]
+    public class GradingTerrainViewCommand : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
+        {
+            var uiApp = commandData.Application;
+            var uiDoc = uiApp.ActiveUIDocument;
+            if (uiDoc?.Document == null)
+            {
+                TaskDialog.Show("整地檢視", "沒有作用中的文件。");
+                return Result.Cancelled;
+            }
+
+            var records = RevitToposolidGradingAdapter.ReadSchemeRecords(uiDoc.Document)
+                .Select(JObject.Parse).ToList();
+            if (records.Count == 0)
+            {
+                TaskDialog.Show("整地檢視", "目前沒有整地方案；請先用「新整地方案」建立至少一個。");
+                return Result.Cancelled;
+            }
+
+            var options = new List<KeyValuePair<string, long>>
+            {
+                new KeyValuePair<string, long>("原地形（拆除前）", 0)
+            };
+            for (var index = 0; index < records.Count; index++)
+            {
+                var name = records[index].Value<string>("SchemeName") ?? $"方案{index + 1}";
+                options.Add(new KeyValuePair<string, long>(
+                    $"方案{index + 1}：{name}", records[index].Value<long>("DesignToposolidId")));
+            }
+
+            var dialog = new TerrainViewPickerDialog(options);
+            if (dialog.ShowDialog() != true)
+            {
+                return Result.Cancelled;
+            }
+
+            return GradingRibbonHelper.Run(uiApp, "show_grading_terrain",
+                new JObject { ["designToposolidId"] = dialog.SelectedDesignId }, "整地檢視");
         }
     }
 }

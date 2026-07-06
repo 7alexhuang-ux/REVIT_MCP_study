@@ -492,4 +492,18 @@ export const gradingTools: Tool[] = [
             required: ["designToposolidId", "confirm"],
         },
     },
+    {
+        name: "show_grading_terrain",
+        description:
+            "整地檢視：在專用「整地檢視」3D 視圖顯示指定地形（原地形或某方案成果），保留樓板等現有元素、隱藏其他地形，視圖標題含編號＋名稱。designToposolidId 省略或 0＝顯示原地形（拆除前）。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                designToposolidId: {
+                    type: "integer",
+                    description: "要顯示的方案設計地形 ID；省略或 0 代表顯示原地形（拆除前）",
+                },
+            },
+        },
+    },
 ];
