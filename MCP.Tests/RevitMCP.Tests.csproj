@@ -19,5 +19,6 @@
     <Compile Include="..\MCP\Core\Grading\BalanceSolver.cs" Link="Core\Grading\BalanceSolver.cs" />
     <Compile Include="..\MCP\Core\Grading\EarthworkGrid.cs" Link="Core\Grading\EarthworkGrid.cs" />
     <Compile Include="..\MCP\Core\Grading\GradingNames.cs" Link="Core\Grading\GradingNames.cs" Condition="Exists('..\MCP\Core\Grading\GradingNames.cs')" />
+    <Compile Include="..\MCP\Core\Grading\SheetLayoutMath.cs" Link="Core\Grading\SheetLayoutMath.cs" Condition="Exists('..\MCP\Core\Grading\SheetLayoutMath.cs')" />
   </ItemGroup>
 </Project>
