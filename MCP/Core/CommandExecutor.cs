@@ -488,6 +488,14 @@ namespace RevitMCP.Core
                     case "export_earthwork_gridsheet":
                         result = ExportEarthworkGridsheet(parameters);
                         break;
+
+                    case "create_grading_comparison_sheet":
+                        result = CreateGradingComparisonSheet(parameters);
+                        break;
+
+                    case "remove_grading_scheme":
+                        result = RemoveGradingScheme(parameters);
+                        break;
 #endif
 
                     default:

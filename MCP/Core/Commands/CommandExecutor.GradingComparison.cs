@@ -194,6 +194,244 @@ namespace RevitMCP.Core
             view.SaveOrientationAndLock();
             return view;
         }
+
+        /// <summary>
+        /// C-00c 單張總比較圖紙：一欄一方案（3D／坡度熱區／正剖面／剖面立體），
+        /// 底部整地方案比較明細表；A0 圖框；可選匯 PDF。逐方案容錯。
+        /// </summary>
+        private object CreateGradingComparisonSheet(JObject parameters)
+        {
+            var doc = _uiApp.ActiveUIDocument.Document;
+            var records = RevitToposolidGradingAdapter.ReadSchemeRecords(doc)
+                .Select(JObject.Parse).ToList();
+            var filter = parameters["designToposolidIds"] as JArray;
+            if (filter != null && filter.Count > 0)
+            {
+                var wanted = new HashSet<long>(filter.Values<long>());
+                records = records.Where(r => wanted.Contains(r.Value<long>("DesignToposolidId"))).ToList();
+            }
+
+            if (records.Count == 0)
+            {
+                throw new InvalidOperationException("登記簿沒有可比較的方案。");
+            }
+
+            var titleBlockId = ResolveA0TitleBlock(doc, parameters);
+            var export = parameters["export"]?.Value<bool?>() ?? true;
+
+            // 1. 共用參數綁定＋指標回寫（單一交易）
+            using (var transaction = new Transaction(doc, "回寫方案比較指標"))
+            {
+                GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
+                transaction.Start();
+                GradingSharedParameters.EnsureBindings(doc);
+                foreach (var record in records)
+                {
+                    var designId = record.Value<long>("DesignToposolidId");
+                    if (doc.GetElement(new ElementId(checked((int)designId))) is Toposolid design)
+                    {
+                        GradingSharedParameters.WriteSchemeMetrics(doc, design, record);
+                    }
+                }
+
+                transaction.Commit();
+            }
+
+            // 2. 共同剖面線（取第一筆記錄的原地形）
+            var originalId = records[0].Value<long>("OriginalToposolidId");
+            var original = doc.GetElement(new ElementId(checked((int)originalId))) as Toposolid
+                ?? throw new InvalidOperationException($"原地形 {originalId} 不存在。");
+            var (sectionStart, sectionEnd) = ComputeMaxDropSectionLine(original);
+
+            var allDesignIds = records
+                .Select(r => new ElementId(checked((int)r.Value<long>("DesignToposolidId"))))
+                .ToList();
+
+            // 3. 每方案確保四個視圖（逐方案容錯，沿用 presentation 的 TrySubStep 模式）
+            var schemeColumns = new List<(string Name, long[] ViewIds, List<string> Steps)>();
+            foreach (var record in records)
+            {
+                var designId = record.Value<long>("DesignToposolidId");
+                var designElementId = new ElementId(checked((int)designId));
+                var schemeName = record.Value<string>("SchemeName") ?? $"方案{designId}";
+                var steps = new List<string>();
+                try
+                {
+                    var view3dId = EnsureSchemeView(doc, designId, record, steps);
+                    var slopeViewId = DuplicateSchemeView(doc, view3dId, $"整地-{schemeName}-坡度比較");
+                    TrySubStep(steps, "坡度熱區", () =>
+                        CreateSlopeHeatmap(new JObject { ["designToposolidId"] = designId, ["viewId"] = slopeViewId }));
+                    TrySubStep(steps, "範圍線", () =>
+                        CreateGradingExtentLines(new JObject { ["designToposolidId"] = designId, ["viewId"] = slopeViewId }));
+
+                    var otherDesigns = allDesignIds.Where(id => id != designElementId).ToList();
+                    long sectionId = 0, isoId = 0;
+                    using (var transaction = new Transaction(doc, "建立比較剖面視圖"))
+                    {
+                        GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
+                        transaction.Start();
+                        sectionId = CreateSchemeSectionView(doc, schemeName, sectionStart, sectionEnd, otherDesigns)
+                            .Id.GetIdValue();
+                        var isolate = new List<ElementId> { designElementId, original.Id };
+                        foreach (var floorId in (record["FloorIds"] as JArray)?.Values<long>() ?? Enumerable.Empty<long>())
+                        {
+                            isolate.Add(new ElementId(checked((int)floorId)));
+                        }
+
+                        isoId = CreateSchemeSectionIsoView(doc, schemeName, sectionStart, sectionEnd, isolate)
+                            .Id.GetIdValue();
+                        transaction.Commit();
+                    }
+
+                    steps.Add("剖面×2");
+                    schemeColumns.Add((schemeName, new[] { view3dId, slopeViewId, sectionId, isoId }, steps));
+                }
+                catch (Exception ex)
+                {
+                    steps.Add($"失敗：{ex.Message}");
+                    schemeColumns.Add((schemeName, Array.Empty<long>(), steps));
+                }
+            }
+
+            var usable = schemeColumns.Where(c => c.ViewIds.Length == 4).ToList();
+            if (usable.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "沒有任何方案成功備妥四個視圖：" + string.Join("；",
+                        schemeColumns.Select(c => $"{c.Name}[{string.Join(",", c.Steps)}]")));
+            }
+
+            // 4. 建圖紙＋格局排版＋明細表（單一交易）
+            long sheetIdValue;
+            using (var transaction = new Transaction(doc, "建立方案總比較圖紙"))
+            {
+                GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
+                transaction.Start();
+                var sheet = ViewSheet.Create(doc, titleBlockId);
+                sheet.Name = UniqueSheetName(doc, "整地方案總比較");
+                sheet.SheetNumber = NextComparisonSheetNumber(doc);
+                sheetIdValue = sheet.Id.GetIdValue();
+                doc.Regenerate();
+
+                var titleBlockBox = new FilteredElementCollector(doc, sheet.Id)
+                    .OfCategory(BuiltInCategory.OST_TitleBlocks)
+                    .WhereElementIsNotElementType()
+                    .FirstElement()?.get_BoundingBox(sheet)
+                    ?? throw new InvalidOperationException("比較圖紙沒有圖框。");
+                var margin = UnitUtils.ConvertToInternalUnits(15, UnitTypeId.Millimeters);
+                var originX = titleBlockBox.Min.X + margin;
+                var topY = titleBlockBox.Max.Y - margin;
+                var width = (titleBlockBox.Max.X - titleBlockBox.Min.X) - (2 * margin);
+                var height = (titleBlockBox.Max.Y - titleBlockBox.Min.Y) - (2 * margin);
+                var gap = UnitUtils.ConvertToInternalUnits(8, UnitTypeId.Millimeters);
+                var labelWidth = UnitUtils.ConvertToInternalUnits(25, UnitTypeId.Millimeters);
+                var layout = SheetLayoutMath.ComputeComparisonGrid(width, height, usable.Count, gap, labelWidth);
+
+                string[] rowLabels = { "(a) 3D", "(b) 坡度", "(c) 剖面", "(c2) 剖立體", "(d) 明細" };
+                var textType = new FilteredElementCollector(doc).OfClass(typeof(TextNoteType))
+                    .FirstElementId();
+                for (var row = 0; row < layout.RowLabelCells.Count; row++)
+                {
+                    var cell = layout.RowLabelCells[row];
+                    TextNote.Create(doc, sheet.Id,
+                        new XYZ(originX + cell.X, topY - cell.Y - (cell.Height / 2), 0),
+                        rowLabels[row], textType);
+                }
+
+                for (var column = 0; column < usable.Count; column++)
+                {
+                    for (var row = 0; row < 4; row++)
+                    {
+                        var cell = layout.SchemeCells[row][column];
+                        var center = new XYZ(
+                            originX + cell.X + (cell.Width / 2),
+                            topY - cell.Y - (cell.Height / 2), 0);
+                        var viewElementId = new ElementId(checked((int)usable[column].ViewIds[row]));
+                        if (!Viewport.CanAddViewToSheet(doc, sheet.Id, viewElementId))
+                        {
+                            usable[column].Steps.Add($"第{row + 1}列視圖已在其他圖紙，略過");
+                            continue;
+                        }
+
+                        var viewport = Viewport.Create(doc, sheet.Id, viewElementId, center);
+                        if (doc.GetElement(viewElementId) is View placedView)
+                        {
+                            FitViewportToCell(doc, viewport, placedView, cell.Width, cell.Height, center);
+                        }
+                    }
+                }
+
+                var schedule = EnsureComparisonSchedule(doc);
+                PlaceScheduleOnSheet(doc, sheet, schedule,
+                    new XYZ(originX + layout.ScheduleCell.X, topY - layout.ScheduleCell.Y, 0));
+                transaction.Commit();
+            }
+
+            // 5. PDF
+            object pdf = null;
+            if (export)
+            {
+                try
+                {
+                    pdf = ExportSheetsPdf(new JObject
+                    {
+                        ["sheetIds"] = new JArray(new[] { sheetIdValue }),
+                        ["outputPath"] = parameters["outputPath"]?.Value<string>(),
+                        ["combine"] = true
+                    });
+                }
+                catch (Exception ex) { pdf = new { Success = false, Error = ex.Message }; }
+            }
+
+            return new
+            {
+                SheetId = sheetIdValue,
+                SchemeCount = usable.Count,
+                Schemes = schemeColumns.Select(c => new { c.Name, c.ViewIds, c.Steps }),
+                Pdf = pdf,
+                Message = $"方案總比較圖紙完成（{usable.Count} 欄）。"
+            };
+        }
+
+        /// <summary>找 A0 圖框：titleBlockId 參數優先；否則型別名或族名含「A0」者；找不到→引導。</summary>
+        private static ElementId ResolveA0TitleBlock(Document doc, JObject parameters)
+        {
+            var explicitId = parameters["titleBlockId"]?.Value<long?>() ?? 0;
+            if (explicitId > 0)
+            {
+                return new ElementId(checked((int)explicitId));
+            }
+
+            var a0 = new FilteredElementCollector(doc)
+                .OfClass(typeof(FamilySymbol))
+                .OfCategory(BuiltInCategory.OST_TitleBlocks)
+                .Cast<FamilySymbol>()
+                .FirstOrDefault(symbol =>
+                    symbol.Name.IndexOf("A0", StringComparison.OrdinalIgnoreCase) >= 0
+                    || symbol.FamilyName.IndexOf("A0", StringComparison.OrdinalIgnoreCase) >= 0);
+            return a0?.Id ?? throw new InvalidOperationException(
+                "模型沒有 A0 圖框；請載入 A0 公制圖框族群，或以 titleBlockId 指定圖框。");
+        }
+
+        /// <summary>比較圖紙編號 GRD-C01 起流水。</summary>
+        private static string NextComparisonSheetNumber(Document doc)
+        {
+            var numbers = new HashSet<string>(new FilteredElementCollector(doc)
+                .OfClass(typeof(ViewSheet)).Cast<ViewSheet>().Select(sheet => sheet.SheetNumber));
+            for (var index = 1; index < 100; index++)
+            {
+                var candidate = $"GRD-C{index:00}";
+                if (!numbers.Contains(candidate)) { return candidate; }
+            }
+
+            return $"GRD-C{Guid.NewGuid().ToString("N").Substring(0, 4)}";
+        }
+
+        // Task 7 佔位：實作於後續任務替換為完整刪除方案邏輯。
+        private object RemoveGradingScheme(JObject parameters)
+        {
+            throw new NotImplementedException("remove_grading_scheme 尚未實作");
+        }
     }
 }
 #endif
