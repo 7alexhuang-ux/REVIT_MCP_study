@@ -192,13 +192,13 @@ namespace RevitMCP.Commands
         }
     }
 
-    /// <summary>②方案總覽：非模態清單視窗（進度儀表板）。Task 9 前先以最小殼佔位。</summary>
+    /// <summary>②方案總覽：非模態清單視窗（進度儀表板）。</summary>
     [Transaction(TransactionMode.Manual)]
     public class SchemeOverviewCommand : IExternalCommand
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            TaskDialog.Show("方案總覽", "Task 9 實作中");
+            SchemeOverviewWindow.ShowOrActivate(commandData.Application);
             return Result.Succeeded;
         }
     }
