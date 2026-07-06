@@ -111,6 +111,24 @@ namespace RevitMCP.Commands
                 return data.ToString();
             }
         }
+
+        /// <summary>目前選取的摘要字串（對話框顯示用），如「✔ 地形 ×1、樓板 ×2」。</summary>
+        public static string DescribeSelection(UIDocument uiDoc)
+        {
+            var toposolids = 0;
+            var floors = 0;
+            if (uiDoc?.Document != null)
+            {
+                foreach (var id in uiDoc.Selection.GetElementIds())
+                {
+                    var element = uiDoc.Document.GetElement(id);
+                    if (element is Toposolid) { toposolids++; }
+                    else if (element is Floor) { floors++; }
+                }
+            }
+
+            return (toposolids >= 1 && floors >= 1 ? "✔" : "⚠") + $" 選取狀態：地形 ×{toposolids}、樓板 ×{floors}";
+        }
     }
 
     /// <summary>整地-投影直貼（footprint_only）：以選取地形＋樓板執行。</summary>
@@ -153,6 +171,46 @@ namespace RevitMCP.Commands
         {
             return GradingRibbonHelper.Run(commandData.Application, "create_grading_presentation",
                 new JObject { ["export"] = true }, "整地圖說一鍵出圖");
+        }
+    }
+
+    /// <summary>①新整地方案：對話框選模式/參數 → 執行並記錄一筆（重複按＝做下一個方案）。</summary>
+    [Transaction(TransactionMode.Manual)]
+    public class NewGradingSchemeCommand : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
+        {
+            var uiDoc = commandData.Application.ActiveUIDocument;
+            var selectionSummary = GradingRibbonHelper.DescribeSelection(uiDoc);
+            var dialog = new NewGradingSchemeDialog(selectionSummary);
+            if (dialog.ShowDialog() != true)
+            {
+                return Result.Cancelled;
+            }
+
+            return GradingRibbonHelper.RunGrade(commandData, dialog.Mode, dialog.ExtraParameters);
+        }
+    }
+
+    /// <summary>②方案總覽：非模態清單視窗（進度儀表板）。Task 9 前先以最小殼佔位。</summary>
+    [Transaction(TransactionMode.Manual)]
+    public class SchemeOverviewCommand : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
+        {
+            TaskDialog.Show("方案總覽", "Task 9 實作中");
+            return Result.Succeeded;
+        }
+    }
+
+    /// <summary>③比較出圖：登記簿全部方案 → C-00c 單張總比較圖紙＋PDF。</summary>
+    [Transaction(TransactionMode.Manual)]
+    public class GradingComparisonCommand : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
+        {
+            return GradingRibbonHelper.Run(
+                commandData.Application, "create_grading_comparison_sheet", new JObject(), "比較出圖");
         }
     }
 }

@@ -57,20 +57,20 @@ namespace RevitMCP
                 panel.AddItem(settingsButtonData);
 
 #if REVIT2024_OR_GREATER
-                // 整地圖說面板（Revit 2024+）：每個模式/步驟一顆按鈕，方便直接點選並看出有哪些模式。
+                // 整地圖說面板（Revit 2024+）：三鈕任務流＋成套圖（規格 2026-07-06 案乙）。
                 RibbonPanel gradingPanel = application.CreateRibbonPanel("整地圖說");
-                AddGradingButton(gradingPanel, assemblyPath, "GradeFootprint", "投影\n直貼",
-                    "RevitMCP.Commands.GradeFootprintCommand",
-                    "選取一片地形＋控制樓板後，以 footprint 直貼整地（理想值，垂直邊）");
-                AddGradingButton(gradingPanel, assemblyPath, "GradeOffset", "Offset\n外延",
-                    "RevitMCP.Commands.GradeOffsetCommand",
-                    "選取一片地形＋控制樓板後，以 offset 外延 5m 漸變整地");
-                AddGradingButton(gradingPanel, assemblyPath, "GradeSlope", "放坡\n1:2",
-                    "RevitMCP.Commands.GradeSlopeCommand",
-                    "選取一片地形＋控制樓板後，以坡度 1:2 放坡整地");
-                AddGradingButton(gradingPanel, assemblyPath, "GradingPresentation", "一鍵\n出圖",
+                AddGradingButton(gradingPanel, assemblyPath, "NewGradingScheme", "新整地\n方案…",
+                    "RevitMCP.Commands.NewGradingSchemeCommand",
+                    "選取一片地形＋控制樓板後，選模式（投影直貼/外延漸變/放坡銜接）與參數，執行並記錄一筆方案");
+                AddGradingButton(gradingPanel, assemblyPath, "SchemeOverview", "方案\n總覽",
+                    "RevitMCP.Commands.SchemeOverviewCommand",
+                    "檢視登記簿全部方案（數字/視圖/還原/刪除/匯出）");
+                AddGradingButton(gradingPanel, assemblyPath, "GradingComparison", "比較\n出圖",
+                    "RevitMCP.Commands.GradingComparisonCommand",
+                    "把全部方案排成 A0 單張總比較圖紙（3D/坡度/剖面/剖面立體/明細表）並匯 PDF");
+                AddGradingButton(gradingPanel, assemblyPath, "GradingPresentation", "方案\n成套圖",
                     "RevitMCP.Commands.GradingPresentationCommand",
-                    "對登記簿全部方案建圖說（熱區/坡度/範圍線/標高）並匯出 PDF");
+                    "對登記簿方案出一案一張成套圖說（方案定案後用）");
 #endif
 
                 // 初始化 ExternalEventManager (必須在 UI 執行緒建立)
