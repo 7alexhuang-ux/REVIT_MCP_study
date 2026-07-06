@@ -56,6 +56,23 @@ namespace RevitMCP
                 settingsButtonData.ToolTip = "開啟 MCP 設定視窗";
                 panel.AddItem(settingsButtonData);
 
+#if REVIT2024_OR_GREATER
+                // 整地圖說面板（Revit 2024+）：每個模式/步驟一顆按鈕，方便直接點選並看出有哪些模式。
+                RibbonPanel gradingPanel = application.CreateRibbonPanel("整地圖說");
+                AddGradingButton(gradingPanel, assemblyPath, "GradeFootprint", "投影\n直貼",
+                    "RevitMCP.Commands.GradeFootprintCommand",
+                    "選取一片地形＋控制樓板後，以 footprint 直貼整地（理想值，垂直邊）");
+                AddGradingButton(gradingPanel, assemblyPath, "GradeOffset", "Offset\n外延",
+                    "RevitMCP.Commands.GradeOffsetCommand",
+                    "選取一片地形＋控制樓板後，以 offset 外延 5m 漸變整地");
+                AddGradingButton(gradingPanel, assemblyPath, "GradeSlope", "放坡\n1:2",
+                    "RevitMCP.Commands.GradeSlopeCommand",
+                    "選取一片地形＋控制樓板後，以坡度 1:2 放坡整地");
+                AddGradingButton(gradingPanel, assemblyPath, "GradingPresentation", "一鍵\n出圖",
+                    "RevitMCP.Commands.GradingPresentationCommand",
+                    "對登記簿全部方案建圖說（熱區/坡度/範圍線/標高）並匯出 PDF");
+#endif
+
                 // 初始化 ExternalEventManager (必須在 UI 執行緒建立)
                 _ = ExternalEventManager.Instance;
 
@@ -79,6 +96,15 @@ namespace RevitMCP
                 return Result.Failed;
             }
         }
+
+#if REVIT2024_OR_GREATER
+        private static void AddGradingButton(
+            RibbonPanel panel, string assemblyPath, string name, string text, string className, string tooltip)
+        {
+            var buttonData = new PushButtonData(name, text, assemblyPath, className) { ToolTip = tooltip };
+            panel.AddItem(buttonData);
+        }
+#endif
 
         public Result OnShutdown(UIControlledApplication application)
         {

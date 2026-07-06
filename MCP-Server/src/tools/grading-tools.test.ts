@@ -116,9 +116,14 @@ test("整地工具只註冊於核准的 Profile", () => {
         "solve_balanced_elevation",
         "create_grading_scheme_view",
         "create_cutfill_heatmap",
+        "create_slope_heatmap",
+        "create_grading_extent_lines",
         "annotate_grading_scheme",
         "restore_grading_scheme",
         "export_earthwork_gridsheet",
+        "place_views_on_sheet",
+        "export_sheets_pdf",
+        "create_grading_presentation",
     ];
 
     try {

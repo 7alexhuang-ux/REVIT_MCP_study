@@ -104,3 +104,14 @@ docs/fork-audit/
 
 # Codex 隔離工作目錄
 .worktrees/
+
+# 測試專案建置產物
+MCP.Tests/bin/
+MCP.Tests/obj/
+
+# 各家 agent/工具本機目錄與暫存輸出
+.agents/
+.codex/
+.claude/worktrees/
+output/
+MCP-Server/scripts/*_result.json

@@ -152,6 +152,7 @@ namespace RevitMCP.Core
 
         private static string UniqueViewName(Document doc, string baseName)
         {
+            baseName = GradingNames.SanitizeElementName(baseName);
             var existingNames = new HashSet<string>(
                 new FilteredElementCollector(doc).OfClass(typeof(View)).Cast<View>().Select(v => v.Name));
             if (!existingNames.Contains(baseName))
@@ -288,6 +289,7 @@ namespace RevitMCP.Core
                     throw new InvalidOperationException("無法啟動建立挖填熱區圖交易。");
                 }
 
+                var wasLocked = UnlockViewForAnalysis(view);
                 var manager = SpatialFieldManager.GetSpatialFieldManager(view)
                     ?? SpatialFieldManager.CreateSpatialFieldManager(view, 1);
                 var schemaIndex = FindOrRegisterCutFillSchema(manager);
@@ -353,6 +355,7 @@ namespace RevitMCP.Core
                 }
 
                 ApplyCutFillDisplayStyle(doc, view);
+                RelockViewAfterAnalysis(view, wasLocked);
                 if (transaction.Commit() != TransactionStatus.Committed)
                 {
                     throw new InvalidOperationException("建立挖填熱區圖交易未能提交。");
@@ -369,6 +372,29 @@ namespace RevitMCP.Core
                 Message = $"挖填熱區圖已建立（{styledFaces} 個面、{totalPoints} 個取樣點；"
                     + "紅=挖、藍=填；AVF 僅為視覺化，土方量以登記簿為準）。"
             };
+        }
+
+        /// <summary>
+        /// 方案視圖以 SaveOrientationAndLock 鎖定，鎖定中的 3D 視圖會拒絕 AVF 相關修改；
+        /// AVF 動作前暫時解鎖，完成後以 RelockViewAfterAnalysis 恢復鎖定（同一交易內，失敗會整體回滾）。
+        /// </summary>
+        private static bool UnlockViewForAnalysis(View view)
+        {
+            if (view is View3D view3D && view3D.IsLocked)
+            {
+                view3D.Unlock();
+                return true;
+            }
+
+            return false;
+        }
+
+        private static void RelockViewAfterAnalysis(View view, bool wasLocked)
+        {
+            if (wasLocked && view is View3D view3D)
+            {
+                view3D.SaveOrientationAndLock();
+            }
         }
 
         private static IReadOnlyList<Face> CollectUpwardFaces(Toposolid toposolid, double minimumNormalZ)

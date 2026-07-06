@@ -39,6 +39,14 @@ namespace RevitMCP.Core.Grading
         // 底面法向量 Z 分量上限：-cos(15°)。允許至約 15 度（約 1:3.7）的斜板底面，仍排除側面與頂面。
         private const double BottomFaceNormalZMaximum = -0.965925826289068;
 
+        // 銜接帶控制環密度：直邊最大弦長 1 m、凸角圓弧最大角步距 15°（貼合距離場坡腳、消除三角網過衝）。
+        private static readonly double RingMaxChordFeet =
+            UnitUtils.ConvertToInternalUnits(1000.0, UnitTypeId.Millimeters);
+        private static readonly double RingArcMaxStepRadians = Math.PI / 12.0;
+        // 銜接帶徑向填充步距：於放坡帶寬度中間每 1.5 m 補一圈控制點，砍三角網徑向跨距（陡坡地包絡殘留）。
+        private static readonly double RadialFillStepFeet =
+            UnitUtils.ConvertToInternalUnits(1500.0, UnitTypeId.Millimeters);
+
         private static readonly Guid AssociationSchemaGuid =
             new Guid("9B4B16C7-4C9C-4B73-9D13-B44F88650D29");
 
@@ -503,16 +511,34 @@ namespace RevitMCP.Core.Grading
             IReadOnlyList<IReadOnlyList<XYZ>> transitionRings = null;
             if (settings.Mode != GradingMode.FootprintOnly)
             {
+                // 邊界點加入與邊界摺線已各觸發一次 doc.Regenerate()，line 429 擷取的 solids
+                // 快照對應的實體幾何在重生後已失效；footprint 模式在重生前就用完 solids（line 453），
+                // 故不受影響，但銜接帶取樣在重生後才使用，必須重新擷取設計副本的當前幾何。
+                // 此時尚未校準頂點（投影外仍為原地形高程），重新取樣到的地形 Z 與原設計一致。
+                IReadOnlyList<Solid> transitionSolids;
+                using (_timeline.Measure("銜接帶幾何重取"))
+                {
+                    transitionSolids = CollectSolids(design);
+                }
+
+                if (transitionSolids.Count == 0)
+                {
+                    throw new InvalidOperationException("重生後設計 Toposolid 沒有可用的實體幾何，無法建立銜接帶。");
+                }
+
+                IReadOnlyList<XYZ> bandFill;
                 using (_timeline.Measure("銜接帶外圈取樣"))
                 {
-                    transitionRings = BuildTransitionRings(
-                        solids, footprints, settings, xyTolerance, elevationTolerance,
+                    var built = BuildTransitionRings(
+                        transitionSolids, footprints, settings, xyTolerance, elevationTolerance,
                         rayBottomZ, rayTopZ, warnings);
+                    transitionRings = built.Rings;
+                    bandFill = built.BandFill;
                 }
 
                 var positionsAfterBoundary = CollectVertexPositions(editor);
                 var ringPoints = new List<XYZ>();
-                foreach (var candidate in transitionRings.SelectMany(ring => ring))
+                foreach (var candidate in transitionRings.SelectMany(ring => ring).Concat(bandFill))
                 {
                     if (HasNearbyXY(positionsAfterBoundary, candidate, xyTolerance)
                         || HasNearbyXY(ringPoints, candidate, xyTolerance))
@@ -1027,7 +1053,7 @@ namespace RevitMCP.Core.Grading
             return UnitUtils.ConvertToInternalUnits(meters, UnitTypeId.Meters);
         }
 
-        private IReadOnlyList<IReadOnlyList<XYZ>> BuildTransitionRings(
+        private (IReadOnlyList<IReadOnlyList<XYZ>> Rings, IReadOnlyList<XYZ> BandFill) BuildTransitionRings(
             IReadOnlyList<Solid> solids,
             IReadOnlyList<FloorFootprint> footprints,
             TransitionSettings settings,
@@ -1044,17 +1070,19 @@ namespace RevitMCP.Core.Grading
                 ? ToInternalMeters(settings.MaxExtensionMeters)
                 : 0.0;
             var rings = new List<IReadOnlyList<XYZ>>(footprints.Count);
+            var bandFill = new List<XYZ>();
             foreach (var footprint in footprints)
             {
                 var loop = footprint.OuterLoop;
-                var directions = Polygon2D.OutwardDirections(loop);
-                var ring = new List<XYZ>(loop.Count);
+                // 2026-07-05：改用「直邊細分＋凸角圓弧」密錨點取代每頂點單一角平分點，
+                // 讓控制環貼合距離場真實坡腳（凸角圓弧、凹角收斂），消除稀疏圈點造成的三角網過衝（offset 包絡失敗根因）。
+                var anchors = Polygon2D.DensifiedBoundaryWithCornerArcs(
+                    loop, RingMaxChordFeet, RingArcMaxStepRadians);
+                var ring = new List<XYZ>(anchors.Count);
                 var cappedCount = 0;
                 var maxResidualFeet = 0.0;
-                for (var index = 0; index < loop.Count; index++)
+                foreach (var (boundaryPoint, direction) in anchors)
                 {
-                    var boundaryPoint = loop[index];
-                    var direction = directions[index];
                     var boundaryBottomZ = footprint.BottomElevationAt(boundaryPoint.X, boundaryPoint.Y);
                     double extension;
                     if (settings.Mode == GradingMode.OffsetTransition)
@@ -1115,6 +1143,27 @@ namespace RevitMCP.Core.Grading
                     }
 
                     ring.Add(new XYZ(ringXY.X, ringXY.Y, terrainZ.Value));
+
+                    // 徑向填充：在此錨點的放坡帶寬度中間每 RadialFillStepFeet 補控制點，
+                    // 供距離場分類賦予漸變目標高程，砍除跨帶寬三角網鼓起（offset 陡坡地包絡殘留）。
+                    for (var fillDistance = RadialFillStepFeet;
+                        fillDistance < extension - (RadialFillStepFeet / 2.0);
+                        fillDistance += RadialFillStepFeet)
+                    {
+                        var fillXY = new Point2D(
+                            boundaryPoint.X + (direction.X * fillDistance),
+                            boundaryPoint.Y + (direction.Y * fillDistance));
+                        if (footprints.Any(other => Polygon2D.Contains(other.OuterLoop, fillXY, xyTolerance)))
+                        {
+                            continue;
+                        }
+
+                        var fillTerrainZ = IntersectTerrainTopZ(solids, fillXY, rayBottomZ, rayTopZ);
+                        if (fillTerrainZ.HasValue)
+                        {
+                            bandFill.Add(new XYZ(fillXY.X, fillXY.Y, fillTerrainZ.Value));
+                        }
+                    }
                 }
 
                 if (cappedCount > 0)
@@ -1128,7 +1177,7 @@ namespace RevitMCP.Core.Grading
                 rings.Add(ring);
             }
 
-            return rings;
+            return (rings, bandFill);
         }
 
         private static void DrawRingSplitLines(

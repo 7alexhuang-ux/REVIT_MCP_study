@@ -243,6 +243,50 @@ export const gradingTools: Tool[] = [
         },
     },
     {
+        name: "create_slope_heatmap",
+        description:
+            "坡度熱區圖：在方案視圖上以 AVF 為設計地形頂面依「台灣水土保持技術規範六級坡」著色（一級坡≤5%…六級坡>55%，離散色帶）。坡度由面法線求得；僅視覺化，坡度統計權威值以正式計算書為準。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                designToposolidId: {
+                    type: "integer",
+                    description: "方案的設計地形元素 ID",
+                },
+                viewId: {
+                    type: "integer",
+                    description: "要著色的視圖 ID；未提供時用方案記錄的 SchemeViewId（需先建方案視圖）",
+                },
+                sampleStepMeters: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    default: 2,
+                    description: "取樣網格步距（公尺）",
+                },
+            },
+            required: ["designToposolidId"],
+        },
+    },
+    {
+        name: "create_grading_extent_lines",
+        description:
+            "整地範圍線：在方案視圖建模型線環標示「動過地的範圍」。footprint 只畫樓板投影邊界；offset/slope 另畫外圈放坡外緣（坡腳線，圓角）。純標示，擾動面積以登記簿為準。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                designToposolidId: {
+                    type: "integer",
+                    description: "方案的設計地形元素 ID",
+                },
+                viewId: {
+                    type: "integer",
+                    description: "要畫範圍線的視圖 ID；未提供時用方案記錄的 SchemeViewId",
+                },
+            },
+            required: ["designToposolidId"],
+        },
+    },
+    {
         name: "annotate_grading_scheme",
         description:
             "整地方案標高標註：在鎖定 3D 方案視圖為控制樓板頂面（中心＋角點內縮 300mm）與設計地形 daylight 取樣點建立 Spot Elevation；逐點容錯並回報成敗數。",
@@ -314,6 +358,91 @@ export const gradingTools: Tool[] = [
                 },
             },
             required: ["designToposolidId"],
+        },
+    },
+    {
+        name: "place_views_on_sheet",
+        description:
+            "自動排圖：把多個視圖以格狀排上一張圖紙（依圖框可用區計算格位中心）。視圖已在其他圖紙者回報略過。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                sheetId: {
+                    type: "integer",
+                    description: "目標圖紙的元素 ID",
+                },
+                viewIds: {
+                    type: "array",
+                    items: { type: "integer" },
+                    minItems: 1,
+                    description: "要排上圖紙的視圖 ID 清單（依序填入格位）",
+                },
+                columns: {
+                    type: "integer",
+                    exclusiveMinimum: 0,
+                    description: "格欄數；未提供時依視圖數自動計算",
+                },
+                rows: {
+                    type: "integer",
+                    exclusiveMinimum: 0,
+                    description: "格列數；未提供時依視圖數自動計算",
+                },
+            },
+            required: ["sheetId", "viewIds"],
+        },
+    },
+    {
+        name: "export_sheets_pdf",
+        description:
+            "PDF 匯出：把指定圖紙以 PDFExportOptions 批次匯出（Revit 2022+）；預設合併為單一 PDF。環境受限時回報並可改用 Revit 內建列印。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                sheetIds: {
+                    type: "array",
+                    items: { type: "integer" },
+                    minItems: 1,
+                    description: "要匯出的圖紙元素 ID 清單",
+                },
+                outputPath: {
+                    type: "string",
+                    description: "輸出檔完整路徑（.pdf）；未提供時預設專案目錄＋時間戳檔名",
+                },
+                combine: {
+                    type: "boolean",
+                    default: true,
+                    description: "是否合併為單一 PDF（false＝逐張，各圖紙自動命名）",
+                },
+            },
+            required: ["sheetIds"],
+        },
+    },
+    {
+        name: "create_grading_presentation",
+        description:
+            "整地圖說一鍵出圖：對登記簿每個方案建方案視圖＋挖填熱區＋坡度熱區＋範圍線＋標高，排上帶圖框圖紙，批次匯出 PDF。逐方案逐步容錯。需模型已載入圖框。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                designToposolidIds: {
+                    type: "array",
+                    items: { type: "integer" },
+                    description: "只出這些方案的設計地形 ID；未提供時出登記簿全部方案",
+                },
+                titleBlockId: {
+                    type: "integer",
+                    description: "圖框類型 ID；未提供時取模型第一個可用圖框",
+                },
+                export: {
+                    type: "boolean",
+                    default: true,
+                    description: "是否於出圖後批次匯出 PDF",
+                },
+                outputPath: {
+                    type: "string",
+                    description: "PDF 輸出檔完整路徑；未提供時預設專案目錄＋時間戳檔名",
+                },
+            },
         },
     },
 ];

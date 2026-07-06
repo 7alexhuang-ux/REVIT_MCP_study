@@ -338,6 +338,12 @@ namespace RevitMCP.Core
                     case "get_viewport_map":
                         result = GetViewportMap();
                         break;
+                    case "place_views_on_sheet":
+                        result = PlaceViewsOnSheet(parameters);
+                        break;
+                    case "export_sheets_pdf":
+                        result = ExportSheetsPdf(parameters);
+                        break;
 
                     // === 詳圖元件模組 ===
                     case "get_detail_components":
@@ -459,6 +465,18 @@ namespace RevitMCP.Core
                         result = CreateCutfillHeatmap(parameters);
                         break;
 
+                    case "create_slope_heatmap":
+                        result = CreateSlopeHeatmap(parameters);
+                        break;
+
+                    case "create_grading_extent_lines":
+                        result = CreateGradingExtentLines(parameters);
+                        break;
+
+                    case "create_grading_presentation":
+                        result = CreateGradingPresentation(parameters);
+                        break;
+
                     case "annotate_grading_scheme":
                         result = AnnotateGradingScheme(parameters);
                         break;
@@ -485,6 +503,8 @@ namespace RevitMCP.Core
             }
             catch (Exception ex)
             {
+                // 完整堆疊落外掛日誌；回應僅帶訊息（實機除錯唯一的堆疊來源）。
+                Logger.Error($"命令 {request.CommandName} 執行失敗", ex);
                 return new RevitCommandResponse
                 {
                     Success = false,

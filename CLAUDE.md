@@ -34,7 +34,7 @@ These counts must be derived from source, not copied by memory.
 | Item | Current Count | Source of Truth |
 |---|---:|---|
 | Runtime MCP tools | 96 | `registerRevitTools()` from `MCP-Server/src/tools/index.ts` |
-| Domain SOP files | 45 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
+| Domain SOP files | 47 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
 | Claude skills | 22 | `.claude/skills/*/SKILL.md` |
 
 When these numbers change, update `CLAUDE.md`, `README.md`, `README.en.md`, `docs/DOCUMENT_AUDIENCE_INVENTORY.md`, and any public site copy that makes grand-total claims. Then run `scripts/verify-qaqc.ps1 -SkipBuild -SkipDeploy`.
@@ -273,6 +273,7 @@ Read the matching file before applying a workflow or calculation.
 | fire rating, fireproofing | `domain/fire-rating-check.md` |
 | floor area, FAR review, gross floor area | `domain/floor-area-review.md` |
 | floor slope, drainage slope, slab slope, 樓板坡度, 排水坡度, 洩水 | `domain/floor-slope-analysis.md` |
+| grading slope, slope class, 六級坡, 坡度分級, 坡度熱區, 宜林地, 加強保育地, 水保坡度 | `domain/grading-slope-classification.md` |
 | IFC, structural sync, imported structural framing | `domain/ifc-structural-sync.md` |
 | mechanical part, assembly, BIP, mechanical documentation | `domain/mechanical-part-doc.md` |
 | MEP clash, CSA clash, penetration, beam penetration | `domain/mep-csa-clash-detection.md` |
@@ -305,6 +306,7 @@ Meta and governance domain files:
 | Path maintenance QA | `domain/path-maintenance-qa.md` |
 | Session context guard | `domain/session-context-guard.md` |
 | Skill authoring standard | `domain/skill-authoring-standard.md` |
+| Domain flow visualization | `domain/domain-flow-visualization.md` |
 | Tool capability boundary | `domain/tool-capability-boundary.md` |
 
 ## Skills

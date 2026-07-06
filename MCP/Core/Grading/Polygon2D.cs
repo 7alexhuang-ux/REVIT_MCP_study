@@ -124,6 +124,99 @@ namespace RevitMCP.Core.Grading
             return directions;
         }
 
+        /// <summary>
+        /// 沿邊界產生密控制錨點：直邊依最大弦長細分（沿邊外法線），凸角補一串圓弧方向
+        /// （繞角點自入邊外法線掃至出邊外法線），凹角／直邊僅放單一角平分方向。
+        /// 每個錨點為 (基點, 外向單位向量)；放坡帶圈點 = 基點 + 外向 × 放坡距離，
+        /// 凸角諸方向共用頂點基點即形成圓角，貼合距離場真實坡腳。
+        /// </summary>
+        public static IReadOnlyList<(Point2D BasePoint, Point2D OutwardDir)> DensifiedBoundaryWithCornerArcs(
+            IReadOnlyList<Point2D> polygon,
+            double maxChord,
+            double maxArcStepRadians)
+        {
+            if (polygon == null || polygon.Count < 3)
+            {
+                throw new ArgumentException("多邊形至少需要三個頂點。", nameof(polygon));
+            }
+
+            var orientation = SignedArea(polygon) >= 0 ? 1.0 : -1.0;
+            var anchors = new List<(Point2D, Point2D)>();
+            var count = polygon.Count;
+            for (var index = 0; index < count; index++)
+            {
+                var previous = polygon[(index - 1 + count) % count];
+                var current = polygon[index];
+                var next = polygon[(index + 1) % count];
+                var incomingNormal = EdgeOutwardNormal(previous, current, orientation);
+                var outgoingNormal = EdgeOutwardNormal(current, next, orientation);
+
+                if (IsConvexVertex(previous, current, next, orientation))
+                {
+                    foreach (var direction in ArcDirections(incomingNormal, outgoingNormal, maxArcStepRadians))
+                    {
+                        anchors.Add((current, direction));
+                    }
+                }
+                else
+                {
+                    var sumX = incomingNormal.X + outgoingNormal.X;
+                    var sumY = incomingNormal.Y + outgoingNormal.Y;
+                    var length = Math.Sqrt((sumX * sumX) + (sumY * sumY));
+                    anchors.Add((current, length > 1e-12
+                        ? new Point2D(sumX / length, sumY / length)
+                        : outgoingNormal));
+                }
+
+                var edgeLength = Distance(current, next);
+                if (maxChord > 0 && edgeLength > maxChord)
+                {
+                    var segments = (int)Math.Ceiling(edgeLength / maxChord);
+                    for (var step = 1; step < segments; step++)
+                    {
+                        var t = (double)step / segments;
+                        var point = new Point2D(
+                            current.X + (t * (next.X - current.X)),
+                            current.Y + (t * (next.Y - current.Y)));
+                        anchors.Add((point, outgoingNormal));
+                    }
+                }
+            }
+
+            return anchors;
+        }
+
+        private static bool IsConvexVertex(Point2D previous, Point2D current, Point2D next, double orientation)
+        {
+            var incomingX = current.X - previous.X;
+            var incomingY = current.Y - previous.Y;
+            var outgoingX = next.X - current.X;
+            var outgoingY = next.Y - current.Y;
+            var cross = (incomingX * outgoingY) - (incomingY * outgoingX);
+            return cross * orientation > 1e-12;
+        }
+
+        private static IReadOnlyList<Point2D> ArcDirections(Point2D from, Point2D to, double maxArcStepRadians)
+        {
+            var dot = Math.Max(-1.0, Math.Min(1.0, (from.X * to.X) + (from.Y * to.Y)));
+            var cross = (from.X * to.Y) - (from.Y * to.X);
+            var angle = Math.Atan2(cross, dot);
+            var step = maxArcStepRadians > 0 ? maxArcStepRadians : Math.PI / 12.0;
+            var segments = Math.Max(1, (int)Math.Ceiling(Math.Abs(angle) / step));
+            var directions = new List<Point2D>(segments + 1);
+            for (var k = 0; k <= segments; k++)
+            {
+                var theta = angle * k / segments;
+                var cos = Math.Cos(theta);
+                var sin = Math.Sin(theta);
+                directions.Add(new Point2D(
+                    (from.X * cos) - (from.Y * sin),
+                    (from.X * sin) + (from.Y * cos)));
+            }
+
+            return directions;
+        }
+
         private static Point2D EdgeOutwardNormal(Point2D start, Point2D end, double orientation)
         {
             var edgeX = end.X - start.X;

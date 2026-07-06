@@ -131,6 +131,38 @@ namespace RevitMCP.Tests.Grading
             Assert.Less(directions[3].Y, 0);
         }
 
+        [Test]
+        public void DensifiedBoundaryWithCornerArcs_正方形凸角補圓弧且直邊細分()
+        {
+            var anchors = Polygon2D.DensifiedBoundaryWithCornerArcs(UnitSquare, 5.0, System.Math.PI / 4);
+
+            // 4 個 90° 凸角 ×（45° 步距→3 方向）+ 4 條長 10 的邊 ×（maxChord 5→1 中點）= 16。
+            Assert.AreEqual(16, anchors.Count);
+            foreach (var anchor in anchors)
+            {
+                var length = System.Math.Sqrt(
+                    (anchor.OutwardDir.X * anchor.OutwardDir.X) + (anchor.OutwardDir.Y * anchor.OutwardDir.Y));
+                Assert.AreEqual(1.0, length, 1e-9);
+            }
+        }
+
+        [Test]
+        public void DensifiedBoundaryWithCornerArcs_凸角圓弧方向由入邊法線掃至出邊法線()
+        {
+            // maxChord 100 > 邊長 10 → 無直邊中點；每角 3 方向 ×4 = 12。
+            var anchors = Polygon2D.DensifiedBoundaryWithCornerArcs(UnitSquare, 100.0, System.Math.PI / 4);
+            Assert.AreEqual(12, anchors.Count);
+            // 頂點 (0,0) 三方向：起 (-1,0)、中 (-√2/2,-√2/2)、止 (0,-1)。
+            Assert.AreEqual(0.0, anchors[0].BasePoint.X, 1e-9);
+            Assert.AreEqual(0.0, anchors[0].BasePoint.Y, 1e-9);
+            Assert.AreEqual(-1.0, anchors[0].OutwardDir.X, 1e-9);
+            Assert.AreEqual(0.0, anchors[0].OutwardDir.Y, 1e-9);
+            Assert.AreEqual(-System.Math.Sqrt(2) / 2, anchors[1].OutwardDir.X, 1e-9);
+            Assert.AreEqual(-System.Math.Sqrt(2) / 2, anchors[1].OutwardDir.Y, 1e-9);
+            Assert.AreEqual(0.0, anchors[2].OutwardDir.X, 1e-9);
+            Assert.AreEqual(-1.0, anchors[2].OutwardDir.Y, 1e-9);
+        }
+
         private static IReadOnlyList<Point2D> Rect(double minX, double minY, double maxX, double maxY)
         {
             return new[]
