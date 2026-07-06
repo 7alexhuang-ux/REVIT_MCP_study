@@ -48,6 +48,8 @@ namespace RevitMCP.Core
                 rows = Math.Max(1, (int)Math.Ceiling((double)viewIds.Count / columns));
             }
 
+            var fitToCell = parameters["fitToCell"]?.Value<bool?>() ?? true;
+
             // 可用區取圖框外框；無圖框時以 A1 橫幅預設。
             double minU, minV, maxU, maxV;
             var titleBlock = new FilteredElementCollector(doc, sheet.Id)
@@ -103,11 +105,18 @@ namespace RevitMCP.Core
                         }
 
                         var viewport = Viewport.Create(doc, sheet.Id, viewElementId, center);
+                        if (fitToCell && doc.GetElement(viewElementId) is View placedView)
+                        {
+                            FitViewportToCell(doc, viewport, placedView,
+                                (maxU - minU) / columns - margin, (maxV - minV) / rows - margin, center);
+                        }
+
                         successCount++;
                         placed.Add(new
                         {
                             ViewId = viewIds[index],
                             ViewportId = viewport.Id.GetIdValue(),
+                            Scale = (doc.GetElement(viewElementId) as View)?.Scale,
                             Success = true
                         });
                     }
@@ -128,6 +137,48 @@ namespace RevitMCP.Core
                 Placed = placed,
                 Message = $"已於圖紙排入 {successCount} 個視圖（{columns}×{rows} 格）。"
             };
+        }
+
+        /// <summary>
+        /// 依格框可用尺寸自動調整視圖比例並置中：量測 viewport 外框 → 需求縮放比 →
+        /// 視圖比例向上取標準比例 → 重新置中。圖表（Schedule）與透視視圖不適用，呼叫端排除。
+        /// 修正 2026-07-06 實機缺陷：排圖不設比例導致視圖互相疊壓。
+        /// </summary>
+        private static void FitViewportToCell(
+            Document doc, Viewport viewport, View view,
+            double cellWidthFeet, double cellHeightFeet, XYZ center)
+        {
+            if (view is View3D perspective && perspective.IsPerspective)
+            {
+                return; // 透視圖比例無意義，僅置中。
+            }
+
+            try
+            {
+                doc.Regenerate();
+                var outline = viewport.GetBoxOutline();
+                var outlineWidth = outline.MaximumPoint.X - outline.MinimumPoint.X;
+                var outlineHeight = outline.MaximumPoint.Y - outline.MinimumPoint.Y;
+                if (outlineWidth <= 1e-9 || outlineHeight <= 1e-9 || view.Scale <= 0)
+                {
+                    return;
+                }
+
+                var ratio = Math.Max(outlineWidth / cellWidthFeet, outlineHeight / cellHeightFeet);
+                var targetScale = RevitMCP.Core.Grading.SheetLayoutMath.SnapToStandardScale(view.Scale * ratio);
+                if (targetScale != view.Scale)
+                {
+                    view.Scale = targetScale;
+                    doc.Regenerate();
+                }
+
+                viewport.SetBoxCenter(center);
+            }
+            catch (Autodesk.Revit.Exceptions.ApplicationException)
+            {
+                // 個別視圖不支援改比例（例如鎖定狀態限制）時保持原樣，不讓整批失敗。
+                viewport.SetBoxCenter(center);
+            }
         }
 
         /// <summary>
