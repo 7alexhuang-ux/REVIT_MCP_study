@@ -49,6 +49,24 @@ namespace RevitMCP.Core
                 schemeName = $"方案{adapter.CountSchemeRecords(doc) + 1}";
             }
 
+            // V2.1（2026-07-07）：多方案須共用同一份原地形。若使用者選到的是某方案的成果地形
+            // （原地形被拆除隱藏而誤選），自動改用登記簿記的原地形當來源，避免方案疊加。
+            var sourceSummaries = RevitToposolidGradingAdapter.ReadSchemeRecords(doc)
+                .Select(JObject.Parse)
+                .Select(r => new SchemeSourceSummary(
+                    r.Value<long>("DesignToposolidId"),
+                    r.Value<long>("OriginalToposolidId"),
+                    r.Value<string>("SchemeName")))
+                .ToList();
+            var sourceResolution = GradingSourceResolver.Resolve(sourceSummaries, request.ToposolidId);
+            if (sourceResolution.Redirected)
+            {
+                warnings.Add(
+                    $"偵測到選取的是方案「{sourceResolution.RedirectedFromScheme}」的成果地形，" +
+                    $"已自動改用原地形（ID {sourceResolution.SourceId}）作為整地來源，確保各方案從同一份原地形出發。");
+                request.ToposolidId = sourceResolution.SourceId;
+            }
+
             Toposolid original;
             IReadOnlyList<Floor> floors;
             IReadOnlyList<FloorFootprint> footprints;
