@@ -78,6 +78,20 @@ test("Phase4 表現層工具存在且預設值正確", () => {
     assert.equal(exportProps.includeScreenshots.default, true);
 });
 
+test("V2 比較出圖與刪除方案工具存在且參數正確", () => {
+    const comparisonTool = gradingTools.find(item => item.name === "create_grading_comparison_sheet");
+    assert.ok(comparisonTool);
+    const comparisonProps = comparisonTool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(comparisonProps.export.default, true);
+    assert.equal(comparisonProps.designToposolidIds.type, "array");
+
+    const removeTool = gradingTools.find(item => item.name === "remove_grading_scheme");
+    assert.ok(removeTool);
+    assert.deepEqual(removeTool.inputSchema.required, ["designToposolidId", "confirm"]);
+    const removeProps = removeTool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(removeProps.confirm.type, "boolean");
+});
+
 test("平衡高程反求工具存在且預設值正確", () => {
     const tool = gradingTools.find(item => item.name === "solve_balanced_elevation");
     assert.ok(tool);
@@ -124,6 +138,8 @@ test("整地工具只註冊於核准的 Profile", () => {
         "place_views_on_sheet",
         "export_sheets_pdf",
         "create_grading_presentation",
+        "create_grading_comparison_sheet",
+        "remove_grading_scheme",
     ];
 
     try {

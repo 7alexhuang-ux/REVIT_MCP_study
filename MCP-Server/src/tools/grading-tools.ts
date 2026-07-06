@@ -445,4 +445,51 @@ export const gradingTools: Tool[] = [
             },
         },
     },
+    {
+        name: "create_grading_comparison_sheet",
+        description:
+            "整地方案總比較圖紙（C-00c）：一欄一方案（3D/坡度熱區/正剖面/剖面立體），底部方案比較明細表（挖方/填方/淨土方/挖填總量/最大挖深填高/擾動面積/鬆實方三本帳），A0 圖框單張輸出可匯 PDF。逐方案容錯。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                designToposolidIds: {
+                    type: "array",
+                    items: { type: "integer" },
+                    description: "只比較這些方案的設計地形 ID；未提供時取登記簿全部方案",
+                },
+                titleBlockId: {
+                    type: "integer",
+                    description: "A0 圖框類型 ID；未提供時自動找名稱含 A0 的圖框",
+                },
+                export: {
+                    type: "boolean",
+                    default: true,
+                    description: "是否於出圖後匯出 PDF",
+                },
+                outputPath: {
+                    type: "string",
+                    description: "PDF 輸出檔完整路徑；未提供時預設專案目錄+時間戳檔名",
+                },
+            },
+        },
+    },
+    {
+        name: "remove_grading_scheme",
+        description:
+            "刪除整地方案（破壞性，須 confirm=true）：刪設計地形與方案相關視圖、移除登記簿記錄；登記簿清空時解除原地形的拆除階段設定。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                designToposolidId: {
+                    type: "integer",
+                    description: "要刪除方案的設計地形元素 ID",
+                },
+                confirm: {
+                    type: "boolean",
+                    description: "破壞性操作確認，必須為 true",
+                },
+            },
+            required: ["designToposolidId", "confirm"],
+        },
+    },
 ];
