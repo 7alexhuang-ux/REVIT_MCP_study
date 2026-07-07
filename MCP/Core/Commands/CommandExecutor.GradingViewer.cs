@@ -60,19 +60,14 @@ namespace RevitMCP.Core
             {
                 GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
                 transaction.Start();
-                var view = EnsureTerrainReviewView(doc);
+                var view = EnsureTerrainReviewView(doc, _uiApp.ActiveUIDocument.ActiveView);
 
-                // 階段篩選設成「顯示拆除物件」，讓被拆除隱藏的原地形可見；
-                // 只影響拆除類元素，新建的樓板不受影響。優先取「完成後」(ByCategory 正常顯示)，退「全部顯示」。
-                var revealFilter = new FilteredElementCollector(doc)
-                    .OfClass(typeof(PhaseFilter)).Cast<PhaseFilter>()
-                    .Where(f => f.Name == "完成後" || f.Name == "Show Complete"
-                        || f.Name == "全部顯示" || f.Name == "Show All")
-                    .OrderBy(f => f.Name == "完成後" || f.Name == "Show Complete" ? 0 : 1)
-                    .FirstOrDefault();
-                if (revealFilter != null)
+                // 階段篩選設成「顯示拆除物件為正常色」，讓被拆除的原地形可見；只影響拆除類、不影響新建樓板。
+                // 修正 2026-07-07 實機缺陷：原本誤選「Show Complete」——該內建篩選其實「不顯示」拆除物件 → 原地形消失。
+                var revealFilter = EnsureRevealPhaseFilter(doc);
+                if (revealFilter != ElementId.InvalidElementId)
                 {
-                    view.get_Parameter(BuiltInParameter.VIEW_PHASE_FILTER)?.Set(revealFilter.Id);
+                    view.get_Parameter(BuiltInParameter.VIEW_PHASE_FILTER)?.Set(revealFilter);
                 }
 
                 foreach (var terrainId in allTerrains)
@@ -118,8 +113,11 @@ namespace RevitMCP.Core
             };
         }
 
-        /// <summary>取得（或建立）專用「整地檢視」等角 3D 視圖，以名稱前綴辨識、冪等重用。</summary>
-        private static View3D EnsureTerrainReviewView(Document doc)
+        /// <summary>
+        /// 取得（或建立）專用「整地檢視」3D 視圖：已存在（名稱前綴）即重用；否則**複製使用者目前的 3D 視圖**
+        /// 以繼承其表現法（避免「表現法差很多」），非 3D 則退回等角新視圖；關閉剖面框確保地形完整可見。
+        /// </summary>
+        private static View3D EnsureTerrainReviewView(Document doc, View activeView)
         {
             var existing = new FilteredElementCollector(doc)
                 .OfClass(typeof(View3D)).Cast<View3D>()
@@ -130,14 +128,68 @@ namespace RevitMCP.Core
                 return existing;
             }
 
-            var viewFamilyType = new FilteredElementCollector(doc)
-                .OfClass(typeof(ViewFamilyType)).Cast<ViewFamilyType>()
-                .FirstOrDefault(type => type.ViewFamily == ViewFamily.ThreeDimensional)
-                ?? throw new InvalidOperationException("找不到 3D 視圖類型。");
+            View3D reviewView = null;
+            if (activeView is View3D source && !source.IsTemplate
+                && source.ViewType == ViewType.ThreeD
+                && source.CanViewBeDuplicated(ViewDuplicateOption.Duplicate))
+            {
+                var duplicateId = source.Duplicate(ViewDuplicateOption.Duplicate);
+                reviewView = doc.GetElement(duplicateId) as View3D;
+            }
 
-            var view = View3D.CreateIsometric(doc, viewFamilyType.Id);
-            view.Name = $"{TerrainReviewViewPrefix}｜（未選）";
-            return view;
+            if (reviewView == null)
+            {
+                var viewFamilyType = new FilteredElementCollector(doc)
+                    .OfClass(typeof(ViewFamilyType)).Cast<ViewFamilyType>()
+                    .FirstOrDefault(type => type.ViewFamily == ViewFamily.ThreeDimensional)
+                    ?? throw new InvalidOperationException("找不到 3D 視圖類型。");
+                reviewView = View3D.CreateIsometric(doc, viewFamilyType.Id);
+            }
+
+            if (reviewView.IsSectionBoxActive)
+            {
+                reviewView.IsSectionBoxActive = false; // 避免剖面框裁掉地形
+            }
+
+            reviewView.Name = $"{TerrainReviewViewPrefix}｜（未選）";
+            return reviewView;
+        }
+
+        /// <summary>
+        /// 取得（或建立）「顯示拆除物件為正常色」的階段篩選，讓被拆除的原地形能正常顯示。
+        /// 內建「Show Complete/完成後」會「不顯示」拆除物件（原地形消失的根因），故不可用；
+        /// 優先自建全 ByCategory 篩選，API 不支援時退回內建「Show All/全部顯示」（拆除呈半色調，仍可見）。
+        /// </summary>
+        private static ElementId EnsureRevealPhaseFilter(Document doc)
+        {
+            const string filterName = "整地-原地形顯示";
+            var existing = new FilteredElementCollector(doc)
+                .OfClass(typeof(PhaseFilter)).Cast<PhaseFilter>()
+                .FirstOrDefault(filter => filter.Name == filterName);
+            if (existing != null)
+            {
+                return existing.Id;
+            }
+
+            try
+            {
+                var created = PhaseFilter.Create(doc, filterName);
+                // 四種狀態一律「ShowByCategory（正常色）」；關鍵是拆除也正常顯示 → 原地形看得到。
+                created.SetPhaseStatusPresentation(ElementOnPhaseStatus.New, PhaseStatusPresentation.ShowByCategory);
+                created.SetPhaseStatusPresentation(ElementOnPhaseStatus.Existing, PhaseStatusPresentation.ShowByCategory);
+                created.SetPhaseStatusPresentation(ElementOnPhaseStatus.Demolished, PhaseStatusPresentation.ShowByCategory);
+                created.SetPhaseStatusPresentation(ElementOnPhaseStatus.Temporary, PhaseStatusPresentation.ShowByCategory);
+                return created.Id;
+            }
+            catch
+            {
+                var showAll = new FilteredElementCollector(doc)
+                    .OfClass(typeof(PhaseFilter)).Cast<PhaseFilter>()
+                    .FirstOrDefault(filter => filter.Name == "全部顯示" || filter.Name == "Show All"
+                        || filter.Name.IndexOf("全部", StringComparison.Ordinal) >= 0
+                        || filter.Name.IndexOf("All", StringComparison.OrdinalIgnoreCase) >= 0);
+                return showAll?.Id ?? ElementId.InvalidElementId;
+            }
         }
     }
 }
