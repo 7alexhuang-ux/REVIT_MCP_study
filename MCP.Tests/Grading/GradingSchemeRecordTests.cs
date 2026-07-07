@@ -7,14 +7,16 @@ namespace RevitMCP.Tests.Grading
     public class GradingSchemeRecordTests
     {
         [Test]
-        public void 記錄模型_預設SchemaVersion為3()
+        public void 記錄模型_預設SchemaVersion為4()
         {
-            // v2 加鬆實方 Ledger；v3 加方案視圖/截圖與樓板高程偏移（還原依據）。
+            // v2 加鬆實方 Ledger；v3 加方案視圖/截圖與樓板高程偏移（還原依據）；
+            // v4 加邊坡率政策快照 EdgePolicies（V3-S2 逐邊坡率）。
             var record = new GradingSchemeRecord();
-            Assert.AreEqual(3, record.SchemaVersion);
+            Assert.AreEqual(4, record.SchemaVersion);
             Assert.IsNull(record.Ledger);
             Assert.IsNull(record.SchemeViewId);
             Assert.IsNull(record.ScreenshotPath);
+            Assert.IsNull(record.EdgePolicies);
             Assert.IsNull(new FloorMetric().HeightOffsetMeters);
         }
 
