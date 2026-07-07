@@ -22,4 +22,10 @@
     <PackageReference Include="ClosedXML" Version="0.102.3" />
   </ItemGroup>
 
+  <!-- 整地圖說 ribbon 色磚 Badge 圖示（嵌入組件，讀取見 Application.LoadGradingIcon）。 -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\icons\*_16.png" />
+    <EmbeddedResource Include="Resources\icons\*_32.png" />
+  </ItemGroup>
+
 </Project>

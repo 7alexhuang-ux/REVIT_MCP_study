@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Autodesk.Revit.UI;
 using System.Reflection;
 using RevitMCP.Core;
@@ -61,19 +62,24 @@ namespace RevitMCP
                 RibbonPanel gradingPanel = application.CreateRibbonPanel("整地圖說");
                 AddGradingButton(gradingPanel, assemblyPath, "NewGradingScheme", "新整地\n方案…",
                     "RevitMCP.Commands.NewGradingSchemeCommand",
-                    "選取一片地形＋控制樓板後，選模式（投影直貼/外延漸變/放坡銜接）與參數，執行並記錄一筆方案");
+                    "選取一片地形＋控制樓板後，選模式（投影直貼/外延漸變/放坡銜接）與參數，執行並記錄一筆方案",
+                    "new");
                 AddGradingButton(gradingPanel, assemblyPath, "SchemeOverview", "方案\n總覽",
                     "RevitMCP.Commands.SchemeOverviewCommand",
-                    "檢視登記簿全部方案（數字/視圖/還原/刪除/匯出）");
+                    "檢視登記簿全部方案（數字/視圖/還原/刪除/匯出）",
+                    "overview");
                 AddGradingButton(gradingPanel, assemblyPath, "GradingTerrainView", "整地\n檢視",
                     "RevitMCP.Commands.GradingTerrainViewCommand",
-                    "選單挑「原地形/某方案」→ 在專用視圖顯示（保留樓板），視圖標題顯示編號＋名稱");
+                    "選單挑「原地形/某方案」→ 在專用視圖顯示（保留樓板），視圖標題顯示編號＋名稱",
+                    "view");
                 AddGradingButton(gradingPanel, assemblyPath, "GradingComparison", "比較\n出圖",
                     "RevitMCP.Commands.GradingComparisonCommand",
-                    "把全部方案排成 A0 單張總比較圖紙（3D/坡度/剖面/剖面立體/明細表）並匯 PDF");
+                    "把全部方案排成 A0 單張總比較圖紙（3D/坡度/剖面/剖面立體/明細表）並匯 PDF",
+                    "compare");
                 AddGradingButton(gradingPanel, assemblyPath, "GradingPresentation", "方案\n成套圖",
                     "RevitMCP.Commands.GradingPresentationCommand",
-                    "對登記簿方案出一案一張成套圖說（方案定案後用）");
+                    "對登記簿方案出一案一張成套圖說（方案定案後用）",
+                    "set");
 #endif
 
                 // 初始化 ExternalEventManager (必須在 UI 執行緒建立)
@@ -102,10 +108,44 @@ namespace RevitMCP
 
 #if REVIT2024_OR_GREATER
         private static void AddGradingButton(
-            RibbonPanel panel, string assemblyPath, string name, string text, string className, string tooltip)
+            RibbonPanel panel, string assemblyPath, string name, string text, string className,
+            string tooltip, string iconKey)
         {
             var buttonData = new PushButtonData(name, text, assemblyPath, className) { ToolTip = tooltip };
+            var large = LoadGradingIcon(iconKey + "_32.png");
+            var small = LoadGradingIcon(iconKey + "_16.png");
+            if (large != null) { buttonData.LargeImage = large; }
+            if (small != null) { buttonData.Image = small; }
             panel.AddItem(buttonData);
+        }
+
+        /// <summary>從嵌入資源載入 ribbon 色磚圖示（Resources/icons/*.png）；找不到回 null（退回純文字，不影響按鈕）。</summary>
+        private static System.Windows.Media.ImageSource LoadGradingIcon(string fileName)
+        {
+            try
+            {
+                var assembly = Assembly.GetExecutingAssembly();
+                var resourceName = assembly.GetManifestResourceNames()
+                    .FirstOrDefault(name => name.EndsWith(".icons." + fileName, StringComparison.OrdinalIgnoreCase)
+                        || name.EndsWith("." + fileName, StringComparison.OrdinalIgnoreCase));
+                if (resourceName == null) { return null; }
+
+                using (var stream = assembly.GetManifestResourceStream(resourceName))
+                {
+                    if (stream == null) { return null; }
+                    var image = new System.Windows.Media.Imaging.BitmapImage();
+                    image.BeginInit();
+                    image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                    image.StreamSource = stream;
+                    image.EndInit();
+                    image.Freeze();
+                    return image;
+                }
+            }
+            catch
+            {
+                return null;
+            }
         }
 #endif
 
