@@ -36,5 +36,15 @@ namespace RevitMCP.Tests.Grading
         {
             Assert.That(GradingNames.SanitizeElementName(null), Is.EqualTo(string.Empty));
         }
+
+        [Test]
+        public void Sanitize_TerrainReviewViewTitle_KeepsFullWidthSeparatorsReplacesColon()
+        {
+            // 實機教訓（2026-07-07）：整地檢視器視圖標題未消毒，方案名「坡道整地-南邊1:12」
+            // 的半形冒號使 view.Name 直接丟 prohibited characters；全形「｜」「：」為合法字元須保留。
+            Assert.That(
+                GradingNames.SanitizeElementName("整地檢視｜方案1：坡道整地-南邊1:12"),
+                Is.EqualTo("整地檢視｜方案1：坡道整地-南邊1-12"));
+        }
     }
 }

@@ -90,7 +90,8 @@ namespace RevitMCP.Core
                     }
                 }
 
-                var desired = $"{TerrainReviewViewPrefix}｜{label}";
+                // 方案名可含 Revit 禁字（如「1:12」的冒號），視圖改名前必過消毒，否則整個檢視器炸掉。
+                var desired = GradingNames.SanitizeElementName($"{TerrainReviewViewPrefix}｜{label}");
                 var clash = new FilteredElementCollector(doc).OfClass(typeof(View)).Cast<View>()
                     .Any(candidate => candidate.Id != view.Id && candidate.Name == desired);
                 view.Name = clash ? $"{desired} ({view.Id.GetIdValue()})" : desired;

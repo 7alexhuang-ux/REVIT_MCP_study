@@ -184,6 +184,16 @@ namespace RevitMCP.Core.Grading
             }
 
             var design = copiedToposolids[0];
+
+            // 複製 Toposolid 時 Revit 會連帶複製其子分割（Sub-Division），且複製品不在 CopyElement
+            // 回傳清單中（隱式相依複製）；留在設計副本上會每放坡一次多一份、污染模型與整地檢視，
+            // 故取得副本後一律刪除。原地形自身的子分割不受影響。
+            var copiedSubDivisionIds = design.GetSubDivisionIds();
+            if (copiedSubDivisionIds != null && copiedSubDivisionIds.Count > 0)
+            {
+                doc.Delete(copiedSubDivisionIds);
+            }
+
             var designCreated = RequirePhaseParameter(design, BuiltInParameter.PHASE_CREATED, "建立階段");
             var designDemolished = RequirePhaseParameter(design, BuiltInParameter.PHASE_DEMOLISHED, "拆除階段");
             SetPhaseParameter(designDemolished, ElementId.InvalidElementId, "設計 Toposolid 拆除階段");
@@ -727,7 +737,7 @@ namespace RevitMCP.Core.Grading
                 using (_timeline.Measure("銜接帶包絡驗收"))
                 {
                     VerifyTransitionBand(
-                        original, design, footprints, settings,
+                        original, design, footprints, settings, rateFields,
                         elevationTolerance, xyTolerance, rayBottomZ, rayTopZ);
                 }
             }
@@ -1297,6 +1307,7 @@ namespace RevitMCP.Core.Grading
             Toposolid design,
             IReadOnlyList<FloorFootprint> footprints,
             TransitionSettings settings,
+            IReadOnlyList<BoundaryRateField> rateFields,
             double elevationTolerance,
             double xyTolerance,
             double rayBottomZ,
@@ -1316,8 +1327,9 @@ namespace RevitMCP.Core.Grading
             var bandWidth = ToInternalMeters(settings.Mode == GradingMode.OffsetTransition
                 ? settings.OffsetDistanceMeters
                 : settings.MaxExtensionMeters);
-            foreach (var footprint in footprints)
+            for (var footprintIndex = 0; footprintIndex < footprints.Count; footprintIndex++)
             {
+                var footprint = footprints[footprintIndex];
                 var loop = footprint.OuterLoop;
                 var minX = double.MaxValue;
                 var minY = double.MaxValue;
@@ -1357,8 +1369,12 @@ namespace RevitMCP.Core.Grading
                         var boundaryBottomZ = footprint.BottomElevationAt(boundaryPoint.X, boundaryPoint.Y);
                         if (settings.Mode == GradingMode.SlopeTransition)
                         {
+                            // V3-S2：貼合判定用該取樣點最近邊界位置的生效坡率（逐邊政策＋角點混坡），
+                            // 與放坡寫入端同一個坡率場；用預設坡率會在例外邊誤判帶內外。
+                            var fieldRate = rateFields?[footprintIndex]?.RateAt(boundaryPoint)
+                                ?? settings.RunPerRise;
                             var targetZ = TransitionGeometry.SlopeTargetZ(
-                                boundaryBottomZ, terrainZ.Value, distance, settings.RunPerRise);
+                                boundaryBottomZ, terrainZ.Value, distance, fieldRate);
                             if (Math.Abs(targetZ - terrainZ.Value) <= elevationTolerance)
                             {
                                 continue; // 帶外：放坡已在此距離前貼合地形。
