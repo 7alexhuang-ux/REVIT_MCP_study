@@ -21,5 +21,8 @@
     <Compile Include="..\MCP\Core\Grading\GradingNames.cs" Link="Core\Grading\GradingNames.cs" Condition="Exists('..\MCP\Core\Grading\GradingNames.cs')" />
     <Compile Include="..\MCP\Core\Grading\SheetLayoutMath.cs" Link="Core\Grading\SheetLayoutMath.cs" Condition="Exists('..\MCP\Core\Grading\SheetLayoutMath.cs')" />
     <Compile Include="..\MCP\Core\Grading\GradingSourceResolver.cs" Link="Core\Grading\GradingSourceResolver.cs" Condition="Exists('..\MCP\Core\Grading\GradingSourceResolver.cs')" />
+    <Compile Include="..\MCP\Core\Grading\EdgeSlopePolicies.cs" Link="Core\Grading\EdgeSlopePolicies.cs" Condition="Exists('..\MCP\Core\Grading\EdgeSlopePolicies.cs')" />
+    <Compile Include="..\MCP\Core\Grading\BoundaryRateField.cs" Link="Core\Grading\BoundaryRateField.cs" Condition="Exists('..\MCP\Core\Grading\BoundaryRateField.cs')" />
+    <Compile Include="..\MCP\Core\Grading\SlopedPlaneMath.cs" Link="Core\Grading\SlopedPlaneMath.cs" Condition="Exists('..\MCP\Core\Grading\SlopedPlaneMath.cs')" />
   </ItemGroup>
 </Project>

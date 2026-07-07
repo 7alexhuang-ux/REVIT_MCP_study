@@ -63,6 +63,15 @@ namespace RevitMCP.Core.Grading
             IReadOnlyList<Point2D> polygon,
             Point2D point)
         {
+            var detailed = NearestBoundaryPointDetailed(polygon, point);
+            return (detailed.Point, detailed.Distance);
+        }
+
+        /// <summary>最近邊界點的完整資訊：點、距離、所屬邊 index（頂點 i→i+1）、邊上參數 t∈[0,1]。</summary>
+        public static (Point2D Point, double Distance, int EdgeIndex, double T) NearestBoundaryPointDetailed(
+            IReadOnlyList<Point2D> polygon,
+            Point2D point)
+        {
             if (polygon == null || polygon.Count < 2)
             {
                 throw new ArgumentException("多邊形至少需要兩個頂點。", nameof(polygon));
@@ -70,6 +79,8 @@ namespace RevitMCP.Core.Grading
 
             var best = polygon[0];
             var bestDistanceSquared = double.MaxValue;
+            var bestEdgeIndex = 0;
+            var bestT = 0.0;
             for (var index = 0; index < polygon.Count; index++)
             {
                 var start = polygon[index];
@@ -90,10 +101,12 @@ namespace RevitMCP.Core.Grading
                 {
                     bestDistanceSquared = distanceSquared;
                     best = candidate;
+                    bestEdgeIndex = index;
+                    bestT = t;
                 }
             }
 
-            return (best, Math.Sqrt(bestDistanceSquared));
+            return (best, Math.Sqrt(bestDistanceSquared), bestEdgeIndex, bestT);
         }
 
         public static IReadOnlyList<Point2D> OutwardDirections(IReadOnlyList<Point2D> polygon)
