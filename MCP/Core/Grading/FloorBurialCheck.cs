@@ -59,5 +59,32 @@ namespace RevitMCP.Core.Grading
             var coveredBefore = originalTerrainZ > floorBottomZ + tolerance;
             return coveredBefore ? fieldTargetZ : Math.Min(fieldTargetZ, floorBottomZ);
         }
+
+        /// <summary>
+        /// 連續放坡（使用者裁決 2026-07-08：壓蓋板緣不要高差）：
+        /// 任一取樣點「原本外露（原地形未高於板底）且距離場目標會蓋過板底」→ 該板應自動納入控制樓板，
+        /// 讓地形沿板底通過、於板緣接續放坡。距離場目標低於板底（高架板）或原本就埋者不納入。
+        /// </summary>
+        public static bool ShouldAutoInclude(
+            IEnumerable<(double FloorBottomZ, double OriginalZ, double FieldTargetZ)> samples,
+            double tolerance)
+        {
+            if (tolerance < 0)
+                throw new ArgumentOutOfRangeException(nameof(tolerance), "覆蓋判定門檻不可為負。");
+            if (samples == null)
+                throw new ArgumentNullException(nameof(samples));
+
+            foreach (var (floorBottomZ, originalZ, fieldTargetZ) in samples)
+            {
+                var wouldCover = fieldTargetZ > floorBottomZ + tolerance;
+                var coveredBefore = originalZ > floorBottomZ + tolerance;
+                if (wouldCover && !coveredBefore)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 }

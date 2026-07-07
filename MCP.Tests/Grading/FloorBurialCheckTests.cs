@@ -129,5 +129,58 @@ namespace RevitMCP.Tests.Grading
             Assert.Throws<System.ArgumentOutOfRangeException>(() =>
                 FloorBurialCheck.CapTargetZ(1.0, 0.0, 2.0, -0.01));
         }
+
+        // ---- ShouldAutoInclude：連續放坡（使用者裁決 2026-07-08：壓蓋板緣不要高差）----
+        // 會被放坡覆蓋的「外露」樓板 → 自動納入控制樓板，地形沿板底通過、板緣接續放坡。
+
+        [Test]
+        public void ShouldAutoInclude_ExposedFloorCoveredByField_True()
+        {
+            // 坡道情境：板底 2.43、原地形 0.5（外露）、距離場目標 2.81（會覆蓋）。
+            Assert.That(
+                FloorBurialCheck.ShouldAutoInclude(
+                    new[] { (FloorBottomZ: 2.43, OriginalZ: 0.5, FieldTargetZ: 2.81) }, Tolerance),
+                Is.True);
+        }
+
+        [Test]
+        public void ShouldAutoInclude_FieldStaysBelowFloorBottom_False()
+        {
+            // 高架板情境：距離場目標低於板底 → 不會覆蓋，也絕不可為了貼板底把地形抬高。
+            Assert.That(
+                FloorBurialCheck.ShouldAutoInclude(
+                    new[] { (FloorBottomZ: 5.0, OriginalZ: 0.5, FieldTargetZ: 2.0) }, Tolerance),
+                Is.False);
+        }
+
+        [Test]
+        public void ShouldAutoInclude_FloorAlreadyEmbedded_False()
+        {
+            // 地下室情境：原地形已高於板底 → 屬既有覆土，不納入（避免整地把它挖開）。
+            Assert.That(
+                FloorBurialCheck.ShouldAutoInclude(
+                    new[] { (FloorBottomZ: 0.8, OriginalZ: 3.0, FieldTargetZ: 2.5) }, Tolerance),
+                Is.False);
+        }
+
+        [Test]
+        public void ShouldAutoInclude_AnyExposedCoveredSample_True()
+        {
+            var samples = new[]
+            {
+                (FloorBottomZ: 5.0, OriginalZ: 0.5, FieldTargetZ: 2.0),   // 高架段：不覆蓋
+                (FloorBottomZ: 2.43, OriginalZ: 0.5, FieldTargetZ: 2.81), // 覆蓋段：觸發
+            };
+            Assert.That(FloorBurialCheck.ShouldAutoInclude(samples, Tolerance), Is.True);
+        }
+
+        [Test]
+        public void ShouldAutoInclude_EmptySamples_False()
+        {
+            Assert.That(
+                FloorBurialCheck.ShouldAutoInclude(
+                    System.Array.Empty<(double, double, double)>(), Tolerance),
+                Is.False);
+        }
     }
 }

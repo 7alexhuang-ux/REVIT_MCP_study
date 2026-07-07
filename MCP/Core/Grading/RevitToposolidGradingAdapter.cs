@@ -433,6 +433,18 @@ namespace RevitMCP.Core.Grading
                 EnsureNoConflictingOverlaps(footprints, xyTolerance, elevationTolerance);
             }
 
+            // 連續放坡（使用者裁決 2026-07-08：壓蓋板緣不要高差）：放坡帶內「會被覆蓋的外露非控制樓板」
+            // 自動納入控制樓板——地形沿板底通過、於板緣接續放坡；投影重疊衝突或底面抽取失敗者
+            // 退回帶頂點壓蓋保護（見銜接帶頂點分類）。
+            if (settings.Mode != GradingMode.FootprintOnly)
+            {
+                using (_timeline.Measure("鄰接樓板自動納入"))
+                {
+                    footprints = AutoIncludeCoveredFloors(
+                        doc, design, footprints, settings, xyTolerance, elevationTolerance, warnings);
+                }
+            }
+
             // V3-S2 逐邊坡率：每片板的政策匹配到當前輪廓 → 邊界坡率場（無政策＝null，行為與單一坡率一致）。
             var rateFields = BuildBoundaryRateFields(footprints, settings, warnings);
 
@@ -1364,6 +1376,141 @@ namespace RevitMCP.Core.Grading
             }
 
             return (minX - bandWidth, minY - bandWidth, maxX + bandWidth, maxY + bandWidth);
+        }
+
+        /// <summary>
+        /// 連續放坡：迭代發現「會被距離場覆蓋的外露非控制樓板」並納入控制樓板清單。
+        /// 每輪以當前清單重建坡率場與候選集（新納入樓板的放坡帶可能再覆蓋更外圍的樓板），
+        /// 至無新增或達輪數上限為止；與既有控制板投影重疊衝突者跳過（退回帶頂點壓蓋保護）。
+        /// </summary>
+        private static IReadOnlyList<FloorFootprint> AutoIncludeCoveredFloors(
+            Document doc,
+            Toposolid design,
+            IReadOnlyList<FloorFootprint> footprints,
+            TransitionSettings settings,
+            double xyTolerance,
+            double elevationTolerance,
+            ICollection<string> warnings)
+        {
+            var terrainSolids = CollectSolids(design);
+            var boundingBox = design.get_BoundingBox(null);
+            if (terrainSolids.Count == 0 || boundingBox == null)
+            {
+                return footprints; // 拿不到幾何就不擴充；覆蓋風險由壓蓋與告警把關。
+            }
+
+            var rayBottomZ = boundingBox.Min.Z - 10.0;
+            var rayTopZ = boundingBox.Max.Z + 10.0;
+            var bandWidth = ToInternalMeters(settings.Mode == GradingMode.OffsetTransition
+                ? settings.OffsetDistanceMeters
+                : settings.MaxExtensionMeters);
+            var offsetWidthFeet = settings.Mode == GradingMode.OffsetTransition
+                ? ToInternalMeters(settings.OffsetDistanceMeters)
+                : 0.0;
+            var sampleStep = UnitUtils.ConvertToInternalUnits(
+                BurialSampleStepMillimeters, UnitTypeId.Millimeters);
+            var tolerance = UnitUtils.ConvertToInternalUnits(
+                BurialToleranceMillimeters, UnitTypeId.Millimeters);
+
+            var working = footprints.ToList();
+            const int maxRounds = 5;
+            for (var round = 0; round < maxRounds; round++)
+            {
+                // 政策匹配警告只在正式建場（ApplyGrading 本體）時記；發現階段用暫存清單避免重複。
+                var probeWarnings = new List<string>();
+                var rateFields = BuildBoundaryRateFields(working, settings, probeWarnings);
+                var candidates = CollectCapFloorFootprints(doc, working, bandWidth);
+                var added = false;
+                foreach (var candidate in candidates)
+                {
+                    var samples = new List<(double FloorBottomZ, double OriginalZ, double FieldTargetZ)>();
+                    var extent = ComputeDisturbedExtent(new[] { candidate }, 0.0);
+                    for (var x = extent.MinX + (sampleStep / 2); x <= extent.MaxX; x += sampleStep)
+                    {
+                        for (var y = extent.MinY + (sampleStep / 2); y <= extent.MaxY; y += sampleStep)
+                        {
+                            var sample = new Point2D(x, y);
+                            if (!Polygon2D.Contains(candidate.OuterLoop, sample, xyTolerance))
+                            {
+                                continue;
+                            }
+
+                            var originalZ = IntersectTerrainTopZ(
+                                terrainSolids, sample, rayBottomZ, rayTopZ);
+                            if (!originalZ.HasValue)
+                            {
+                                continue; // 規則 7：超出地形不處理。
+                            }
+
+                            var nearestDistance = double.MaxValue;
+                            var nearestIndex = -1;
+                            var nearestBoundary = default(Point2D);
+                            for (var index = 0; index < working.Count; index++)
+                            {
+                                var (boundaryPoint, distance) = Polygon2D.NearestBoundaryPoint(
+                                    working[index].OuterLoop, sample);
+                                if (distance < nearestDistance)
+                                {
+                                    nearestDistance = distance;
+                                    nearestIndex = index;
+                                    nearestBoundary = boundaryPoint;
+                                }
+                            }
+
+                            if (nearestIndex < 0 || nearestDistance > bandWidth + xyTolerance)
+                            {
+                                continue; // 帶外：距離場不會動到這裡。
+                            }
+
+                            var boundaryBottomZ = working[nearestIndex]
+                                .BottomElevationAt(nearestBoundary.X, nearestBoundary.Y);
+                            var fieldRate = rateFields?[nearestIndex]?.RateAt(nearestBoundary)
+                                ?? settings.RunPerRise;
+                            var fieldTarget = settings.Mode == GradingMode.OffsetTransition
+                                ? TransitionGeometry.OffsetTargetZ(
+                                    boundaryBottomZ, originalZ.Value, nearestDistance, offsetWidthFeet)
+                                : TransitionGeometry.SlopeTargetZ(
+                                    boundaryBottomZ, originalZ.Value, nearestDistance, fieldRate);
+                            samples.Add((
+                                candidate.BottomElevationAt(sample.X, sample.Y),
+                                originalZ.Value,
+                                fieldTarget));
+                        }
+                    }
+
+                    if (!FloorBurialCheck.ShouldAutoInclude(samples, tolerance))
+                    {
+                        continue;
+                    }
+
+                    // 與既有控制板投影重疊且板底高程衝突 → 無法納入，退回壓蓋保護（共邊等高不算衝突）。
+                    var trial = new List<FloorFootprint>(working) { candidate };
+                    try
+                    {
+                        EnsureNoConflictingOverlaps(trial, xyTolerance, elevationTolerance);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        warnings.Add(
+                            $"非控制樓板 ID {candidate.FloorId} 會被放坡覆蓋，但與控制樓板投影重疊且底面高程衝突，"
+                            + "無法自動納入連續放坡；退回不覆蓋壓蓋保護（板緣將出現高差）。");
+                        continue;
+                    }
+
+                    working.Add(candidate);
+                    added = true;
+                    warnings.Add(
+                        $"非控制樓板 ID {candidate.FloorId} 會被放坡覆蓋，已自動納入控制樓板連續放坡"
+                        + "（地形沿板底通過、於板緣接續放坡）。");
+                }
+
+                if (!added)
+                {
+                    break;
+                }
+            }
+
+            return working;
         }
 
         /// <summary>
