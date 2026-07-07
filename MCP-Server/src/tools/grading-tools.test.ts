@@ -97,6 +97,21 @@ test("V2 比較出圖與刪除方案工具存在且參數正確", () => {
     assert.equal(viewerProps.designToposolidId.type, "integer");
 });
 
+test("V3 板高程與邊坡率工具存在且參數正確", () => {
+    const elevationTool = gradingTools.find(item => item.name === "set_floor_elevations");
+    assert.ok(elevationTool);
+    assert.deepEqual(elevationTool.inputSchema.required, ["floors"]);
+    const elevationProps = elevationTool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(elevationProps.floors.type, "array");
+
+    const edgeTool = gradingTools.find(item => item.name === "set_floor_edge_slope");
+    assert.ok(edgeTool);
+    assert.deepEqual(edgeTool.inputSchema.required, ["floorId"]);
+    const edgeProps = edgeTool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(edgeProps.slopeRatio.type, "string");
+    assert.equal(edgeProps.clear.type, "boolean");
+});
+
 test("平衡高程反求工具存在且預設值正確", () => {
     const tool = gradingTools.find(item => item.name === "solve_balanced_elevation");
     assert.ok(tool);
@@ -146,6 +161,8 @@ test("整地工具只註冊於核准的 Profile", () => {
         "create_grading_comparison_sheet",
         "remove_grading_scheme",
         "show_grading_terrain",
+        "set_floor_elevations",
+        "set_floor_edge_slope",
     ];
 
     try {

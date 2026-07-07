@@ -493,6 +493,56 @@ export const gradingTools: Tool[] = [
         },
     },
     {
+        name: "set_floor_elevations",
+        description:
+            "V3 板高程/斜板：批次設定控制樓板——平板偏移（offsetMeters）、斜板（slope：低側邊參考點 x/y 公尺＋slopeRatio 1:n，低側邊維持原高其餘抬升）、還原平板（reset）。逐板容錯。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                floors: {
+                    type: "array",
+                    description: "每片板一項：{floorId, offsetMeters?} 或 {floorId, slope:{x,y,slopeRatio}} 或 {floorId, reset:true}",
+                    items: {
+                        type: "object",
+                        properties: {
+                            floorId: { type: "integer", description: "樓板元素 ID" },
+                            offsetMeters: { type: "number", description: "平板自標高偏移（公尺）" },
+                            slope: {
+                                type: "object",
+                                description: "斜板：低側邊參考點（公尺，專案內部原點座標）＋坡率",
+                                properties: {
+                                    x: { type: "number" },
+                                    y: { type: "number" },
+                                    slopeRatio: { type: "string", description: "1:n，例 1:12" },
+                                },
+                                required: ["x", "y", "slopeRatio"],
+                            },
+                            reset: { type: "boolean", description: "還原平板（清除 SlabShape 變形）" },
+                        },
+                        required: ["floorId"],
+                    },
+                },
+            },
+            required: ["floors"],
+        },
+    },
+    {
+        name: "set_floor_edge_slope",
+        description:
+            "V3 邊坡率政策：以 (x,y) 公尺座標指定樓板最近的一條邊界邊用例外放坡坡率（如臨路無障礙 1:12），其餘邊用整地時預設坡率；政策存於樓板、放坡（slope_transition）時生效並快照進登記簿。clear=true 清空該板政策。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                floorId: { type: "integer", description: "樓板元素 ID" },
+                x: { type: "number", description: "邊參考點 x（公尺，專案內部原點座標；點在目標邊附近即可，3m 內）" },
+                y: { type: "number", description: "邊參考點 y（公尺）" },
+                slopeRatio: { type: "string", description: "例外坡率 1:n，例 1:12" },
+                clear: { type: "boolean", description: "true＝清空該板全部邊政策（忽略 x/y/slopeRatio）" },
+            },
+            required: ["floorId"],
+        },
+    },
+    {
         name: "show_grading_terrain",
         description:
             "整地檢視：在專用「整地檢視」3D 視圖顯示指定地形（原地形或某方案成果），保留樓板等現有元素、隱藏其他地形，視圖標題含編號＋名稱。designToposolidId 省略或 0＝顯示原地形（拆除前）。",
