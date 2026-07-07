@@ -58,8 +58,16 @@ namespace RevitMCP
                 panel.AddItem(settingsButtonData);
 
 #if REVIT2024_OR_GREATER
-                // 整地圖說面板（Revit 2024+）：三鈕任務流＋成套圖（規格 2026-07-06 案乙）。
+                // 整地圖說面板（Revit 2024+）：備板兩鈕＋三鈕任務流＋檢視＋成套圖（V3 規格 2026-07-07）。
                 RibbonPanel gradingPanel = application.CreateRibbonPanel("整地圖說");
+                AddGradingButton(gradingPanel, assemblyPath, "FloorElevation", "板高程\n斜板…",
+                    "RevitMCP.Commands.FloorElevationCommand",
+                    "選取樓板後設定平板偏移、改斜板（點低側邊＋坡率 1:n）或還原平板",
+                    "elev");
+                AddGradingButton(gradingPanel, assemblyPath, "EdgeSlope", "邊坡率…",
+                    "RevitMCP.Commands.EdgeSlopeCommand",
+                    "點選樓板邊指定例外放坡坡率（如臨路無障礙 1:12），其餘邊用整地時的預設坡率",
+                    "edge");
                 AddGradingButton(gradingPanel, assemblyPath, "NewGradingScheme", "新整地\n方案…",
                     "RevitMCP.Commands.NewGradingSchemeCommand",
                     "選取一片地形＋控制樓板後，選模式（投影直貼/外延漸變/放坡銜接）與參數，執行並記錄一筆方案",

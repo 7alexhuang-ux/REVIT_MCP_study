@@ -85,8 +85,29 @@ def ic_set():
     stroke(d, scp([(21,41),(35,41)]), PURPLE, int(3*m))
     return img
 
+SLATE=(90,107,123); BROWN=(138,106,71)
+EDGE_SOFT = blend(BROWN, 0.45)
+
+def ic_elev():
+    img,d = canvas(); tile(d, SLATE)
+    # 三條水平高程線＋上抬箭頭：板高程/斜板。
+    stroke(d, scp([(14,44),(50,44)]), WHITE, int(4*m))
+    stroke(d, scp([(14,34),(42,34)]), blend(SLATE,0.7), int(4*m))
+    stroke(d, scp([(14,24),(34,24)]), blend(SLATE,0.45), int(4*m))
+    stroke(d, scp([(44,30),(44,14)]), WHITE, int(4*m))
+    d.polygon(scp([(44,9),(38.5,17),(49.5,17)]), fill=WHITE)
+    return img
+
+def ic_edge():
+    img,d = canvas(); tile(d, BROWN)
+    # 板輪廓＋一條被強調的邊（臨路邊例外坡率）。
+    outline = [(16,18),(48,18),(48,40),(32,50),(16,40)]
+    d.polygon(scp(outline), outline=EDGE_SOFT, width=int(3.5*m))
+    stroke(d, scp([(16,40),(32,50)]), WHITE, int(6*m))   # 強調邊
+    return img
+
 ICONS = {"new":ic_new, "overview":ic_overview, "view":ic_view,
-         "compare":ic_compare, "set":ic_set}
+         "compare":ic_compare, "set":ic_set, "elev":ic_elev, "edge":ic_edge}
 
 rendered = {}
 for key, fn in ICONS.items():
@@ -97,7 +118,7 @@ for key, fn in ICONS.items():
         small.save(os.path.join(OUT, f"{key}_{size}.png"))
 
 # 預覽總圖（給使用者看，不入 DLL）
-order = ["new","overview","view","compare","set"]
+order = ["elev","edge","new","overview","view","compare","set"]
 pad, cell = 16, 84
 W = pad + len(order)*(cell+pad)
 H = pad + cell + pad

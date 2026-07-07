@@ -5,6 +5,7 @@ using System.Linq;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
+using Autodesk.Revit.UI.Selection;
 using Newtonsoft.Json.Linq;
 using RevitMCP.Core;
 using RevitMCP.Core.Grading;
@@ -213,6 +214,201 @@ namespace RevitMCP.Commands
         {
             return GradingRibbonHelper.Run(
                 commandData.Application, "create_grading_comparison_sheet", new JObject(), "比較出圖");
+        }
+    }
+
+    /// <summary>樓板邊選取過濾器：只允許點到 Floor 的邊。</summary>
+    internal sealed class FloorEdgeSelectionFilter : ISelectionFilter
+    {
+        private readonly long _restrictToFloorId;
+
+        public FloorEdgeSelectionFilter(long restrictToFloorId = 0)
+        {
+            _restrictToFloorId = restrictToFloorId;
+        }
+
+        public bool AllowElement(Element element)
+        {
+            return element is Autodesk.Revit.DB.Floor
+                && (_restrictToFloorId == 0 || element.Id.GetIdValue() == _restrictToFloorId);
+        }
+
+        public bool AllowReference(Reference reference, XYZ position) => true;
+    }
+
+    /// <summary>V3-S1 板高程/斜板：選取樓板 → 對話框收集意圖 → 斜板逐板點低側邊 → 一次套用。</summary>
+    [Transaction(TransactionMode.Manual)]
+    public class FloorElevationCommand : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
+        {
+            var uiApp = commandData.Application;
+            var uiDoc = uiApp.ActiveUIDocument;
+            var doc = uiDoc?.Document;
+            if (doc == null)
+            {
+                TaskDialog.Show("板高程", "沒有作用中的文件。");
+                return Result.Cancelled;
+            }
+
+            var floors = uiDoc.Selection.GetElementIds()
+                .Select(id => doc.GetElement(id))
+                .OfType<Autodesk.Revit.DB.Floor>()
+                .ToList();
+            if (floors.Count == 0)
+            {
+                TaskDialog.Show("板高程", "請先選取至少一片樓板，再點此按鈕。");
+                return Result.Cancelled;
+            }
+
+            var rows = floors
+                .Select(floor =>
+                {
+                    var offsetFeet = floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM)?.AsDouble() ?? 0;
+                    var offsetMeters = UnitUtils.ConvertFromInternalUnits(offsetFeet, UnitTypeId.Meters);
+                    return ((long)floor.Id.GetIdValue(), $"板 {floor.Id.GetIdValue()}（目前偏移 {offsetMeters:0.00}m）");
+                })
+                .ToList();
+
+            var dialog = new FloorElevationDialog(rows);
+            if (dialog.ShowDialog() != true)
+            {
+                return Result.Cancelled;
+            }
+
+            // 斜板：對話框關閉後逐板點低側邊（模態中不能 PickObject）。
+            var floorEntries = new JArray();
+            foreach (var intent in dialog.Intents)
+            {
+                var entry = new JObject { ["floorId"] = intent.FloorId };
+                switch (intent.Action)
+                {
+                    case "offset":
+                        entry["offsetMeters"] = intent.OffsetMeters;
+                        break;
+                    case "reset":
+                        entry["reset"] = true;
+                        break;
+                    case "slope":
+                        try
+                        {
+                            var reference = uiDoc.Selection.PickObject(
+                                ObjectType.Edge,
+                                new FloorEdgeSelectionFilter(intent.FloorId),
+                                $"請點選板 {intent.FloorId} 的低側邊（板往那條邊斜下去）");
+                            var element = doc.GetElement(reference);
+                            var edge = element?.GetGeometryObjectFromReference(reference) as Edge;
+                            var curve = edge?.AsCurve();
+                            if (curve == null)
+                            {
+                                TaskDialog.Show("板高程", $"板 {intent.FloorId} 點選的不是有效邊，略過斜板。");
+                                continue;
+                            }
+
+                            var mid = curve.Evaluate(0.5, true);
+                            entry["slope"] = new JObject
+                            {
+                                ["x"] = UnitUtils.ConvertFromInternalUnits(mid.X, UnitTypeId.Meters),
+                                ["y"] = UnitUtils.ConvertFromInternalUnits(mid.Y, UnitTypeId.Meters),
+                                ["slopeRatio"] = intent.SlopeRatio
+                            };
+                        }
+                        catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+                        {
+                            continue; // 使用者 ESC，略過此板的斜板動作。
+                        }
+
+                        break;
+                    default:
+                        continue;
+                }
+
+                floorEntries.Add(entry);
+            }
+
+            if (floorEntries.Count == 0)
+            {
+                return Result.Cancelled;
+            }
+
+            return GradingRibbonHelper.Run(uiApp, "set_floor_elevations",
+                new JObject { ["floors"] = floorEntries }, "板高程");
+        }
+    }
+
+    /// <summary>V3-S2 邊坡率：連續點樓板邊（ESC 結束），每條邊填坡率（如臨路無障礙 1:12），存為板的邊政策。</summary>
+    [Transaction(TransactionMode.Manual)]
+    public class EdgeSlopeCommand : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
+        {
+            var uiApp = commandData.Application;
+            var uiDoc = uiApp.ActiveUIDocument;
+            var doc = uiDoc?.Document;
+            if (doc == null)
+            {
+                TaskDialog.Show("邊坡率", "沒有作用中的文件。");
+                return Result.Cancelled;
+            }
+
+            var summaries = new List<string>();
+            while (true)
+            {
+                Reference reference;
+                try
+                {
+                    reference = uiDoc.Selection.PickObject(
+                        ObjectType.Edge,
+                        new FloorEdgeSelectionFilter(),
+                        "點選要指定坡率的樓板邊（ESC 結束）");
+                }
+                catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+                {
+                    break;
+                }
+
+                var element = doc.GetElement(reference);
+                var edge = element?.GetGeometryObjectFromReference(reference) as Edge;
+                var curve = edge?.AsCurve();
+                if (element == null || curve == null)
+                {
+                    TaskDialog.Show("邊坡率", "點選的不是有效的樓板邊，請再試一次。");
+                    continue;
+                }
+
+                var lengthMeters = UnitUtils.ConvertFromInternalUnits(curve.Length, UnitTypeId.Meters);
+                var rateDialog = new EdgeRateDialog(
+                    $"板 {element.Id.GetIdValue()}、邊長約 {lengthMeters:0.0}m——這條邊的放坡坡率？");
+                if (rateDialog.ShowDialog() != true)
+                {
+                    continue;
+                }
+
+                var mid = curve.Evaluate(0.5, true);
+                var executor = new CommandExecutor(uiApp);
+                var response = executor.ExecuteCommand(new RevitCommandRequest
+                {
+                    CommandName = "set_floor_edge_slope",
+                    Parameters = new JObject
+                    {
+                        ["floorId"] = element.Id.GetIdValue(),
+                        ["x"] = UnitUtils.ConvertFromInternalUnits(mid.X, UnitTypeId.Meters),
+                        ["y"] = UnitUtils.ConvertFromInternalUnits(mid.Y, UnitTypeId.Meters),
+                        ["slopeRatio"] = rateDialog.SlopeRatio
+                    },
+                    RequestId = "ribbon-" + Guid.NewGuid().ToString("N")
+                });
+                summaries.Add(response.Success
+                    ? $"✔ 板 {element.Id.GetIdValue()} 邊（{lengthMeters:0.0}m）＝{rateDialog.SlopeRatio}"
+                    : $"✘ 板 {element.Id.GetIdValue()}：{response.Error}");
+            }
+
+            TaskDialog.Show("邊坡率",
+                summaries.Count == 0
+                    ? "沒有指定任何邊。"
+                    : string.Join("\n", summaries)
+                        + "\n\n之後用「新整地方案」放坡時，這些邊會用自己的坡率、其餘邊用預設坡率。");
+            return Result.Succeeded;
         }
     }
 
