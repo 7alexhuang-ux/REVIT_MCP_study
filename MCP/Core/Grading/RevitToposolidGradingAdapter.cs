@@ -627,6 +627,12 @@ namespace RevitMCP.Core.Grading
                 var offsetWidthFeet = settings.Mode == GradingMode.OffsetTransition
                     ? ToInternalMeters(settings.OffsetDistanceMeters)
                     : 0.0;
+                // 不覆蓋政策（使用者裁決 2026-07-08）：放坡帶可能觸及的非控制樓板，
+                // 帶頂點落在其投影內時目標壓至板底以下（原本就埋在原地形下者不動）。
+                var capFloorFootprints = CollectCapFloorFootprints(doc, footprints, bandCandidateWidth);
+                var capTolerance = UnitUtils.ConvertToInternalUnits(
+                    BurialToleranceMillimeters, UnitTypeId.Millimeters);
+                var cappedFloorIds = new SortedSet<long>();
                 var bandScope = _timeline.Measure("銜接帶頂點分類");
                 for (var positionIndex = 0; positionIndex < allPositions.Count; positionIndex++)
                 {
@@ -669,6 +675,25 @@ namespace RevitMCP.Core.Grading
                             boundaryBottomZ, localTerrainZ, nearestDistance, offsetWidthFeet)
                         : TransitionGeometry.SlopeTargetZ(
                             boundaryBottomZ, localTerrainZ, nearestDistance, fieldRate);
+
+                    // 不覆蓋政策：頂點落在外露非控制樓板投影內 → 目標壓至板底以下。
+                    foreach (var capFloor in capFloorFootprints)
+                    {
+                        if (!Polygon2D.Contains(capFloor.OuterLoop, sample, xyTolerance))
+                        {
+                            continue;
+                        }
+
+                        var floorBottomZ = capFloor.BottomElevationAt(sample.X, sample.Y);
+                        var capped = FloorBurialCheck.CapTargetZ(
+                            targetZ, localTerrainZ, floorBottomZ, capTolerance);
+                        if (capped < targetZ)
+                        {
+                            targetZ = capped;
+                            cappedFloorIds.Add(capFloor.FloorId);
+                        }
+                    }
+
                     if (Math.Abs(targetZ - localTerrainZ) <= elevationTolerance)
                     {
                         continue;
@@ -678,6 +703,13 @@ namespace RevitMCP.Core.Grading
                 }
 
                 bandScope.Dispose();
+
+                foreach (var cappedFloorId in cappedFloorIds)
+                {
+                    warnings.Add(
+                        $"非控制樓板 ID {cappedFloorId} 位於放坡帶內：設計地形已壓至其底面以下、不覆蓋該板；"
+                        + "如需連續放坡請將該板納入 floorIds 一併整地。");
+                }
             }
 
             if (targets.Count == 0)
@@ -1311,6 +1343,70 @@ namespace RevitMCP.Core.Grading
         private const double BurialSampleStepMillimeters = 2000.0;
         private const double BurialToleranceMillimeters = 50.0;
 
+        /// <summary>擾動範圍外框：全部控制樓板投影包圍盒外擴帶寬。</summary>
+        private static (double MinX, double MinY, double MaxX, double MaxY) ComputeDisturbedExtent(
+            IReadOnlyList<FloorFootprint> footprints,
+            double bandWidth)
+        {
+            var minX = double.MaxValue;
+            var minY = double.MaxValue;
+            var maxX = double.MinValue;
+            var maxY = double.MinValue;
+            foreach (var footprint in footprints)
+            {
+                foreach (var point in footprint.OuterLoop)
+                {
+                    minX = Math.Min(minX, point.X);
+                    minY = Math.Min(minY, point.Y);
+                    maxX = Math.Max(maxX, point.X);
+                    maxY = Math.Max(maxY, point.Y);
+                }
+            }
+
+            return (minX - bandWidth, minY - bandWidth, maxX + bandWidth, maxY + bandWidth);
+        }
+
+        /// <summary>
+        /// 不覆蓋政策：蒐集放坡帶可能觸及的非控制樓板 footprint（帶頂點壓蓋用）。
+        /// 底面抽取失敗的特殊樓板跳過——留給覆蓋告警把關。
+        /// </summary>
+        private static IReadOnlyList<FloorFootprint> CollectCapFloorFootprints(
+            Document doc,
+            IReadOnlyList<FloorFootprint> footprints,
+            double bandWidth)
+        {
+            var extent = ComputeDisturbedExtent(footprints, bandWidth);
+            var controlFloorIds = new HashSet<long>(footprints.Select(fp => fp.FloorId));
+            var capFloors = new List<FloorFootprint>();
+            foreach (var floor in new FilteredElementCollector(doc).OfClass(typeof(Floor)).Cast<Floor>())
+            {
+                long floorId = floor.Id.GetIdValue();
+                if (controlFloorIds.Contains(floorId))
+                {
+                    continue;
+                }
+
+                var bounds = floor.get_BoundingBox(null);
+                if (bounds == null
+                    || bounds.Max.X < extent.MinX || bounds.Min.X > extent.MaxX
+                    || bounds.Max.Y < extent.MinY || bounds.Min.Y > extent.MaxY)
+                {
+                    continue; // 樓板不在擾動範圍內。
+                }
+
+                try
+                {
+                    capFloors.Add(ExtractBottomFootprint(floor));
+                }
+                catch (InvalidOperationException)
+                {
+                    // 非單一平面底面等特殊樓板：無法壓蓋，由覆蓋告警把關。
+                }
+            }
+
+            return capFloors;
+        }
+
         /// <summary>
         /// 掃描擾動範圍（控制樓板投影外擴帶寬）內的非控制樓板，
         /// 以 FloorBurialCheck 判定整地是否「新增」蓋過其頂面；有則加告警（不回滾）。
@@ -1338,26 +1434,7 @@ namespace RevitMCP.Core.Grading
                     ? settings.OffsetDistanceMeters
                     : settings.MaxExtensionMeters);
 
-            var extentMinX = double.MaxValue;
-            var extentMinY = double.MaxValue;
-            var extentMaxX = double.MinValue;
-            var extentMaxY = double.MinValue;
-            foreach (var footprint in footprints)
-            {
-                foreach (var point in footprint.OuterLoop)
-                {
-                    extentMinX = Math.Min(extentMinX, point.X);
-                    extentMinY = Math.Min(extentMinY, point.Y);
-                    extentMaxX = Math.Max(extentMaxX, point.X);
-                    extentMaxY = Math.Max(extentMaxY, point.Y);
-                }
-            }
-
-            extentMinX -= bandWidth;
-            extentMinY -= bandWidth;
-            extentMaxX += bandWidth;
-            extentMaxY += bandWidth;
-
+            var extent = ComputeDisturbedExtent(footprints, bandWidth);
             var controlFloorIds = new HashSet<long>(footprints.Select(fp => fp.FloorId));
             var sampleStep = UnitUtils.ConvertToInternalUnits(
                 BurialSampleStepMillimeters, UnitTypeId.Millimeters);
@@ -1379,10 +1456,10 @@ namespace RevitMCP.Core.Grading
                     continue;
                 }
 
-                var minX = Math.Max(bounds.Min.X, extentMinX);
-                var maxX = Math.Min(bounds.Max.X, extentMaxX);
-                var minY = Math.Max(bounds.Min.Y, extentMinY);
-                var maxY = Math.Min(bounds.Max.Y, extentMaxY);
+                var minX = Math.Max(bounds.Min.X, extent.MinX);
+                var maxX = Math.Min(bounds.Max.X, extent.MaxX);
+                var minY = Math.Max(bounds.Min.Y, extent.MinY);
+                var maxY = Math.Min(bounds.Max.Y, extent.MaxY);
                 if (minX > maxX || minY > maxY)
                 {
                     continue; // 樓板不在擾動範圍內。

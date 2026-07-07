@@ -81,5 +81,53 @@ namespace RevitMCP.Tests.Grading
                 FloorBurialCheck.Evaluate(
                     new[] { (FloorTopZ: 1.0, OriginalZ: 0.0, DesignZ: 2.0) }, -0.01));
         }
+
+        // ---- CapTargetZ：不覆蓋政策（使用者裁決 2026-07-08：不要只警告，一律不覆蓋樓板）----
+
+        [Test]
+        public void CapTargetZ_ExposedFloor_FieldTargetAboveBottom_CappedToBottom()
+        {
+            // 坡道情境：原地形 0.5（外露）、板底 2.43、1:12 場目標 2.81 → 壓到板底。
+            Assert.That(
+                FloorBurialCheck.CapTargetZ(
+                    fieldTargetZ: 2.81, originalTerrainZ: 0.5, floorBottomZ: 2.43, tolerance: Tolerance),
+                Is.EqualTo(2.43));
+        }
+
+        [Test]
+        public void CapTargetZ_ExposedFloor_FieldTargetBelowBottom_Unchanged()
+        {
+            Assert.That(
+                FloorBurialCheck.CapTargetZ(
+                    fieldTargetZ: 1.2, originalTerrainZ: 0.5, floorBottomZ: 2.43, tolerance: Tolerance),
+                Is.EqualTo(1.2));
+        }
+
+        [Test]
+        public void CapTargetZ_FloorAlreadyEmbeddedInOriginalTerrain_NotExcavated()
+        {
+            // 地下室情境：原地形 3.0 已高於板底 0.8 → 不壓蓋（否則會把既有覆土挖開）。
+            Assert.That(
+                FloorBurialCheck.CapTargetZ(
+                    fieldTargetZ: 2.5, originalTerrainZ: 3.0, floorBottomZ: 0.8, tolerance: Tolerance),
+                Is.EqualTo(2.5));
+        }
+
+        [Test]
+        public void CapTargetZ_SlabOnGrade_BottomTouchingTerrain_StillCapped()
+        {
+            // 貼地板：原地形≈板底（50mm 門檻內視為外露）→ 壓蓋生效，填坡不得蓋過。
+            Assert.That(
+                FloorBurialCheck.CapTargetZ(
+                    fieldTargetZ: 1.5, originalTerrainZ: 1.02, floorBottomZ: 1.0, tolerance: Tolerance),
+                Is.EqualTo(1.0));
+        }
+
+        [Test]
+        public void CapTargetZ_NegativeTolerance_Throws()
+        {
+            Assert.Throws<System.ArgumentOutOfRangeException>(() =>
+                FloorBurialCheck.CapTargetZ(1.0, 0.0, 2.0, -0.01));
+        }
     }
 }

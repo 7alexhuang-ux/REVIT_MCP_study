@@ -41,5 +41,23 @@ namespace RevitMCP.Core.Grading
 
             return (newlyBuried, maxNewDepth);
         }
+
+        /// <summary>
+        /// 不覆蓋政策（使用者裁決 2026-07-08）：帶頂點落在非控制樓板投影內時的目標高程壓蓋。
+        /// 原本外露的樓板（原地形未高於板底）→ 目標壓至板底以下；
+        /// 原本就埋在原地形下的樓板（如地下室板）→ 不動，避免把既有覆土挖開。
+        /// </summary>
+        public static double CapTargetZ(
+            double fieldTargetZ,
+            double originalTerrainZ,
+            double floorBottomZ,
+            double tolerance)
+        {
+            if (tolerance < 0)
+                throw new ArgumentOutOfRangeException(nameof(tolerance), "覆蓋判定門檻不可為負。");
+
+            var coveredBefore = originalTerrainZ > floorBottomZ + tolerance;
+            return coveredBefore ? fieldTargetZ : Math.Min(fieldTargetZ, floorBottomZ);
+        }
     }
 }
