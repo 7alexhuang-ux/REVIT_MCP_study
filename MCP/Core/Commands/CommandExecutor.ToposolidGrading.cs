@@ -202,7 +202,8 @@ namespace RevitMCP.Core
                                 FloorMetrics = BuildFloorMetrics(floors, footprints),
                                 Warnings = warnings.ToArray(),
                                 ElevationBasis = "專案內部原點起算（公尺）",
-                                Ledger = ledger
+                                Ledger = ledger,
+                                EdgePolicies = BuildEdgePolicySnapshots(floors)
                             };
                             adapter.WriteSchemeRecord(
                                 doc, design, JsonConvert.SerializeObject(record), associationId);
@@ -364,6 +365,36 @@ namespace RevitMCP.Core
             }
 
             return metrics;
+        }
+
+        /// <summary>V3-S2：把各板本次生效的邊坡率政策快照進登記簿（無政策的板不列）。</summary>
+        private static IReadOnlyList<FloorEdgePolicySnapshot> BuildEdgePolicySnapshots(
+            IReadOnlyList<Floor> floors)
+        {
+            var snapshots = new List<FloorEdgePolicySnapshot>();
+            foreach (var floor in floors)
+            {
+                var stored = FloorEdgePolicyStore.Read(floor);
+                if (stored.Count == 0)
+                {
+                    continue;
+                }
+
+                snapshots.Add(new FloorEdgePolicySnapshot
+                {
+                    FloorId = floor.Id.GetIdValue(),
+                    Policies = stored
+                        .Select(policy => new EdgePolicySnapshot
+                        {
+                            SlopeRatio = policy.SlopeRatio,
+                            LengthMeters = Math.Round(
+                                UnitUtils.ConvertFromInternalUnits(policy.Length, UnitTypeId.Meters), 2)
+                        })
+                        .ToList()
+                });
+            }
+
+            return snapshots.Count > 0 ? snapshots : null;
         }
 
         /// <summary>

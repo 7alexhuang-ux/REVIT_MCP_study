@@ -10,7 +10,7 @@ namespace RevitMCP.Core.Grading
     /// </summary>
     public sealed class GradingSchemeRecord
     {
-        public int SchemaVersion { get; set; } = 3;
+        public int SchemaVersion { get; set; } = 4;
         public string AssociationId { get; set; }
         public string SchemeName { get; set; }
         public string Timestamp { get; set; }
@@ -41,6 +41,23 @@ namespace RevitMCP.Core.Grading
 
         /// <summary>方案截圖檔路徑（v3 新增；create_grading_scheme_view 回寫）。</summary>
         public string ScreenshotPath { get; set; }
+
+        /// <summary>本次生效的邊坡率政策快照（v4 新增；V3-S2 逐邊坡率，可重現/可比較）。</summary>
+        public IReadOnlyList<FloorEdgePolicySnapshot> EdgePolicies { get; set; }
+    }
+
+    /// <summary>單一樓板的邊坡率政策快照（登記簿用；公尺）。</summary>
+    public sealed class FloorEdgePolicySnapshot
+    {
+        public long FloorId { get; set; }
+        public IReadOnlyList<EdgePolicySnapshot> Policies { get; set; }
+    }
+
+    /// <summary>單條邊政策快照：坡率與邊長（公尺）。</summary>
+    public sealed class EdgePolicySnapshot
+    {
+        public string SlopeRatio { get; set; }
+        public double LengthMeters { get; set; }
     }
 
     /// <summary>單一控制樓板的登記指標。</summary>

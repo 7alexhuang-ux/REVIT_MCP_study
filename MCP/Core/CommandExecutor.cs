@@ -500,6 +500,14 @@ namespace RevitMCP.Core
                     case "show_grading_terrain":
                         result = ShowGradingTerrain(parameters);
                         break;
+
+                    case "set_floor_elevations":
+                        result = SetFloorElevations(parameters);
+                        break;
+
+                    case "set_floor_edge_slope":
+                        result = SetFloorEdgeSlope(parameters);
+                        break;
 #endif
 
                     default:

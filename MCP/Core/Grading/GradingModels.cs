@@ -149,6 +149,9 @@ namespace RevitMCP.Core.Grading
         public long FloorId { get; set; }
         public IReadOnlyList<Point2D> OuterLoop { get; set; }
         public Func<double, double, double> BottomElevationAt { get; set; }
+
+        /// <summary>板的邊坡率政策（V3-S2；無政策＝null/空，放坡時全邊用預設坡率）。</summary>
+        public IReadOnlyList<EdgeSlopePolicy> EdgePolicies { get; set; }
     }
 
     /// <summary>整地執行的單一階段耗時。</summary>

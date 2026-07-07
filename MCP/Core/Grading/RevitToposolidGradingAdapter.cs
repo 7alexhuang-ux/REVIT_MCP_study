@@ -120,7 +120,11 @@ namespace RevitMCP.Core.Grading
                     throw new ArgumentException("樓板集合不可包含 null。", nameof(floors));
                 }
 
-                footprints.Add(ExtractBottomFootprint(floor));
+                var footprint = ExtractBottomFootprint(floor);
+                // V3-S2：板上的邊坡率政策一併帶出，放坡時逐邊套用。
+                footprint.EdgePolicies = FloorEdgePolicyStore.ToGeometryPolicies(
+                    FloorEdgePolicyStore.Read(floor));
+                footprints.Add(footprint);
             }
 
             return footprints;
@@ -419,6 +423,9 @@ namespace RevitMCP.Core.Grading
                 EnsureNoConflictingOverlaps(footprints, xyTolerance, elevationTolerance);
             }
 
+            // V3-S2 逐邊坡率：每片板的政策匹配到當前輪廓 → 邊界坡率場（無政策＝null，行為與單一坡率一致）。
+            var rateFields = BuildBoundaryRateFields(footprints, settings, warnings);
+
             if (!editor.IsEnabled)
             {
                 using (_timeline.Measure("形狀編輯器啟用"))
@@ -530,7 +537,7 @@ namespace RevitMCP.Core.Grading
                 using (_timeline.Measure("銜接帶外圈取樣"))
                 {
                     var built = BuildTransitionRings(
-                        transitionSolids, footprints, settings, xyTolerance, elevationTolerance,
+                        transitionSolids, footprints, settings, rateFields, xyTolerance, elevationTolerance,
                         rayBottomZ, rayTopZ, warnings);
                     transitionRings = built.Rings;
                     bandFill = built.BandFill;
@@ -621,15 +628,18 @@ namespace RevitMCP.Core.Grading
                     var position = allPositions[positionIndex];
                     var sample = ToPoint2D(position);
                     FloorFootprint nearestFootprint = null;
+                    var nearestFootprintIndex = -1;
                     var nearestDistance = double.MaxValue;
                     var nearestBoundary = default(Point2D);
-                    foreach (var footprint in footprints)
+                    for (var footprintIndex = 0; footprintIndex < footprints.Count; footprintIndex++)
                     {
+                        var footprint = footprints[footprintIndex];
                         var (boundaryPoint, distance) = Polygon2D.NearestBoundaryPoint(footprint.OuterLoop, sample);
                         if (distance < nearestDistance)
                         {
                             nearestDistance = distance;
                             nearestFootprint = footprint;
+                            nearestFootprintIndex = footprintIndex;
                             nearestBoundary = boundaryPoint;
                         }
                     }
@@ -641,11 +651,14 @@ namespace RevitMCP.Core.Grading
 
                     var boundaryBottomZ = nearestFootprint.BottomElevationAt(nearestBoundary.X, nearestBoundary.Y);
                     var localTerrainZ = position.Z;
+                    // V3-S2：距離場坡率取「最近邊界位置」生效值（逐邊政策＋角點混坡）。
+                    var fieldRate = rateFields?[nearestFootprintIndex]?.RateAt(nearestBoundary)
+                        ?? settings.RunPerRise;
                     var targetZ = settings.Mode == GradingMode.OffsetTransition
                         ? TransitionGeometry.OffsetTargetZ(
                             boundaryBottomZ, localTerrainZ, nearestDistance, offsetWidthFeet)
                         : TransitionGeometry.SlopeTargetZ(
-                            boundaryBottomZ, localTerrainZ, nearestDistance, settings.RunPerRise);
+                            boundaryBottomZ, localTerrainZ, nearestDistance, fieldRate);
                     if (Math.Abs(targetZ - localTerrainZ) <= elevationTolerance)
                     {
                         continue;
@@ -1053,10 +1066,57 @@ namespace RevitMCP.Core.Grading
             return UnitUtils.ConvertToInternalUnits(meters, UnitTypeId.Meters);
         }
 
+        /// <summary>V3-S2：逐板建邊界坡率場；僅放坡模式＋板帶政策時生效，其餘為 null（單一坡率行為不變）。</summary>
+        private static IReadOnlyList<BoundaryRateField> BuildBoundaryRateFields(
+            IReadOnlyList<FloorFootprint> footprints,
+            TransitionSettings settings,
+            ICollection<string> warnings)
+        {
+            var fields = new BoundaryRateField[footprints.Count];
+            for (var index = 0; index < footprints.Count; index++)
+            {
+                var footprint = footprints[index];
+                var policies = footprint.EdgePolicies;
+                if (policies == null || policies.Count == 0)
+                {
+                    continue;
+                }
+
+                if (settings.Mode != GradingMode.SlopeTransition)
+                {
+                    warnings.Add(
+                        $"樓板 ID {footprint.FloorId} 帶 {policies.Count} 條邊坡率政策，"
+                        + "但僅 slope_transition（放坡）模式生效，本次已忽略。");
+                    continue;
+                }
+
+                var (edgeRates, unmatched) = EdgeSlopePolicies.MatchEdgeRates(
+                    footprint.OuterLoop, policies, settings.RunPerRise);
+                if (unmatched.Count > 0)
+                {
+                    warnings.Add(
+                        $"樓板 ID {footprint.FloorId} 有 {unmatched.Count} 條邊坡率政策找不到對應邊"
+                        + "（板輪廓改過？），已忽略——請以「邊坡率」重新指定。");
+                }
+
+                if (edgeRates.Any(rate => Math.Abs(rate - settings.RunPerRise) > 1e-12))
+                {
+                    fields[index] = new BoundaryRateField(
+                        footprint.OuterLoop, edgeRates, ToInternalMeters(BoundaryRateBlendMeters));
+                }
+            }
+
+            return fields;
+        }
+
+        /// <summary>逐邊坡率的角點混坡長度（公尺）。</summary>
+        private const double BoundaryRateBlendMeters = 2.0;
+
         private (IReadOnlyList<IReadOnlyList<XYZ>> Rings, IReadOnlyList<XYZ> BandFill) BuildTransitionRings(
             IReadOnlyList<Solid> solids,
             IReadOnlyList<FloorFootprint> footprints,
             TransitionSettings settings,
+            IReadOnlyList<BoundaryRateField> rateFields,
             double xyTolerance,
             double elevationTolerance,
             double rayBottomZ,
@@ -1071,8 +1131,10 @@ namespace RevitMCP.Core.Grading
                 : 0.0;
             var rings = new List<IReadOnlyList<XYZ>>(footprints.Count);
             var bandFill = new List<XYZ>();
-            foreach (var footprint in footprints)
+            for (var footprintIndex = 0; footprintIndex < footprints.Count; footprintIndex++)
             {
+                var footprint = footprints[footprintIndex];
+                var rateField = rateFields?[footprintIndex];
                 var loop = footprint.OuterLoop;
                 // 2026-07-05：改用「直邊細分＋凸角圓弧」密錨點取代每頂點單一角平分點，
                 // 讓控制環貼合距離場真實坡腳（凸角圓弧、凹角收斂），消除稀疏圈點造成的三角網過衝（offset 包絡失敗根因）。
@@ -1084,6 +1146,8 @@ namespace RevitMCP.Core.Grading
                 foreach (var (boundaryPoint, direction) in anchors)
                 {
                     var boundaryBottomZ = footprint.BottomElevationAt(boundaryPoint.X, boundaryPoint.Y);
+                    // V3-S2：此錨點生效坡率（逐邊政策＋角點混坡）；無政策＝整圈預設坡率。
+                    var anchorRate = rateField?.RateAt(boundaryPoint) ?? settings.RunPerRise;
                     double extension;
                     if (settings.Mode == GradingMode.OffsetTransition)
                     {
@@ -1106,7 +1170,7 @@ namespace RevitMCP.Core.Grading
                             }
 
                             var needed = TransitionGeometry.SlopeExtensionNeeded(
-                                boundaryBottomZ, probeTerrainZ.Value, settings.RunPerRise);
+                                boundaryBottomZ, probeTerrainZ.Value, anchorRate);
                             extension = Math.Min(needed, maxExtensionFeet);
                         }
 
@@ -1133,7 +1197,7 @@ namespace RevitMCP.Core.Grading
                     if (settings.Mode == GradingMode.SlopeTransition)
                     {
                         var targetAtRing = TransitionGeometry.SlopeTargetZ(
-                            boundaryBottomZ, terrainZ.Value, extension, settings.RunPerRise);
+                            boundaryBottomZ, terrainZ.Value, extension, anchorRate);
                         var residual = Math.Abs(targetAtRing - terrainZ.Value);
                         if (extension >= maxExtensionFeet - xyTolerance && residual > elevationTolerance)
                         {
