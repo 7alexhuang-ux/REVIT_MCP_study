@@ -24,5 +24,6 @@
     <Compile Include="..\MCP\Core\Grading\EdgeSlopePolicies.cs" Link="Core\Grading\EdgeSlopePolicies.cs" Condition="Exists('..\MCP\Core\Grading\EdgeSlopePolicies.cs')" />
     <Compile Include="..\MCP\Core\Grading\BoundaryRateField.cs" Link="Core\Grading\BoundaryRateField.cs" Condition="Exists('..\MCP\Core\Grading\BoundaryRateField.cs')" />
     <Compile Include="..\MCP\Core\Grading\SlopedPlaneMath.cs" Link="Core\Grading\SlopedPlaneMath.cs" Condition="Exists('..\MCP\Core\Grading\SlopedPlaneMath.cs')" />
+    <Compile Include="..\MCP\Core\Grading\FloorBurialCheck.cs" Link="Core\Grading\FloorBurialCheck.cs" Condition="Exists('..\MCP\Core\Grading\FloorBurialCheck.cs')" />
   </ItemGroup>
 </Project>

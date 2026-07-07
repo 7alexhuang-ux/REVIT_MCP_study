@@ -742,6 +742,15 @@ namespace RevitMCP.Core.Grading
                 }
             }
 
+            // 非控制樓板覆蓋告警：Revit 的 overlap 警告會被 FailuresPreprocessor 自動消化、
+            // 不夠醒目（實機教訓 2026-07-07：坡道板未納入 floorIds 被 1:12 填坡整片蓋掉）。
+            // 只告警、不回滾——蓋掉可能是刻意的（如回填既有平台）。
+            using (_timeline.Measure("非控制樓板覆蓋檢查"))
+            {
+                WarnNonControlFloorBurial(
+                    doc, original, design, footprints, settings, rayBottomZ, rayTopZ, warnings);
+            }
+
             // 方案指標：最大挖深/填高取自控制點原高程與目標高程差；
             // 擾動面積 = 樓板投影面積（精確）＋銜接帶外圈面積（近似，圈點缺段時取樣不全）。
             var disturbedArea = footprints.Sum(fp => Polygon2D.Area(fp.OuterLoop));
@@ -842,10 +851,10 @@ namespace RevitMCP.Core.Grading
             return false;
         }
 
-        internal static IReadOnlyList<Solid> CollectSolids(Toposolid toposolid)
+        internal static IReadOnlyList<Solid> CollectSolids(Element element)
         {
             var solids = new List<Solid>();
-            var geometry = toposolid.get_Geometry(new Options());
+            var geometry = element.get_Geometry(new Options());
             if (geometry != null)
             {
                 foreach (var geometryObject in geometry)
@@ -1294,6 +1303,136 @@ namespace RevitMCP.Core.Grading
                     {
                         continue; // 既有摺線或退化線段；缺段風險由包絡驗收把關。
                     }
+                }
+            }
+        }
+
+        // 非控制樓板覆蓋告警：取樣步距 2 m、覆蓋門檻 50 mm（告警用途，非工程閘門）。
+        private const double BurialSampleStepMillimeters = 2000.0;
+        private const double BurialToleranceMillimeters = 50.0;
+
+        /// <summary>
+        /// 掃描擾動範圍（控制樓板投影外擴帶寬）內的非控制樓板，
+        /// 以 FloorBurialCheck 判定整地是否「新增」蓋過其頂面；有則加告警（不回滾）。
+        /// </summary>
+        private static void WarnNonControlFloorBurial(
+            Document doc,
+            Toposolid original,
+            Toposolid design,
+            IReadOnlyList<FloorFootprint> footprints,
+            TransitionSettings settings,
+            double rayBottomZ,
+            double rayTopZ,
+            ICollection<string> warnings)
+        {
+            var originalSolids = CollectSolids(original);
+            var designSolids = CollectSolids(design);
+            if (originalSolids.Count == 0 || designSolids.Count == 0)
+            {
+                return; // 告警檢查拿不到幾何就靜默跳過，不阻斷整地。
+            }
+
+            var bandWidth = settings.Mode == GradingMode.FootprintOnly
+                ? 0.0
+                : ToInternalMeters(settings.Mode == GradingMode.OffsetTransition
+                    ? settings.OffsetDistanceMeters
+                    : settings.MaxExtensionMeters);
+
+            var extentMinX = double.MaxValue;
+            var extentMinY = double.MaxValue;
+            var extentMaxX = double.MinValue;
+            var extentMaxY = double.MinValue;
+            foreach (var footprint in footprints)
+            {
+                foreach (var point in footprint.OuterLoop)
+                {
+                    extentMinX = Math.Min(extentMinX, point.X);
+                    extentMinY = Math.Min(extentMinY, point.Y);
+                    extentMaxX = Math.Max(extentMaxX, point.X);
+                    extentMaxY = Math.Max(extentMaxY, point.Y);
+                }
+            }
+
+            extentMinX -= bandWidth;
+            extentMinY -= bandWidth;
+            extentMaxX += bandWidth;
+            extentMaxY += bandWidth;
+
+            var controlFloorIds = new HashSet<long>(footprints.Select(fp => fp.FloorId));
+            var sampleStep = UnitUtils.ConvertToInternalUnits(
+                BurialSampleStepMillimeters, UnitTypeId.Millimeters);
+            var tolerance = UnitUtils.ConvertToInternalUnits(
+                BurialToleranceMillimeters, UnitTypeId.Millimeters);
+
+            var floors = new FilteredElementCollector(doc).OfClass(typeof(Floor)).Cast<Floor>();
+            foreach (var floor in floors)
+            {
+                long floorId = floor.Id.GetIdValue();
+                if (controlFloorIds.Contains(floorId))
+                {
+                    continue;
+                }
+
+                var bounds = floor.get_BoundingBox(null);
+                if (bounds == null)
+                {
+                    continue;
+                }
+
+                var minX = Math.Max(bounds.Min.X, extentMinX);
+                var maxX = Math.Min(bounds.Max.X, extentMaxX);
+                var minY = Math.Max(bounds.Min.Y, extentMinY);
+                var maxY = Math.Min(bounds.Max.Y, extentMaxY);
+                if (minX > maxX || minY > maxY)
+                {
+                    continue; // 樓板不在擾動範圍內。
+                }
+
+                var floorSolids = CollectSolids(floor);
+                if (floorSolids.Count == 0)
+                {
+                    continue;
+                }
+
+                var samples = new List<(double FloorTopZ, double OriginalZ, double DesignZ)>();
+                void AddSample(double x, double y)
+                {
+                    var point = new Point2D(x, y);
+                    var floorTopZ = IntersectTerrainTopZ(floorSolids, point, rayBottomZ, rayTopZ);
+                    if (!floorTopZ.HasValue)
+                    {
+                        return; // 射線沒打到樓板（重疊框的空角）。
+                    }
+
+                    var originalZ = IntersectTerrainTopZ(originalSolids, point, rayBottomZ, rayTopZ);
+                    var designZ = IntersectTerrainTopZ(designSolids, point, rayBottomZ, rayTopZ);
+                    if (originalZ.HasValue && designZ.HasValue)
+                    {
+                        samples.Add((floorTopZ.Value, originalZ.Value, designZ.Value));
+                    }
+                }
+
+                for (var x = minX + (sampleStep / 2); x <= maxX; x += sampleStep)
+                {
+                    for (var y = minY + (sampleStep / 2); y <= maxY; y += sampleStep)
+                    {
+                        AddSample(x, y);
+                    }
+                }
+
+                if (samples.Count == 0)
+                {
+                    // 細長薄板可能整片落在步距之間，至少取重疊框中心一點。
+                    AddSample((minX + maxX) / 2, (minY + maxY) / 2);
+                }
+
+                var (newlyBuried, maxNewDepth) = FloorBurialCheck.Evaluate(samples, tolerance);
+                if (newlyBuried)
+                {
+                    var depthMeters = UnitUtils.ConvertFromInternalUnits(maxNewDepth, UnitTypeId.Meters);
+                    warnings.Add(
+                        $"非控制樓板 ID {floorId} 整地後被設計地形覆蓋（新增埋深最大 {depthMeters:F2} m）；"
+                        + "若需保留外露，請將該板納入 floorIds 一併整地，或調整坡率／邊坡率政策。");
                 }
             }
         }
