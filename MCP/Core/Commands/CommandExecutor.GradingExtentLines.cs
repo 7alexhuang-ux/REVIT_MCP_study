@@ -252,7 +252,7 @@ namespace RevitMCP.Core
                 }
 
                 subCategory.SetLineWeight(10, GraphicsStyleType.Projection);
-                subCategory.LineColor = new Color(0, 130, 0);
+                subCategory.LineColor = new Color(0, 51, 153); // 深藍（2026-07-08 使用者裁決，原深綠）
                 return subCategory.GetGraphicsStyle(GraphicsStyleType.Projection);
             }
             catch (Autodesk.Revit.Exceptions.ApplicationException)
