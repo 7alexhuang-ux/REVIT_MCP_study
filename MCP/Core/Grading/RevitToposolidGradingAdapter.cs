@@ -556,12 +556,14 @@ namespace RevitMCP.Core.Grading
                 }
 
                 IReadOnlyList<XYZ> bandFill;
+                IReadOnlyList<IReadOnlyCollection<int>> transitionRingBreaks;
                 using (_timeline.Measure("銜接帶外圈取樣"))
                 {
                     var built = BuildTransitionRings(
                         transitionSolids, footprints, settings, rateFields, xyTolerance, elevationTolerance,
                         rayBottomZ, rayTopZ, warnings);
                     transitionRings = built.Rings;
+                    transitionRingBreaks = built.RingBreaks;
                     bandFill = built.BandFill;
                 }
 
@@ -590,7 +592,7 @@ namespace RevitMCP.Core.Grading
 
                 using (_timeline.Measure("銜接帶摺線"))
                 {
-                    DrawRingSplitLines(editor, transitionRings, xyTolerance);
+                    DrawRingSplitLines(editor, transitionRings, transitionRingBreaks, xyTolerance);
                     doc.Regenerate();
                 }
             }
@@ -1175,7 +1177,7 @@ namespace RevitMCP.Core.Grading
         /// <summary>逐邊坡率的角點混坡長度（公尺）。</summary>
         private const double BoundaryRateBlendMeters = 2.0;
 
-        private (IReadOnlyList<IReadOnlyList<XYZ>> Rings, IReadOnlyList<XYZ> BandFill) BuildTransitionRings(
+        private (IReadOnlyList<IReadOnlyList<XYZ>> Rings, IReadOnlyList<IReadOnlyCollection<int>> RingBreaks, IReadOnlyList<XYZ> BandFill) BuildTransitionRings(
             IReadOnlyList<Solid> solids,
             IReadOnlyList<FloorFootprint> footprints,
             TransitionSettings settings,
@@ -1193,6 +1195,7 @@ namespace RevitMCP.Core.Grading
                 ? ToInternalMeters(settings.MaxExtensionMeters)
                 : 0.0;
             var rings = new List<IReadOnlyList<XYZ>>(footprints.Count);
+            var ringBreaks = new List<IReadOnlyCollection<int>>(footprints.Count);
             var bandFill = new List<XYZ>();
             for (var footprintIndex = 0; footprintIndex < footprints.Count; footprintIndex++)
             {
@@ -1204,6 +1207,9 @@ namespace RevitMCP.Core.Grading
                 var anchors = Polygon2D.DensifiedBoundaryWithCornerArcs(
                     loop, RingMaxChordFeet, RingArcMaxStepRadians);
                 var ring = new List<XYZ>(anchors.Count);
+                // 2026-07-08 實機教訓：錨點被跳過（鄰板投影/超出地形/無帶可放）時摺線必須斷段，
+                // 封圈連弦會從高處斜切樓板上空、SlabShape 沿線抬升成垂直細片鰭。
+                var breakTracker = new RingBreakTracker();
                 var cappedCount = 0;
                 var maxResidualFeet = 0.0;
                 foreach (var (boundaryPoint, direction) in anchors)
@@ -1239,6 +1245,7 @@ namespace RevitMCP.Core.Grading
 
                         if (extension < xyTolerance)
                         {
+                            breakTracker.MarkSkipped();
                             continue; // 地形已在板底高程，無帶可放。
                         }
                     }
@@ -1248,12 +1255,14 @@ namespace RevitMCP.Core.Grading
                         boundaryPoint.Y + (direction.Y * extension));
                     if (footprints.Any(other => Polygon2D.Contains(other.OuterLoop, ringXY, xyTolerance)))
                     {
-                        continue; // 凹角或鄰板：圈點落回投影內時跳過，缺段由摺線 try-catch 與包絡驗收把關。
+                        breakTracker.MarkSkipped();
+                        continue; // 凹角或鄰板：圈點落回投影內時跳過，缺段由鄰板邊界摺線把關。
                     }
 
                     var terrainZ = IntersectTerrainTopZ(solids, ringXY, rayBottomZ, rayTopZ);
                     if (!terrainZ.HasValue)
                     {
+                        breakTracker.MarkSkipped();
                         continue; // 規則 7：超出地形不處理。
                     }
 
@@ -1270,6 +1279,7 @@ namespace RevitMCP.Core.Grading
                     }
 
                     ring.Add(new XYZ(ringXY.X, ringXY.Y, terrainZ.Value));
+                    breakTracker.MarkAdded();
 
                     // 徑向填充：在此錨點的放坡帶寬度中間每 RadialFillStepFeet 補控制點，
                     // 供距離場分類賦予漸變目標高程，砍除跨帶寬三角網鼓起（offset 陡坡地包絡殘留）。
@@ -1302,14 +1312,16 @@ namespace RevitMCP.Core.Grading
                 }
 
                 rings.Add(ring);
+                ringBreaks.Add(breakTracker.Finalize());
             }
 
-            return (rings, bandFill);
+            return (rings, ringBreaks, bandFill);
         }
 
         private static void DrawRingSplitLines(
             SlabShapeEditor editor,
             IReadOnlyList<IReadOnlyList<XYZ>> rings,
+            IReadOnlyList<IReadOnlyCollection<int>> ringBreaks,
             double xyTolerance)
         {
             var vertices = new List<SlabShapeVertex>();
@@ -1322,10 +1334,20 @@ namespace RevitMCP.Core.Grading
             }
 
             var matchTolerance = VertexMatchTolerance;
-            foreach (var ring in rings)
+            for (var ringIndex = 0; ringIndex < rings.Count; ringIndex++)
             {
+                var ring = rings[ringIndex];
+                var breaks = ringBreaks != null && ringIndex < ringBreaks.Count
+                    ? ringBreaks[ringIndex]
+                    : null;
                 for (var index = 0; index < ring.Count; index++)
                 {
+                    if (breaks != null && breaks.Contains(index))
+                    {
+                        // 斷段（錨點缺口）：不連弦，缺口段地形由鄰板邊界摺線或原地形自身把關。
+                        continue;
+                    }
+
                     var startVertex = FindNearestVertex(vertices, ToPoint2D(ring[index]), matchTolerance);
                     var endVertex = FindNearestVertex(
                         vertices, ToPoint2D(ring[(index + 1) % ring.Count]), matchTolerance);
