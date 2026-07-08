@@ -95,7 +95,7 @@ namespace RevitMCP.Core
 
                 view = CreateContextSchemeView3D(doc, _uiApp.ActiveUIDocument.ActiveView);
                 view.Name = UniqueViewName(doc, $"整地-{schemeName}");
-                ApplySchemeVisibility(doc, view, hideIds);
+                ApplySchemeVisibility(doc, view, design.Id, hideIds);
                 view.SaveOrientationAndLock();
                 record["SchemeViewId"] = view.Id.GetIdValue();
                 UpdateSchemeRecord(doc, design, record);
@@ -191,11 +191,19 @@ namespace RevitMCP.Core
         }
 
         /// <summary>
-        /// 方案視圖可見性：階段篩選藏拆除物（原地形與其子分割）＋明確隱藏其他地形。
+        /// 方案視圖可見性：先確保目標設計地形可見（複製來源可能是別的方案視圖、已把它藏了——
+        /// 2026-07-08 實機教訓：方案2 地形在自己的方案視圖被繼承隱藏，AVF 引用直接失效），
+        /// 再套階段篩選藏拆除物（原地形與其子分割）＋明確隱藏其他地形。
         /// 階段篩選建立失敗時仍有明確隱藏兜底（hideIds 已含原地形）。
         /// </summary>
-        private static void ApplySchemeVisibility(Document doc, View view, IReadOnlyList<ElementId> hideIds)
+        private static void ApplySchemeVisibility(
+            Document doc, View view, ElementId targetDesignId, IReadOnlyList<ElementId> hideIds)
         {
+            if (doc.GetElement(targetDesignId) is Element target && target.IsHidden(view))
+            {
+                view.UnhideElements(new List<ElementId> { targetDesignId });
+            }
+
             var phaseFilterId = EnsureSchemeResultPhaseFilter(doc);
             if (phaseFilterId != ElementId.InvalidElementId)
             {

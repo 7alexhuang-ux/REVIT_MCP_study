@@ -151,12 +151,23 @@ namespace RevitMCP.Core
                 section.get_Parameter(BuiltInParameter.VIEW_PHASE_FILTER)?.Set(phaseFilter.Id);
             }
 
-            if (otherDesignIds.Count > 0)
-            {
-                section.HideElements(otherDesignIds.ToList());
-            }
+            HideElementsSafely(doc, section, otherDesignIds);
 
             return section;
+        }
+
+        /// <summary>逐元素過濾後隱藏（不可隱藏／已隱藏者略過），避免整批 HideElements 因單一元素炸掉。</summary>
+        private static void HideElementsSafely(Document doc, View view, IReadOnlyList<ElementId> ids)
+        {
+            var toHide = ids
+                .Select(id => doc.GetElement(id))
+                .Where(element => element != null && element.CanBeHidden(view) && !element.IsHidden(view))
+                .Select(element => element.Id)
+                .ToList();
+            if (toHide.Count > 0)
+            {
+                view.HideElements(toHide);
+            }
         }
 
         /// <summary>
@@ -183,10 +194,7 @@ namespace RevitMCP.Core
                 view.get_Parameter(BuiltInParameter.VIEW_PHASE_FILTER)?.Set(phaseFilter.Id);
             }
 
-            if (otherDesignIds.Count > 0)
-            {
-                view.HideElements(otherDesignIds.ToList());
-            }
+            HideElementsSafely(doc, view, otherDesignIds);
 
             var mid = (start + end) / 2;
             var lineDirection = (end - start).Normalize();
@@ -302,7 +310,8 @@ namespace RevitMCP.Core
                 }
                 catch (Exception ex)
                 {
-                    steps.Add($"失敗：{ex.Message}");
+                    // 帶例外型別：Revit 例外常見空訊息，只印 Message 會把根因吃掉（2026-07-08 實機教訓）。
+                    steps.Add($"失敗：{ex.GetType().Name}: {ex.Message}");
                     schemeColumns.Add((schemeName, Array.Empty<long>(), steps));
                 }
             }
