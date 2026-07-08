@@ -10,10 +10,14 @@ namespace RevitMCP.Core
 {
     public partial class CommandExecutor
     {
-        // 範圍線取樣參數：步距 1 m（超過 4 萬節點時自動放大）、擾動判定門檻 20 mm、
-        // 簡化容差 0.75 步距（把 1 步距階梯斜線收成直線）。
+        // 範圍線取樣參數：步距 1 m（超過 4 萬節點時自動放大）、擾動判定門檻 50 mm、
+        // 簡化容差 0.75 步距（把 1 步距階梯斜線收成直線）、最小環面積 4 m²。
+        // 實機教訓（2026-07-08 新址總驗）：設計副本加點重新三角化會在帶內外留下 2〜20cm 的
+        // 表面微差斑點（25 環其中 24 個是斑點），門檻 50mm＋面積過濾雙保險去除；
+        // 真實擾動（放坡收尾帶 1:2 時每 10cm 水平即 5cm 高差）不受影響。
         private const double ExtentSampleStepMillimeters = 1000.0;
-        private const double ExtentDisturbedToleranceMillimeters = 20.0;
+        private const double ExtentDisturbedToleranceMillimeters = 50.0;
+        private const double ExtentMinLoopAreaSquareMeters = 4.0;
         private const int ExtentMaxGridNodes = 40000;
 
         /// <summary>
@@ -122,7 +126,10 @@ namespace RevitMCP.Core
                 }
             }
 
+            var minLoopArea = UnitUtils.ConvertToInternalUnits(
+                ExtentMinLoopAreaSquareMeters, UnitTypeId.SquareMeters);
             var loops = DisturbanceContour.ExtractBoundaryLoops(mask, minX, minY, step)
+                .Where(loop => Polygon2D.Area(loop) >= minLoopArea) // 去除重新三角化微差斑點環
                 .Select(loop => DisturbanceContour.SimplifyLoop(loop, step * 0.75))
                 .Where(loop => loop.Count >= 3)
                 .ToList();
