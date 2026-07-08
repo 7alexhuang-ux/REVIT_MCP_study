@@ -35,9 +35,11 @@ These counts must be derived from source, not copied by memory.
 |---|---:|---|
 | Runtime MCP tools | 96 | `registerRevitTools()` from `MCP-Server/src/tools/index.ts` |
 | Domain SOP files | 47 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
-| Claude skills | 22 | `.claude/skills/*/SKILL.md` |
+| Claude skills | 23 | `.claude/skills/*/SKILL.md` |
 
 When these numbers change, update `CLAUDE.md`, `README.md`, `README.en.md`, `docs/DOCUMENT_AUDIENCE_INVENTORY.md`, and any public site copy that makes grand-total claims. Then run `scripts/verify-qaqc.ps1 -SkipBuild -SkipDeploy`.
+
+`docs/PROJECT_INTRO.md` is the community-facing project introduction (zh-TW). Whenever features, architecture, or the counts above change materially, update that file in the same change set (its counts are dated snapshots pointing back here as the source of truth).
 
 ## Session Start Protocol
 

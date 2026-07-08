@@ -17,7 +17,7 @@ This inventory defines which project documents are for AI agents, human readers,
 |---|---:|---|
 | Runtime MCP tools | 96 | `registerRevitTools()` |
 | Domain SOP files | 47 | `domain/*.md` except README, plus `domain/references/*.md` |
-| Claude skills | 22 | `.claude/skills/*/SKILL.md` |
+| Claude skills | 23 | `.claude/skills/*/SKILL.md` |
 
 ## AI-Only Documents
 
@@ -59,6 +59,7 @@ These must remain understandable by both sides.
 | `pyRevit_Tools/README.md` | pyRevit users | pyRevit-specific notes |
 | `docs/BIM_MCP/**` | public knowledge site | Teaching and visual explanations |
 | `docs/troubleshoot-first-install.md` | users | First-install troubleshooting |
+| `docs/PROJECT_INTRO.md` | community readers | Community-facing project introduction (zh-TW, two-tier: overview + full technical detail, mermaid diagrams); update when features/counts change |
 | `docs/slides.md` | presenters | Slide index |
 | `Antigravity_MCP_Complete_Guide.md` | Antigravity users | Manual MCP setup for Antigravity client |
 | `docs/UPDATE-PULL-GUIDE.md`, `docs/branch-index.md` | users and maintainers | Update flow and branch overview |
