@@ -38,14 +38,15 @@ namespace RevitMCP.Core
         }
 
         /// <summary>依視圖 ID 為任意地形（含未整地的原始地形）上六級坡熱區——C-00c 原始地形基準欄用。</summary>
-        private object CreateSlopeHeatmapForTerrain(Document doc, Toposolid target, long viewIdValue)
+        private object CreateSlopeHeatmapForTerrain(
+            Document doc, Toposolid target, long viewIdValue, double sampleStepMeters = 2.0)
         {
             if (!(doc.GetElement(new ElementId(checked((int)viewIdValue))) is View view))
             {
                 throw new InvalidOperationException($"視圖 ID {viewIdValue} 不存在。");
             }
 
-            return CreateSlopeHeatmapCore(doc, target, view, 2.0);
+            return CreateSlopeHeatmapCore(doc, target, view, sampleStepMeters);
         }
 
         /// <summary>坡度熱區核心：對指定地形頂面取樣著色（不依賴方案登記簿）。</summary>

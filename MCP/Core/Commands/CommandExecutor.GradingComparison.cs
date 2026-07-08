@@ -300,6 +300,7 @@ namespace RevitMCP.Core
             // 原地形已被整地標記拆除，3D/坡度用「整地-原地形顯示」篩選現形；隱藏全部方案設計地形。
             var schemeColumns = new List<(string Name, long[] ViewIds, List<string> Steps)>();
             var baselineSteps = new List<string>();
+            Logger.Info("[整地比較] 原始地形基準欄開始");
             try
             {
                 long base3dId;
@@ -330,7 +331,7 @@ namespace RevitMCP.Core
                 baselineSteps.Add("基準視圖");
                 var baseSlopeId = DuplicateSchemeView(doc, base3dId, "整地-原始地形-坡度");
                 TrySubStep(baselineSteps, "坡度熱區", () =>
-                    CreateSlopeHeatmapForTerrain(doc, original, baseSlopeId));
+                    CreateSlopeHeatmapForTerrain(doc, original, baseSlopeId, sampleStepMeters: 3.0));
 
                 long baseSectionId, baseIsoId;
                 using (var transaction = new Transaction(doc, "建立原始地形基準剖面"))
@@ -361,13 +362,19 @@ namespace RevitMCP.Core
                 var designId = record.Value<long>("DesignToposolidId");
                 var designElementId = new ElementId(checked((int)designId));
                 var schemeName = record.Value<string>("SchemeName") ?? $"方案{designId}";
+                Logger.Info($"[整地比較] 方案欄開始：{schemeName}（design {designId}）");
                 var steps = new List<string>();
                 try
                 {
                     var view3dId = EnsureSchemeView(doc, designId, record, steps);
                     var slopeViewId = DuplicateSchemeView(doc, view3dId, $"整地-{schemeName}-坡度比較");
                     TrySubStep(steps, "坡度熱區", () =>
-                        CreateSlopeHeatmap(new JObject { ["designToposolidId"] = designId, ["viewId"] = slopeViewId }));
+                        CreateSlopeHeatmap(new JObject
+                        {
+                            ["designToposolidId"] = designId,
+                            ["viewId"] = slopeViewId,
+                            ["sampleStepMeters"] = 3.0
+                        }));
                     TrySubStep(steps, "範圍線", () =>
                         CreateGradingExtentLines(new JObject { ["designToposolidId"] = designId, ["viewId"] = slopeViewId }));
 
@@ -404,6 +411,7 @@ namespace RevitMCP.Core
             }
 
             // 4. 建圖紙＋格局排版＋明細表（單一交易）
+            Logger.Info($"[整地比較] 圖紙排版開始（{usable.Count} 欄）");
             long sheetIdValue;
             using (var transaction = new Transaction(doc, "建立方案總比較圖紙"))
             {

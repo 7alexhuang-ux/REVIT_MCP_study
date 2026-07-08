@@ -47,6 +47,7 @@ namespace RevitMCP.Core
             {
                 var designId = record.Value<long>("DesignToposolidId");
                 var schemeName = record.Value<string>("SchemeName") ?? $"方案{designId}";
+                Logger.Info($"[整地出圖] 方案開始：{schemeName}（design {designId}）");
                 var steps = new List<string>();
                 try
                 {
@@ -54,14 +55,25 @@ namespace RevitMCP.Core
                     var viewIds = new List<long> { mainViewId };
 
                     // 挖填／坡度熱區各需獨立視圖（AVF 一視圖一顯示樣式，同圖會互相覆蓋）。
+                    // 複合流程取樣放寬 3m（單跑預設 2m）：UI 執行緒凍結時間減半、視覺差異可忽略。
                     var cutfillViewId = DuplicateSchemeView(doc, mainViewId, $"整地-{schemeName}-挖填");
                     TrySubStep(steps, "挖填熱區", () =>
-                        CreateCutfillHeatmap(new JObject { ["designToposolidId"] = designId, ["viewId"] = cutfillViewId }));
+                        CreateCutfillHeatmap(new JObject
+                        {
+                            ["designToposolidId"] = designId,
+                            ["viewId"] = cutfillViewId,
+                            ["sampleStepMeters"] = 3.0
+                        }));
                     viewIds.Add(cutfillViewId);
 
                     var slopeViewId = DuplicateSchemeView(doc, mainViewId, $"整地-{schemeName}-坡度");
                     TrySubStep(steps, "坡度熱區", () =>
-                        CreateSlopeHeatmap(new JObject { ["designToposolidId"] = designId, ["viewId"] = slopeViewId }));
+                        CreateSlopeHeatmap(new JObject
+                        {
+                            ["designToposolidId"] = designId,
+                            ["viewId"] = slopeViewId,
+                            ["sampleStepMeters"] = 3.0
+                        }));
                     viewIds.Add(slopeViewId);
 
                     TrySubStep(steps, "整地範圍線", () =>
@@ -104,6 +116,7 @@ namespace RevitMCP.Core
             object pdf = null;
             if (export && sheetIds.Count > 0)
             {
+                Logger.Info($"[整地出圖] PDF 匯出開始（{sheetIds.Count} 張圖紙）");
                 try
                 {
                     pdf = ExportSheetsPdf(new JObject
@@ -112,10 +125,12 @@ namespace RevitMCP.Core
                         ["outputPath"] = outputPath,
                         ["combine"] = true
                     });
+                    Logger.Info("[整地出圖] PDF 匯出完成");
                 }
                 catch (Exception ex)
                 {
                     pdf = new { Success = false, Error = ex.Message };
+                    Logger.Info($"[整地出圖] PDF 匯出失敗—{ex.GetType().Name}: {ex.Message}");
                 }
             }
 
@@ -229,16 +244,25 @@ namespace RevitMCP.Core
             return titleBlock.Id;
         }
 
+        /// <summary>
+        /// 容錯子步驟＋進度日誌（2026-07-08 實機教訓：複合命令在 UI 執行緒同步跑數分鐘、
+        /// Revit 全程「未回應」且日誌零輸出，使用者以為當機強制關閉——每步起訖必須落日誌）。
+        /// </summary>
         private void TrySubStep(List<string> steps, string label, Func<object> action)
         {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            Logger.Info($"[整地出圖] 步驟開始：{label}");
             try
             {
                 action();
                 steps.Add(label);
+                Logger.Info($"[整地出圖] 步驟完成：{label}（{stopwatch.ElapsedMilliseconds} ms）");
             }
             catch (Exception ex)
             {
                 steps.Add($"{label}（略過：{ex.Message}）");
+                Logger.Info($"[整地出圖] 步驟略過：{label}（{stopwatch.ElapsedMilliseconds} ms）"
+                    + $"—{ex.GetType().Name}: {ex.Message}");
             }
         }
     }
