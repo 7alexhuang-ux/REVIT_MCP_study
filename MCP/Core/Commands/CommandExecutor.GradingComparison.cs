@@ -126,9 +126,11 @@ namespace RevitMCP.Core
                 ?? throw new InvalidOperationException("找不到剖面視圖類型。");
 
             var mid = (start + end) / 2;
-            var lineDirection = (end - start).Normalize();
+            // 2026-07-08 實機教訓：剖面線兩端取自地形最高/最低點、方向帶 Z 分量，直接當
+            // BasisX 會與 BasisZ 不正交 → CreateSection 丟空訊息 ArgumentException。必須壓平。
+            var lineDirection = HorizontalDirection(start, end);
             var viewDirection = lineDirection.CrossProduct(XYZ.BasisZ);
-            var halfLength = start.DistanceTo(end) / 2;
+            var halfLength = HorizontalDistance(start, end) / 2;
             var depth = UnitUtils.ConvertToInternalUnits(15, UnitTypeId.Meters);
             var height = UnitUtils.ConvertToInternalUnits(30, UnitTypeId.Meters);
 
@@ -167,6 +169,26 @@ namespace RevitMCP.Core
             }
         }
 
+        /// <summary>剖面線的水平方向（Z 壓平＋正規化）；退化（近垂直線）時拒絕。</summary>
+        private static XYZ HorizontalDirection(XYZ start, XYZ end)
+        {
+            var flat = new XYZ(end.X - start.X, end.Y - start.Y, 0);
+            if (flat.GetLength() < 1e-9)
+            {
+                throw new InvalidOperationException("剖面線水平投影長度為零，無法決定剖面方向。");
+            }
+
+            return flat.Normalize();
+        }
+
+        /// <summary>剖面線的水平投影長度。</summary>
+        private static double HorizontalDistance(XYZ start, XYZ end)
+        {
+            var dx = end.X - start.X;
+            var dy = end.Y - start.Y;
+            return Math.Sqrt((dx * dx) + (dy * dy));
+        }
+
         /// <summary>逐元素過濾後隱藏（不可隱藏／已隱藏者略過），避免整批 HideElements 因單一元素炸掉。</summary>
         private static void HideElementsSafely(Document doc, View view, IReadOnlyList<ElementId> ids)
         {
@@ -201,9 +223,10 @@ namespace RevitMCP.Core
             HideElementsSafely(doc, view, otherDesignIds);
 
             var mid = (start + end) / 2;
-            var lineDirection = (end - start).Normalize();
+            // 同正剖面：方向必須壓平，否則剖面框 Transform 不正交。
+            var lineDirection = HorizontalDirection(start, end);
             var viewDirection = lineDirection.CrossProduct(XYZ.BasisZ);
-            var halfLength = start.DistanceTo(end) / 2;
+            var halfLength = HorizontalDistance(start, end) / 2;
             var halfBand = UnitUtils.ConvertToInternalUnits(25, UnitTypeId.Meters);
             var height = UnitUtils.ConvertToInternalUnits(30, UnitTypeId.Meters);
             var transform = Transform.Identity;
