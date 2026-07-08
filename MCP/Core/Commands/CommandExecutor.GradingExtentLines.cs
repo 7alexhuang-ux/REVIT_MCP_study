@@ -10,10 +10,18 @@ namespace RevitMCP.Core
 {
     public partial class CommandExecutor
     {
+        // 範圍線取樣參數：步距 1 m（超過 4 萬節點時自動放大）、擾動判定門檻 20 mm、
+        // 簡化容差 0.75 步距（把 1 步距階梯斜線收成直線）。
+        private const double ExtentSampleStepMillimeters = 1000.0;
+        private const double ExtentDisturbedToleranceMillimeters = 20.0;
+        private const int ExtentMaxGridNodes = 40000;
+
         /// <summary>
-        /// 整地範圍線：在方案視圖建模型線環標示「動過地的範圍」。
-        /// footprint 只畫樓板投影邊界（即擾動邊）；offset/slope 另畫外圈放坡外緣（坡腳線，
-        /// 圓角，與 5A 控制環一致的距離場坡腳）。線繪於水平面呈現平面擾動範圍；面積以登記簿為準。
+        /// 整地範圍線：量測「原地形 vs 設計地形」差異場的邊界，畫成封閉、不自交的完整模型線環。
+        /// 2026-07-08 使用者裁決重寫：舊做法逐板重建坡腳環——多板環交疊、跳過處連弦、飄出地形；
+        /// 改為對結果取等值輪廓，多板聯集、逐邊坡率、上限截止、地形邊界全部自動正確。
+        /// 重跑會先清掉本方案先前的範圍線（登記簿 ExtentLineIds；舊版無記錄者以高程平面清除）。
+        /// 純標示，擾動面積以登記簿為準。
         /// </summary>
         private object CreateGradingExtentLines(JObject parameters)
         {
@@ -21,6 +29,12 @@ namespace RevitMCP.Core
             var (design, record) = RequireSchemeRecord(doc, parameters);
             var view = ResolveSchemeView(doc, parameters, record);
             var mode = record.Value<string>("Mode") ?? "footprint_only";
+
+            var originalId = record.Value<long?>("OriginalToposolidId") ?? 0;
+            if (!(doc.GetElement(new ElementId(checked((int)originalId))) is Toposolid original))
+            {
+                throw new InvalidOperationException($"方案的原地形 {originalId} 不存在，無法比對擾動範圍。");
+            }
 
             var floorIds = (record["FloorIds"] as JArray)?.Values<long>().ToList() ?? new List<long>();
             IToposolidGradingAdapter adapter = new RevitToposolidGradingAdapter();
@@ -31,108 +45,96 @@ namespace RevitMCP.Core
                 throw new InvalidOperationException("方案沒有可用的控制樓板投影，無法建立範圍線。");
             }
 
-            // 線環繪於水平面（設計地形頂 + 200mm），僅取 XY 呈現平面擾動範圍。
-            var designBox = design.get_BoundingBox(null);
-            var planeZ = (designBox?.Max.Z ?? 0)
-                + UnitUtils.ConvertToInternalUnits(200, UnitTypeId.Millimeters);
-
-            var xyTolerance = UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters);
-            var ringMaxChord = UnitUtils.ConvertToInternalUnits(1000.0, UnitTypeId.Millimeters);
-            var arcStep = Math.PI / 12.0;
-
-            var offsetFeet = mode == "offset_transition"
-                ? UnitUtils.ConvertToInternalUnits(
-                    record.Value<double?>("OffsetDistanceMeters") ?? 0, UnitTypeId.Meters)
-                : 0.0;
-            var maxExtensionFeet = mode == "slope_transition"
-                ? UnitUtils.ConvertToInternalUnits(
-                    record.Value<double?>("MaxExtensionMeters") ?? 20, UnitTypeId.Meters)
-                : 0.0;
-            var runPerRise = ParseRunPerRise(record.Value<string>("SlopeRatio"));
-
-            // slope 模式的距離場坡腳需取樣原地形。
-            IReadOnlyList<Solid> originalSolids = new List<Solid>();
-            var rayBottomZ = 0.0;
-            var rayTopZ = 0.0;
-            if (mode == "slope_transition")
+            var originalSolids = RevitToposolidGradingAdapter.CollectSolids(original);
+            var designSolids = RevitToposolidGradingAdapter.CollectSolids(design);
+            if (originalSolids.Count == 0 || designSolids.Count == 0)
             {
-                var originalId = record.Value<long?>("OriginalToposolidId") ?? 0;
-                if (doc.GetElement(new ElementId(checked((int)originalId))) is Toposolid original)
-                {
-                    originalSolids = RevitToposolidGradingAdapter.CollectSolids(original);
-                    var originalBox = original.get_BoundingBox(null);
-                    if (originalBox != null)
-                    {
-                        rayBottomZ = originalBox.Min.Z - 10.0;
-                        rayTopZ = originalBox.Max.Z + 10.0;
-                    }
-                }
+                throw new InvalidOperationException("取不到原地形或設計地形的實體幾何。");
             }
 
-            var innerLoops = new List<List<XYZ>>();
-            var outerLoops = new List<List<XYZ>>();
-            foreach (var footprint in footprints)
+            var originalBox = original.get_BoundingBox(null);
+            var designBox = design.get_BoundingBox(null);
+            if (originalBox == null || designBox == null)
             {
-                innerLoops.Add(footprint.OuterLoop.Select(p => new XYZ(p.X, p.Y, planeZ)).ToList());
-                if (mode == "footprint_only")
+                throw new InvalidOperationException("取不到地形範圍盒。");
+            }
+
+            var rayBottomZ = Math.Min(originalBox.Min.Z, designBox.Min.Z) - 10.0;
+            var rayTopZ = Math.Max(originalBox.Max.Z, designBox.Max.Z) + 10.0;
+
+            // 取樣範圍：控制樓板投影包圍盒外擴帶寬＋2 m 邊距。
+            var bandWidthMeters = mode == "offset_transition"
+                ? record.Value<double?>("OffsetDistanceMeters") ?? 0
+                : mode == "slope_transition"
+                    ? record.Value<double?>("MaxExtensionMeters") ?? 20
+                    : 0.0;
+            var margin = UnitUtils.ConvertToInternalUnits(bandWidthMeters + 2.0, UnitTypeId.Meters);
+            var minX = double.MaxValue;
+            var minY = double.MaxValue;
+            var maxX = double.MinValue;
+            var maxY = double.MinValue;
+            foreach (var point in footprints.SelectMany(footprint => footprint.OuterLoop))
+            {
+                minX = Math.Min(minX, point.X);
+                minY = Math.Min(minY, point.Y);
+                maxX = Math.Max(maxX, point.X);
+                maxY = Math.Max(maxY, point.Y);
+            }
+
+            minX -= margin;
+            minY -= margin;
+            maxX += margin;
+            maxY += margin;
+
+            var step = UnitUtils.ConvertToInternalUnits(ExtentSampleStepMillimeters, UnitTypeId.Millimeters);
+            var estimatedNodes = (((maxX - minX) / step) + 1) * (((maxY - minY) / step) + 1);
+            if (estimatedNodes > ExtentMaxGridNodes)
+            {
+                step *= Math.Sqrt(estimatedNodes / ExtentMaxGridNodes); // 超大基地自動放大步距。
+            }
+
+            var countX = (int)Math.Ceiling((maxX - minX) / step) + 1;
+            var countY = (int)Math.Ceiling((maxY - minY) / step) + 1;
+            var disturbedTolerance = UnitUtils.ConvertToInternalUnits(
+                ExtentDisturbedToleranceMillimeters, UnitTypeId.Millimeters);
+
+            var mask = new bool[countX, countY];
+            for (var ix = 0; ix < countX; ix++)
+            {
+                for (var iy = 0; iy < countY; iy++)
                 {
-                    continue;
-                }
-
-                var anchors = Polygon2D.DensifiedBoundaryWithCornerArcs(footprint.OuterLoop, ringMaxChord, arcStep);
-                var outer = new List<XYZ>();
-                foreach (var (basePoint, direction) in anchors)
-                {
-                    double extension;
-                    if (mode == "offset_transition")
+                    var sample = new Point2D(minX + (ix * step), minY + (iy * step));
+                    var originalZ = RevitToposolidGradingAdapter.IntersectTerrainTopZ(
+                        originalSolids, sample, rayBottomZ, rayTopZ);
+                    if (!originalZ.HasValue)
                     {
-                        extension = offsetFeet;
-                    }
-                    else
-                    {
-                        var bottomZ = footprint.BottomElevationAt(basePoint.X, basePoint.Y);
-                        extension = maxExtensionFeet;
-                        for (var iteration = 0; iteration < 8; iteration++)
-                        {
-                            var probe = new Point2D(
-                                basePoint.X + (direction.X * extension),
-                                basePoint.Y + (direction.Y * extension));
-                            var probeTerrainZ = RevitToposolidGradingAdapter.IntersectTerrainTopZ(
-                                originalSolids, probe, rayBottomZ, rayTopZ);
-                            if (!probeTerrainZ.HasValue)
-                            {
-                                break;
-                            }
-
-                            var needed = TransitionGeometry.SlopeExtensionNeeded(
-                                bottomZ, probeTerrainZ.Value, runPerRise);
-                            extension = Math.Min(needed, maxExtensionFeet);
-                        }
-
-                        if (extension < xyTolerance)
-                        {
-                            continue;
-                        }
+                        continue; // 超出地形＝未擾動，輪廓自動貼齊地形邊界。
                     }
 
-                    var x = basePoint.X + (direction.X * extension);
-                    var y = basePoint.Y + (direction.Y * extension);
-                    if (footprints.Any(other => Polygon2D.Contains(other.OuterLoop, new Point2D(x, y), xyTolerance)))
+                    var designZ = RevitToposolidGradingAdapter.IntersectTerrainTopZ(
+                        designSolids, sample, rayBottomZ, rayTopZ);
+                    if (!designZ.HasValue)
                     {
                         continue;
                     }
 
-                    outer.Add(new XYZ(x, y, planeZ));
-                }
-
-                if (outer.Count >= 2)
-                {
-                    outerLoops.Add(outer);
+                    mask[ix, iy] = Math.Abs(designZ.Value - originalZ.Value) > disturbedTolerance;
                 }
             }
 
-            int innerCurves;
-            int outerCurves;
+            var loops = DisturbanceContour.ExtractBoundaryLoops(mask, minX, minY, step)
+                .Select(loop => DisturbanceContour.SimplifyLoop(loop, step * 0.75))
+                .Where(loop => loop.Count >= 3)
+                .ToList();
+            if (loops.Count == 0)
+            {
+                throw new InvalidOperationException("量測不到擾動範圍（原地形與設計地形差異低於門檻）。");
+            }
+
+            // 線環繪於水平面（設計地形頂 + 200mm），僅取 XY 呈現平面擾動範圍。
+            var planeZ = designBox.Max.Z + UnitUtils.ConvertToInternalUnits(200, UnitTypeId.Millimeters);
+
+            int curveCount;
             using (var transaction = new Transaction(doc, "建立整地範圍線"))
             {
                 GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
@@ -141,10 +143,18 @@ namespace RevitMCP.Core
                     throw new InvalidOperationException("無法啟動建立整地範圍線交易。");
                 }
 
+                DeletePreviousExtentLines(doc, record, planeZ);
+
                 var sketchPlane = SketchPlane.Create(
                     doc, Plane.CreateByNormalAndOrigin(XYZ.BasisZ, new XYZ(0, 0, planeZ)));
-                innerCurves = DrawModelLoops(doc, sketchPlane, innerLoops);
-                outerCurves = DrawModelLoops(doc, sketchPlane, outerLoops);
+                var createdIds = DrawModelLoops(
+                    doc,
+                    sketchPlane,
+                    loops.Select(loop => loop.Select(p => new XYZ(p.X, p.Y, planeZ)).ToList()).ToList());
+                curveCount = createdIds.Count;
+
+                record["ExtentLineIds"] = new JArray(createdIds.Select(id => id.GetIdValue()));
+                UpdateSchemeRecord(doc, design, record);
 
                 if (transaction.Commit() != TransactionStatus.Committed)
                 {
@@ -156,37 +166,56 @@ namespace RevitMCP.Core
             {
                 ViewId = view.Id.GetIdValue(),
                 Mode = mode,
-                FootprintCurveCount = innerCurves,
-                DaylightCurveCount = outerCurves,
-                Message = mode == "footprint_only"
-                    ? $"整地範圍線已建立（樓板投影邊界 {innerCurves} 段；footprint 無放坡帶）。"
-                    : $"整地範圍線已建立（樓板投影邊界 {innerCurves} 段＋放坡外緣 {outerCurves} 段，圓角）。"
+                LoopCount = loops.Count,
+                CurveCount = curveCount,
+                Message = $"整地範圍線已建立：{loops.Count} 條封閉邊界環、共 {curveCount} 段"
+                    + "（量測原/設計地形差異場，多板聯集自動合併；重跑會先清除舊線）。"
             };
         }
 
-        /// <summary>解析坡度字串「1:n」為 run/rise（水平/垂直）；無效時回緩坡預設 2。</summary>
-        private static double ParseRunPerRise(string slopeRatio)
+        /// <summary>
+        /// 清除本方案先前建立的範圍線：優先用登記簿記錄的 ExtentLineIds（精確）；
+        /// 舊版記錄沒有 ID 時，清掉位於範圍線高程平面上的水平模型線（一次性遷移，
+        /// 各方案設計地形同源故平面高程相同——舊版亂線全屬待清雜訊，可一併移除）。
+        /// </summary>
+        private static void DeletePreviousExtentLines(Document doc, JObject record, double planeZ)
         {
-            if (!string.IsNullOrWhiteSpace(slopeRatio))
+            var recordedIds = (record["ExtentLineIds"] as JArray)?.Values<long>().ToList();
+            if (recordedIds != null && recordedIds.Count > 0)
             {
-                var parts = slopeRatio.Split(':');
-                if (parts.Length == 2
-                    && double.TryParse(parts[0], out var rise)
-                    && double.TryParse(parts[1], out var run)
-                    && rise > 0 && run > 0)
+                var deletable = recordedIds
+                    .Select(id => new ElementId(checked((int)id)))
+                    .Where(id => doc.GetElement(id) != null)
+                    .ToList();
+                if (deletable.Count > 0)
                 {
-                    return run / rise;
+                    doc.Delete(deletable);
                 }
+
+                return;
             }
 
-            return 2.0;
+            var zTolerance = UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters);
+            var legacyIds = new FilteredElementCollector(doc)
+                .OfClass(typeof(CurveElement))
+                .Cast<CurveElement>()
+                .Where(curveElement => curveElement is ModelCurve
+                    && curveElement.GeometryCurve is Line line
+                    && Math.Abs(line.GetEndPoint(0).Z - planeZ) < zTolerance
+                    && Math.Abs(line.GetEndPoint(1).Z - planeZ) < zTolerance)
+                .Select(curveElement => curveElement.Id)
+                .ToList();
+            if (legacyIds.Count > 0)
+            {
+                doc.Delete(legacyIds);
+            }
         }
 
-        /// <summary>把各封閉點環以模型線段連成環（退化段容錯略過），回傳建立的線段數。</summary>
-        private static int DrawModelLoops(Document doc, SketchPlane sketchPlane, List<List<XYZ>> loops)
+        /// <summary>把各封閉點環以模型線段連成環（退化段容錯略過），回傳建立的線段元素 ID。</summary>
+        private static List<ElementId> DrawModelLoops(Document doc, SketchPlane sketchPlane, List<List<XYZ>> loops)
         {
             var minLength = UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters);
-            var count = 0;
+            var created = new List<ElementId>();
             foreach (var loop in loops)
             {
                 if (loop.Count < 2)
@@ -205,8 +234,8 @@ namespace RevitMCP.Core
 
                     try
                     {
-                        doc.Create.NewModelCurve(Line.CreateBound(start, end), sketchPlane);
-                        count++;
+                        var curve = doc.Create.NewModelCurve(Line.CreateBound(start, end), sketchPlane);
+                        created.Add(curve.Id);
                     }
                     catch (Autodesk.Revit.Exceptions.ApplicationException)
                     {
@@ -215,7 +244,7 @@ namespace RevitMCP.Core
                 }
             }
 
-            return count;
+            return created;
         }
     }
 }
