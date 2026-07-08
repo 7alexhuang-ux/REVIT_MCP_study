@@ -126,11 +126,13 @@ namespace RevitMCP.Core
                 ?? throw new InvalidOperationException("找不到剖面視圖類型。");
 
             var mid = (start + end) / 2;
-            // 2026-07-08 實機教訓×2：①剖面線方向帶 Z 分量會與 BasisZ 不正交（壓平處理）；
-            // ②RevitAPI 文件明定 CreateSection 的 (right, up, view) 須構成「左手」座標系——
-            // view 方向必須取 BasisZ×d；右手系（d×BasisZ）丟空訊息 ArgumentException。
+            // 2026-07-09 文件實錘（BoundingBoxXYZ.Transform）：「The transform must always be
+            // right-handed and orthonormal.」——盒座標系必須右手系：BasisX=d、BasisY=ẑ、
+            // BasisZ=d×ẑ（X×Y=Z ✓）。CreateSection 文件的「(right,up,view) 左手系」描述的是
+            // Revit 內部由 up/view 推算 right 向量的方式，與盒 Transform 手性無關（前輪誤讀）。
+            // 方向並須壓平（帶 Z 分量會破壞正交性）。
             var lineDirection = HorizontalDirection(start, end);
-            var viewDirection = XYZ.BasisZ.CrossProduct(lineDirection);
+            var viewDirection = lineDirection.CrossProduct(XYZ.BasisZ);
             var halfLength = HorizontalDistance(start, end) / 2;
             var depth = UnitUtils.ConvertToInternalUnits(15, UnitTypeId.Meters);
             var height = UnitUtils.ConvertToInternalUnits(30, UnitTypeId.Meters);
@@ -226,7 +228,8 @@ namespace RevitMCP.Core
             ApplyExtentLineCategoryVisibility(doc, view, null); // 剖立體不顯示範圍線
 
             var mid = (start + end) / 2;
-            // 同正剖面：方向壓平；剖面框 Transform 須為右手系 → BasisY 取 BasisZ×d。
+            // 同正剖面：方向壓平；BoundingBoxXYZ.Transform 須右手系——BasisX=d、BasisY=ẑ×d、
+            // BasisZ=ẑ（X×Y＝d×(ẑ×d)＝ẑ ✓）。
             var lineDirection = HorizontalDirection(start, end);
             var viewDirection = XYZ.BasisZ.CrossProduct(lineDirection);
             var halfLength = HorizontalDistance(start, end) / 2;
