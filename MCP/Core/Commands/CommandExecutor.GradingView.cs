@@ -68,8 +68,9 @@ namespace RevitMCP.Core
         }
 
         /// <summary>
-        /// 建立方案鎖定 3D 視圖：隔離設計地形與控制樓板、鎖定方位（Spot Elevation 前提）、
-        /// 可選匯出 PNG；視圖 ID 與截圖路徑回寫方案記錄。
+        /// 建立方案鎖定 3D 視圖：保留模型全部既有元素（柱樑、梁板、植栽…），只控制地形可見性
+        /// （顯示本方案設計地形、隱藏原地形與其他方案）；複製使用者當前 3D 視圖繼承表現法；
+        /// 鎖定方位（Spot Elevation 前提）、可選匯出 PNG；視圖 ID 與截圖路徑回寫方案記錄。
         /// </summary>
         private object CreateGradingSchemeView(JObject parameters)
         {
@@ -79,23 +80,9 @@ namespace RevitMCP.Core
             var outputPath = parameters["outputPath"]?.Value<string>();
             var schemeName = record.Value<string>("SchemeName") ?? $"方案{design.Id.GetIdValue()}";
 
-            var isolateIds = new List<ElementId> { design.Id };
-            foreach (var floorId in (record["FloorIds"] as JArray)?.Values<long>() ?? Enumerable.Empty<long>())
-            {
-                if (doc.GetElement(new ElementId(checked((int)floorId))) is Floor floor)
-                {
-                    isolateIds.Add(floor.Id);
-                }
-            }
-
-            var viewFamilyType = new FilteredElementCollector(doc)
-                .OfClass(typeof(ViewFamilyType))
-                .Cast<ViewFamilyType>()
-                .FirstOrDefault(candidate => candidate.ViewFamily == ViewFamily.ThreeDimensional);
-            if (viewFamilyType == null)
-            {
-                throw new InvalidOperationException("找不到 3D 視圖類型（ViewFamilyType）。");
-            }
+            // 2026-07-08 使用者裁決：方案視圖不得隔離到只剩控制樓板＋設計地形——柱樑、梁板、
+            // 植栽等既有元素全部保留，只控制「哪個地形可見」（藏原地形與其他方案設計地形）。
+            var hideIds = CollectOtherTerrainIds(doc, design.Id);
 
             View3D view;
             using (var transaction = new Transaction(doc, "建立整地方案視圖"))
@@ -106,10 +93,9 @@ namespace RevitMCP.Core
                     throw new InvalidOperationException("無法啟動建立整地方案視圖交易。");
                 }
 
-                view = View3D.CreateIsometric(doc, viewFamilyType.Id);
+                view = CreateContextSchemeView3D(doc, _uiApp.ActiveUIDocument.ActiveView);
                 view.Name = UniqueViewName(doc, $"整地-{schemeName}");
-                view.IsolateElementsTemporary(isolateIds);
-                view.ConvertTemporaryHideIsolateToPermanent();
+                ApplySchemeVisibility(doc, view, hideIds);
                 view.SaveOrientationAndLock();
                 record["SchemeViewId"] = view.Id.GetIdValue();
                 UpdateSchemeRecord(doc, design, record);
@@ -148,6 +134,113 @@ namespace RevitMCP.Core
                 Message = $"方案視圖「{view.Name}」已建立並鎖定"
                     + (screenshotPath != null ? $"，截圖已輸出：{screenshotPath}" : "。")
             };
+        }
+
+        /// <summary>登記簿內全部地形（原地形＋各方案設計地形）中，非目標方案者——方案視圖要藏的清單。</summary>
+        private static IReadOnlyList<ElementId> CollectOtherTerrainIds(Document doc, ElementId targetDesignId)
+        {
+            var ids = new List<ElementId>();
+            foreach (var json in RevitToposolidGradingAdapter.ReadSchemeRecords(doc))
+            {
+                var record = JObject.Parse(json);
+                var originalId = new ElementId(checked((int)record.Value<long>("OriginalToposolidId")));
+                var designId = new ElementId(checked((int)record.Value<long>("DesignToposolidId")));
+                if (originalId != targetDesignId && !ids.Contains(originalId))
+                {
+                    ids.Add(originalId);
+                }
+
+                if (designId != targetDesignId && !ids.Contains(designId))
+                {
+                    ids.Add(designId);
+                }
+            }
+
+            return ids;
+        }
+
+        /// <summary>
+        /// 2026-07-08 使用者裁決：方案視圖保留全部既有元素。做法與整地檢視器一致——
+        /// 複製使用者當前 3D 視圖以繼承表現法（非 3D 退回等角新視圖）、關閉剖面框。
+        /// </summary>
+        private static View3D CreateContextSchemeView3D(Document doc, View activeView)
+        {
+            View3D view = null;
+            if (activeView is View3D source && !source.IsTemplate
+                && source.ViewType == ViewType.ThreeD
+                && source.CanViewBeDuplicated(ViewDuplicateOption.Duplicate))
+            {
+                view = doc.GetElement(source.Duplicate(ViewDuplicateOption.Duplicate)) as View3D;
+            }
+
+            if (view == null)
+            {
+                var viewFamilyType = new FilteredElementCollector(doc)
+                    .OfClass(typeof(ViewFamilyType)).Cast<ViewFamilyType>()
+                    .FirstOrDefault(candidate => candidate.ViewFamily == ViewFamily.ThreeDimensional)
+                    ?? throw new InvalidOperationException("找不到 3D 視圖類型（ViewFamilyType）。");
+                view = View3D.CreateIsometric(doc, viewFamilyType.Id);
+            }
+
+            if (view.IsSectionBoxActive)
+            {
+                view.IsSectionBoxActive = false; // 避免使用者視圖的剖面框裁掉地形。
+            }
+
+            return view;
+        }
+
+        /// <summary>
+        /// 方案視圖可見性：階段篩選藏拆除物（原地形與其子分割）＋明確隱藏其他地形。
+        /// 階段篩選建立失敗時仍有明確隱藏兜底（hideIds 已含原地形）。
+        /// </summary>
+        private static void ApplySchemeVisibility(Document doc, View view, IReadOnlyList<ElementId> hideIds)
+        {
+            var phaseFilterId = EnsureSchemeResultPhaseFilter(doc);
+            if (phaseFilterId != ElementId.InvalidElementId)
+            {
+                view.get_Parameter(BuiltInParameter.VIEW_PHASE_FILTER)?.Set(phaseFilterId);
+            }
+
+            var toHide = hideIds
+                .Select(id => doc.GetElement(id))
+                .Where(element => element != null && element.CanBeHidden(view) && !element.IsHidden(view))
+                .Select(element => element.Id)
+                .ToList();
+            if (toHide.Count > 0)
+            {
+                view.HideElements(toHide);
+            }
+        }
+
+        /// <summary>
+        /// 「整地-方案顯示」階段篩選：拆除／暫時不顯示（原地形消失、成果乾淨）、新建／既有正常。
+        /// 與檢視器的「整地-原地形顯示」（拆除正常色）互補，兩者用途相反。
+        /// </summary>
+        private static ElementId EnsureSchemeResultPhaseFilter(Document doc)
+        {
+            const string filterName = "整地-方案顯示";
+            var existing = new FilteredElementCollector(doc)
+                .OfClass(typeof(PhaseFilter)).Cast<PhaseFilter>()
+                .FirstOrDefault(filter => filter.Name == filterName);
+            if (existing != null)
+            {
+                return existing.Id;
+            }
+
+            try
+            {
+                var created = PhaseFilter.Create(doc, filterName);
+                created.SetPhaseStatusPresentation(ElementOnPhaseStatus.New, PhaseStatusPresentation.ShowByCategory);
+                created.SetPhaseStatusPresentation(ElementOnPhaseStatus.Existing, PhaseStatusPresentation.ShowByCategory);
+                created.SetPhaseStatusPresentation(ElementOnPhaseStatus.Demolished, PhaseStatusPresentation.DontShow);
+                created.SetPhaseStatusPresentation(ElementOnPhaseStatus.Temporary, PhaseStatusPresentation.DontShow);
+                return created.Id;
+            }
+            catch
+            {
+                return ElementId.InvalidElementId; // 兜底：呼叫端的明確隱藏清單已含原地形。
+            }
         }
 
         private static string UniqueViewName(Document doc, string baseName)

@@ -197,14 +197,17 @@ namespace RevitMCP.Core
                 ColorSettingsType = AnalysisDisplayStyleColorSettingsType.SolidColorRanges
             };
 
-            // AVF 值＝坡度%；分段點明確綁在六級坡門檻（5/15/30/40/55）且各帶該級定義色，
-            // 保證渲染為六段離散色（實機教訓：未綁值的中間色不會落在級別邊界，看起來不是六色）。
+            // AVF 值＝坡度%；分段點明確綁在六級坡門檻（5/15/30/40/55）且各帶該級定義色。
+            // 實機教訓（2026-07-08，使用者從圖例抓出）：SolidColorRanges 的中間色項著色的是
+            // 「該值以下、至前一項」的區段——顏色綁級別「下界」會整條錯位一級（紫蓋掉 40-55 的
+            // 五級紅、一級綠只剩 0 一條線）。故各級顏色須綁該級「上界」：一級綠@5…五級紅@55，
+            // 六級紫由 MaxColor 承接 >55。
             var intermediate = new List<AnalysisDisplayColorEntry>();
-            for (var level = 2; level <= 6; level++)
+            for (var level = 1; level <= 5; level++)
             {
                 var slopeClass = SlopeClassifier.GetClass(level);
                 intermediate.Add(new AnalysisDisplayColorEntry(
-                    ToRevitColor(slopeClass), slopeClass.LowerExclusivePercent.Value));
+                    ToRevitColor(slopeClass), slopeClass.UpperInclusivePercent.Value));
             }
 
             colorSettings.SetIntermediateColors(intermediate);

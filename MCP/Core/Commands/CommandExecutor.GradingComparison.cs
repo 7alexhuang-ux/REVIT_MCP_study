@@ -159,10 +159,14 @@ namespace RevitMCP.Core
             return section;
         }
 
-        /// <summary>建方案剖面立體圖：等角 3D＋剖面框沿剖切帶（規格風險節：不用透視，避免透視排圖限制）。</summary>
+        /// <summary>
+        /// 建方案剖面立體圖：等角 3D＋剖面框沿剖切帶（規格風險節：不用透視，避免透視排圖限制）。
+        /// 2026-07-08 使用者裁決：不隔離——柱樑、梁板、植栽等既有元素全部保留，
+        /// 與正剖面同規：Show All 讓拆除的原地形疊比、明確隱藏其他方案設計地形。
+        /// </summary>
         private static View3D CreateSchemeSectionIsoView(
             Document doc, string schemeName, XYZ start, XYZ end,
-            IReadOnlyList<ElementId> isolateIds)
+            IReadOnlyList<ElementId> otherDesignIds)
         {
             var viewFamilyType = new FilteredElementCollector(doc)
                 .OfClass(typeof(ViewFamilyType)).Cast<ViewFamilyType>()
@@ -171,8 +175,18 @@ namespace RevitMCP.Core
 
             var view = View3D.CreateIsometric(doc, viewFamilyType.Id);
             view.Name = UniqueViewName(doc, $"整地-{schemeName}-剖立體");
-            view.IsolateElementsTemporary(isolateIds.ToList());
-            view.ConvertTemporaryHideIsolateToPermanent();
+            var phaseFilter = new FilteredElementCollector(doc)
+                .OfClass(typeof(PhaseFilter)).Cast<PhaseFilter>()
+                .FirstOrDefault(filter => filter.Name == "全部顯示" || filter.Name == "Show All");
+            if (phaseFilter != null)
+            {
+                view.get_Parameter(BuiltInParameter.VIEW_PHASE_FILTER)?.Set(phaseFilter.Id);
+            }
+
+            if (otherDesignIds.Count > 0)
+            {
+                view.HideElements(otherDesignIds.ToList());
+            }
 
             var mid = (start + end) / 2;
             var lineDirection = (end - start).Normalize();
