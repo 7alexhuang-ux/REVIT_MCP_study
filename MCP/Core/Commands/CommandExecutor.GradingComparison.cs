@@ -148,6 +148,13 @@ namespace RevitMCP.Core
                 Min = new XYZ(-halfLength, -height / 2, 0),
                 Max = new XYZ(halfLength, height / 2, depth)
             };
+            // CreateSection 文件例外清單：「MinEnabled and MaxEnabled must be set to true
+            // for all three directions」——明確全開，不賭建構子預設。
+            for (var dimension = 0; dimension < 3; dimension++)
+            {
+                sectionBox.set_MinEnabled(dimension, true);
+                sectionBox.set_MaxEnabled(dimension, true);
+            }
 
             var section = ViewSection.CreateSection(doc, viewFamilyType.Id, sectionBox);
             section.Name = UniqueViewName(doc, $"整地-{schemeName}-剖面");
