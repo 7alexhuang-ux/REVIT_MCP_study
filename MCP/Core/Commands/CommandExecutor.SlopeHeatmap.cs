@@ -48,11 +48,9 @@ namespace RevitMCP.Core
             var maxSlopePercent = 0.0;
             var levelCounts = new int[7]; // 索引 1..6 對應六級坡
 
-            // 2026-07-08 實機差分：鎖定視圖「同交易內解鎖」後 AddSpatialFieldPrimitive 仍拋例外、
-            // 未鎖定視圖同碼成功——解鎖必須先行提交，AVF 用獨立交易，完成後再恢復鎖定。
-            var wasLocked = UnlockViewCommitted(doc, view);
-            try
-            {
+            // 2026-07-08 實機差分定案：AddSpatialFieldPrimitive(Reference) 需要視圖「至少被開啟過一次」
+            // ——切為作用中視圖後成功；鎖定與否無關。AVF 前把目標視圖切成作用中（必須在交易外）。
+            EnsureViewActivated(view);
             using (var transaction = new Transaction(doc, "建立坡度熱區圖"))
             {
                 GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
@@ -140,11 +138,6 @@ namespace RevitMCP.Core
                 {
                     throw new InvalidOperationException("建立坡度熱區圖交易未能提交。");
                 }
-            }
-            }
-            finally
-            {
-                RelockViewCommitted(doc, view, wasLocked);
             }
 
             var legend = SlopeClassifier.Classes.Select(slopeClass => new

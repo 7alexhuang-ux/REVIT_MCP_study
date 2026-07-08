@@ -374,11 +374,10 @@ namespace RevitMCP.Core
             var totalPoints = 0;
             var maxCutMeters = 0.0;
             var maxFillMeters = 0.0;
-            // 2026-07-08 實機差分：鎖定視圖「同交易內解鎖」後 AddSpatialFieldPrimitive 仍拋例外、
-            // 未鎖定視圖同碼成功——解鎖必須先行提交，AVF 用獨立交易，完成後再恢復鎖定。
-            var wasLocked = UnlockViewCommitted(doc, view);
-            try
-            {
+            // 2026-07-08 實機差分定案：AddSpatialFieldPrimitive(Reference) 需要視圖「至少被開啟過一次」
+            // ——同一鎖定視圖未開啟即拋例外、切為作用中視圖後成功；鎖定與否無關（先前兩輪「解鎖」
+            // 修法均為混淆變因誤判，已移除）。AVF 前把目標視圖切成作用中（必須在交易外）。
+            EnsureViewActivated(view);
             using (var transaction = new Transaction(doc, "建立挖填熱區圖"))
             {
                 GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
@@ -457,11 +456,6 @@ namespace RevitMCP.Core
                     throw new InvalidOperationException("建立挖填熱區圖交易未能提交。");
                 }
             }
-            }
-            finally
-            {
-                RelockViewCommitted(doc, view, wasLocked);
-            }
 
             return new
             {
@@ -476,54 +470,25 @@ namespace RevitMCP.Core
         }
 
         /// <summary>
-        /// 方案視圖以 SaveOrientationAndLock 鎖定，鎖定中的 3D 視圖會拒絕 AVF 相關修改。
-        /// 2026-07-08 實機差分：「同交易內解鎖」不夠——AddSpatialFieldPrimitive 仍拋例外，
-        /// 解鎖必須以獨立交易先行提交（含重生），AVF 才吃得到解鎖狀態。
+        /// 2026-07-08 實機差分定案：AddSpatialFieldPrimitive(Reference) 需要視圖「至少被開啟過一次」，
+        /// 否則拋 ApplicationException；鎖定與否無關（同一鎖定視圖開啟後成功）。
+        /// AVF 前把目標視圖切成作用中視圖（同步生效；必須在交易外呼叫）。
         /// </summary>
-        private static bool UnlockViewCommitted(Document doc, View view)
+        private void EnsureViewActivated(View view)
         {
-            if (!(view is View3D view3D) || !view3D.IsLocked)
-            {
-                return false;
-            }
-
-            using (var transaction = new Transaction(doc, "解鎖方案視圖（AVF 前置）"))
-            {
-                GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
-                if (transaction.Start() != TransactionStatus.Started)
-                {
-                    throw new InvalidOperationException("無法啟動解鎖方案視圖交易。");
-                }
-
-                view3D.Unlock();
-                doc.Regenerate();
-                if (transaction.Commit() != TransactionStatus.Committed)
-                {
-                    throw new InvalidOperationException("解鎖方案視圖交易未能提交。");
-                }
-            }
-
-            return true;
-        }
-
-        /// <summary>恢復方案視圖鎖定（獨立交易；AVF 主體失敗也要執行，避免視圖留在解鎖狀態）。</summary>
-        private static void RelockViewCommitted(Document doc, View view, bool wasLocked)
-        {
-            if (!wasLocked || !(view is View3D view3D))
+            var uiDocument = _uiApp.ActiveUIDocument;
+            if (uiDocument.ActiveView?.Id == view.Id)
             {
                 return;
             }
 
-            using (var transaction = new Transaction(doc, "恢復方案視圖鎖定"))
+            try
             {
-                GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
-                if (transaction.Start() != TransactionStatus.Started)
-                {
-                    return; // 鎖不回去不應蓋掉 AVF 主體的結果或例外。
-                }
-
-                view3D.SaveOrientationAndLock();
-                transaction.Commit();
+                uiDocument.ActiveView = view;
+            }
+            catch (Autodesk.Revit.Exceptions.ApplicationException)
+            {
+                // 切不過去（如視圖不可開啟）就維持原視圖；後續 AVF 失敗會拋出明確例外。
             }
         }
 
