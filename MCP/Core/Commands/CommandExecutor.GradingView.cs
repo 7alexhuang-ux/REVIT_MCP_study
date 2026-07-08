@@ -281,6 +281,11 @@ namespace RevitMCP.Core
             var totalPoints = 0;
             var maxCutMeters = 0.0;
             var maxFillMeters = 0.0;
+            // 2026-07-08 實機差分：鎖定視圖「同交易內解鎖」後 AddSpatialFieldPrimitive 仍拋例外、
+            // 未鎖定視圖同碼成功——解鎖必須先行提交，AVF 用獨立交易，完成後再恢復鎖定。
+            var wasLocked = UnlockViewCommitted(doc, view);
+            try
+            {
             using (var transaction = new Transaction(doc, "建立挖填熱區圖"))
             {
                 GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
@@ -289,7 +294,6 @@ namespace RevitMCP.Core
                     throw new InvalidOperationException("無法啟動建立挖填熱區圖交易。");
                 }
 
-                var wasLocked = UnlockViewForAnalysis(view);
                 var manager = SpatialFieldManager.GetSpatialFieldManager(view)
                     ?? SpatialFieldManager.CreateSpatialFieldManager(view, 1);
                 var schemaIndex = FindOrRegisterCutFillSchema(manager);
@@ -355,11 +359,15 @@ namespace RevitMCP.Core
                 }
 
                 ApplyCutFillDisplayStyle(doc, view);
-                RelockViewAfterAnalysis(view, wasLocked);
                 if (transaction.Commit() != TransactionStatus.Committed)
                 {
                     throw new InvalidOperationException("建立挖填熱區圖交易未能提交。");
                 }
+            }
+            }
+            finally
+            {
+                RelockViewCommitted(doc, view, wasLocked);
             }
 
             return new
@@ -375,25 +383,54 @@ namespace RevitMCP.Core
         }
 
         /// <summary>
-        /// 方案視圖以 SaveOrientationAndLock 鎖定，鎖定中的 3D 視圖會拒絕 AVF 相關修改；
-        /// AVF 動作前暫時解鎖，完成後以 RelockViewAfterAnalysis 恢復鎖定（同一交易內，失敗會整體回滾）。
+        /// 方案視圖以 SaveOrientationAndLock 鎖定，鎖定中的 3D 視圖會拒絕 AVF 相關修改。
+        /// 2026-07-08 實機差分：「同交易內解鎖」不夠——AddSpatialFieldPrimitive 仍拋例外，
+        /// 解鎖必須以獨立交易先行提交（含重生），AVF 才吃得到解鎖狀態。
         /// </summary>
-        private static bool UnlockViewForAnalysis(View view)
+        private static bool UnlockViewCommitted(Document doc, View view)
         {
-            if (view is View3D view3D && view3D.IsLocked)
+            if (!(view is View3D view3D) || !view3D.IsLocked)
             {
-                view3D.Unlock();
-                return true;
+                return false;
             }
 
-            return false;
+            using (var transaction = new Transaction(doc, "解鎖方案視圖（AVF 前置）"))
+            {
+                GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
+                if (transaction.Start() != TransactionStatus.Started)
+                {
+                    throw new InvalidOperationException("無法啟動解鎖方案視圖交易。");
+                }
+
+                view3D.Unlock();
+                doc.Regenerate();
+                if (transaction.Commit() != TransactionStatus.Committed)
+                {
+                    throw new InvalidOperationException("解鎖方案視圖交易未能提交。");
+                }
+            }
+
+            return true;
         }
 
-        private static void RelockViewAfterAnalysis(View view, bool wasLocked)
+        /// <summary>恢復方案視圖鎖定（獨立交易；AVF 主體失敗也要執行，避免視圖留在解鎖狀態）。</summary>
+        private static void RelockViewCommitted(Document doc, View view, bool wasLocked)
         {
-            if (wasLocked && view is View3D view3D)
+            if (!wasLocked || !(view is View3D view3D))
             {
+                return;
+            }
+
+            using (var transaction = new Transaction(doc, "恢復方案視圖鎖定"))
+            {
+                GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
+                if (transaction.Start() != TransactionStatus.Started)
+                {
+                    return; // 鎖不回去不應蓋掉 AVF 主體的結果或例外。
+                }
+
                 view3D.SaveOrientationAndLock();
+                transaction.Commit();
             }
         }
 
