@@ -223,6 +223,15 @@ namespace RevitMCP.Core
 
             colorSettings.SetIntermediateColors(intermediate);
 
+            // 圖例瘦身（2026-07-08 使用者回報圖例擋住模型中央）：步數 6 段對應六級坡、
+            // 不重複顯示資料描述——高度約減半。註：AVF 圖例「位置」Revit API 未開放設定，
+            // 使用者手動拖曳一次後 Revit 會記住該視圖的位置。
+            var legendSettings = new AnalysisDisplayLegendSettings
+            {
+                NumberOfSteps = 6,
+                ShowDataDescription = false
+            };
+
             var style = new FilteredElementCollector(doc)
                 .OfClass(typeof(AnalysisDisplayStyle))
                 .Cast<AnalysisDisplayStyle>()
@@ -230,14 +239,14 @@ namespace RevitMCP.Core
             if (style == null)
             {
                 var surfaceSettings = new AnalysisDisplayColoredSurfaceSettings { ShowGridLines = false };
-                var legendSettings = new AnalysisDisplayLegendSettings();
                 style = AnalysisDisplayStyle.CreateAnalysisDisplayStyle(
                     doc, SlopeDisplayStyleName, surfaceSettings, colorSettings, legendSettings);
             }
             else
             {
-                // 既有樣式（可能由舊版程式建立）一律覆寫色帶設定，避免模型殘留舊六色定義。
+                // 既有樣式（可能由舊版程式建立）一律覆寫色帶與圖例設定，避免模型殘留舊定義。
                 style.SetColorSettings(colorSettings);
+                style.SetLegendSettings(legendSettings);
             }
 
             view.AnalysisDisplayStyleId = style.Id;

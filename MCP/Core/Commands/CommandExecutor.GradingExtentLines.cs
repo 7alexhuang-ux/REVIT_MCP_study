@@ -197,8 +197,10 @@ namespace RevitMCP.Core
 
                 DeletePreviousExtentLines(doc, record, legacyPlaneZ);
 
-                var lineStyle = EnsureExtentLineStyle(doc);
+                var lineStyle = EnsureExtentLineStyle(doc, design.Id);
                 var createdIds = DrawDrapedLoops(doc, drapedLoops, lineStyle);
+                // 本方案視圖確保只顯示自己的範圍線（其他方案視圖在各自建立時已藏本子類別）。
+                ApplyExtentLineCategoryVisibility(doc, view, design.Id);
                 curveCount = createdIds.Count;
 
                 record["ExtentLineIds"] = new JArray(createdIds.Select(id => id.GetIdValue()));
@@ -259,13 +261,46 @@ namespace RevitMCP.Core
             }
         }
 
+        /// <summary>整地範圍線線型式名稱前綴；各方案有自己的子類別（範圍線只在自己方案的視圖顯示）。</summary>
+        internal const string ExtentLineStylePrefix = "整地範圍線";
+
         /// <summary>
-        /// 「整地範圍線」專屬線型式（Lines 子類別）：粗線寬＋深綠色，讓範圍在圖面上醒目
-        /// （2026-07-08 使用者裁決：線太細要加粗）。冪等——已存在即重用並校正粗細顏色。
+        /// 各整地視圖的範圍線可見性：只顯示 ownDesignId 方案的範圍線子類別，其餘（含舊式無尾碼）
+        /// 全部隱藏；ownDesignId=null（原始地形／檢視原地形）時全部隱藏。
+        /// 用分類可見性而非逐元素隱藏——之後新畫的線自動遵守，免跨視圖記帳。
         /// </summary>
-        private static GraphicsStyle EnsureExtentLineStyle(Document doc)
+        private static void ApplyExtentLineCategoryVisibility(Document doc, View view, ElementId ownDesignId)
         {
-            const string styleName = "整地範圍線";
+            var ownName = ownDesignId == null || ownDesignId == ElementId.InvalidElementId
+                ? null
+                : $"{ExtentLineStylePrefix}-{ownDesignId.GetIdValue()}";
+            var linesCategory = doc.Settings.Categories.get_Item(BuiltInCategory.OST_Lines);
+            foreach (Category subCategory in linesCategory.SubCategories)
+            {
+                if (!subCategory.Name.StartsWith(ExtentLineStylePrefix, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    view.SetCategoryHidden(subCategory.Id, subCategory.Name != ownName);
+                }
+                catch (Autodesk.Revit.Exceptions.ApplicationException)
+                {
+                    // 個別視圖不支援分類可見性控制時略過，不阻斷主流程。
+                }
+            }
+        }
+
+        /// <summary>
+        /// 「整地範圍線-{方案}」專屬線型式（Lines 子類別）：粗線寬＋深藍色，讓範圍在圖面上醒目。
+        /// 2026-07-08 使用者裁決：①線太細要加粗；②各方案範圍線交疊——模型線全視圖可見，
+        /// 改為每方案一個子類別，各視圖以分類可見性只開自己方案的線。冪等——已存在即校正粗細顏色。
+        /// </summary>
+        private static GraphicsStyle EnsureExtentLineStyle(Document doc, ElementId designId)
+        {
+            var styleName = $"{ExtentLineStylePrefix}-{designId.GetIdValue()}";
             var linesCategory = doc.Settings.Categories.get_Item(BuiltInCategory.OST_Lines);
             Category subCategory = null;
             foreach (Category candidate in linesCategory.SubCategories)

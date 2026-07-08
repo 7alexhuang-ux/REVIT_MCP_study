@@ -204,6 +204,9 @@ namespace RevitMCP.Core
                 view.UnhideElements(new List<ElementId> { targetDesignId });
             }
 
+            // 範圍線只顯示本方案的（各方案線型式分視圖控制，2026-07-08 使用者裁決：不得交疊）。
+            ApplyExtentLineCategoryVisibility(doc, view, targetDesignId);
+
             var phaseFilterId = EnsureSchemeResultPhaseFilter(doc);
             if (phaseFilterId != ElementId.InvalidElementId)
             {

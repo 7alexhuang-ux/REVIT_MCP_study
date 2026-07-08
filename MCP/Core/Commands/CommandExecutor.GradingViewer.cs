@@ -91,6 +91,10 @@ namespace RevitMCP.Core
                 }
 
                 // 方案名可含 Revit 禁字（如「1:12」的冒號），視圖改名前必過消毒，否則整個檢視器炸掉。
+                // 範圍線只顯示目標方案的（原地形＝全部隱藏）。
+                ApplyExtentLineCategoryVisibility(
+                    doc, view, requestedDesign > 0 ? new ElementId(checked((int)targetId)) : null);
+
                 var desired = GradingNames.SanitizeElementName($"{TerrainReviewViewPrefix}｜{label}");
                 var clash = new FilteredElementCollector(doc).OfClass(typeof(View)).Cast<View>()
                     .Any(candidate => candidate.Id != view.Id && candidate.Name == desired);

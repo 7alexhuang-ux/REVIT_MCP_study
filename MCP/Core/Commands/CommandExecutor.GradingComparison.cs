@@ -126,10 +126,11 @@ namespace RevitMCP.Core
                 ?? throw new InvalidOperationException("找不到剖面視圖類型。");
 
             var mid = (start + end) / 2;
-            // 2026-07-08 實機教訓：剖面線兩端取自地形最高/最低點、方向帶 Z 分量，直接當
-            // BasisX 會與 BasisZ 不正交 → CreateSection 丟空訊息 ArgumentException。必須壓平。
+            // 2026-07-08 實機教訓×2：①剖面線方向帶 Z 分量會與 BasisZ 不正交（壓平處理）；
+            // ②RevitAPI 文件明定 CreateSection 的 (right, up, view) 須構成「左手」座標系——
+            // view 方向必須取 BasisZ×d；右手系（d×BasisZ）丟空訊息 ArgumentException。
             var lineDirection = HorizontalDirection(start, end);
-            var viewDirection = lineDirection.CrossProduct(XYZ.BasisZ);
+            var viewDirection = XYZ.BasisZ.CrossProduct(lineDirection);
             var halfLength = HorizontalDistance(start, end) / 2;
             var depth = UnitUtils.ConvertToInternalUnits(15, UnitTypeId.Meters);
             var height = UnitUtils.ConvertToInternalUnits(30, UnitTypeId.Meters);
@@ -150,6 +151,7 @@ namespace RevitMCP.Core
             section.Name = UniqueViewName(doc, $"整地-{schemeName}-剖面");
             ApplyComparisonPhaseFilter(doc, section, revealDemolished);
             HideElementsSafely(doc, section, otherDesignIds);
+            ApplyExtentLineCategoryVisibility(doc, section, null); // 剖面不顯示範圍線
 
             return section;
         }
@@ -221,11 +223,12 @@ namespace RevitMCP.Core
             view.Name = UniqueViewName(doc, $"整地-{schemeName}-剖立體");
             ApplyComparisonPhaseFilter(doc, view, revealDemolished);
             HideElementsSafely(doc, view, otherDesignIds);
+            ApplyExtentLineCategoryVisibility(doc, view, null); // 剖立體不顯示範圍線
 
             var mid = (start + end) / 2;
-            // 同正剖面：方向必須壓平，否則剖面框 Transform 不正交。
+            // 同正剖面：方向壓平；剖面框 Transform 須為右手系 → BasisY 取 BasisZ×d。
             var lineDirection = HorizontalDirection(start, end);
-            var viewDirection = lineDirection.CrossProduct(XYZ.BasisZ);
+            var viewDirection = XYZ.BasisZ.CrossProduct(lineDirection);
             var halfLength = HorizontalDistance(start, end) / 2;
             var halfBand = UnitUtils.ConvertToInternalUnits(25, UnitTypeId.Meters);
             var height = UnitUtils.ConvertToInternalUnits(30, UnitTypeId.Meters);
@@ -323,6 +326,7 @@ namespace RevitMCP.Core
                     }
 
                     HideElementsSafely(doc, baseView, allDesignIds);
+                    ApplyExtentLineCategoryVisibility(doc, baseView, null); // 原始地形欄不顯示任何範圍線
                     baseView.SaveOrientationAndLock();
                     base3dId = baseView.Id.GetIdValue();
                     transaction.Commit();
@@ -353,6 +357,7 @@ namespace RevitMCP.Core
             catch (Exception ex)
             {
                 baselineSteps.Add($"失敗：{ex.GetType().Name}: {ex.Message}");
+                Logger.Error("[整地比較] 原始地形基準欄失敗", ex);
                 schemeColumns.Add(("原始地形", Array.Empty<long>(), baselineSteps));
             }
 
@@ -398,6 +403,7 @@ namespace RevitMCP.Core
                 {
                     // 帶例外型別：Revit 例外常見空訊息，只印 Message 會把根因吃掉（2026-07-08 實機教訓）。
                     steps.Add($"失敗：{ex.GetType().Name}: {ex.Message}");
+                    Logger.Error($"[整地比較] 方案欄失敗：{schemeName}", ex);
                     schemeColumns.Add((schemeName, Array.Empty<long>(), steps));
                 }
             }
