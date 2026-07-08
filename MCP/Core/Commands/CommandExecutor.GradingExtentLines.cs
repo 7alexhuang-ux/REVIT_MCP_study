@@ -138,20 +138,53 @@ namespace RevitMCP.Core
                 throw new InvalidOperationException("量測不到擾動範圍（原地形與設計地形差異低於門檻）。");
             }
 
+            // 環過濾（使用者裁決：範圍線應為一條封閉完整曲線）：只留「包含控制樓板」的主環，
+            // 其餘外圍殘環剔除；主環內的孔洞環須 ≥25 m² 才保留（小孔多為門檻附近的取樣噪點）。
+            var xyToleranceForContain = UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters);
+            var mainLoops = loops
+                .Where(loop => footprints.Any(footprint =>
+                    footprint.OuterLoop.Any(vertex => Polygon2D.Contains(loop, vertex, xyToleranceForContain))))
+                .ToList();
+            var minHoleArea = UnitUtils.ConvertToInternalUnits(25.0, UnitTypeId.SquareMeters);
+            var holeLoops = loops
+                .Where(loop => !mainLoops.Contains(loop)
+                    && Polygon2D.Area(loop) >= minHoleArea
+                    && mainLoops.Any(main => Polygon2D.Contains(main, loop[0], xyToleranceForContain)))
+                .ToList();
+            loops = mainLoops.Concat(holeLoops).ToList();
+            if (loops.Count == 0)
+            {
+                throw new InvalidOperationException("擾動範圍不含任何控制樓板，範圍線判定異常。");
+            }
+
             // 2026-07-08 使用者裁決：範圍線要「貼在地形上」而非浮空平面——每個環點取樣
-            // 設計地形頂面 Z＋150mm 淨空（避免與地表打架）；舊版浮空平面高程僅用於清除遷移。
+            // 設計地形頂面 Z＋150mm 淨空；取樣不到（輪廓半步出地形邊緣）沿用前一點高程，
+            // 消除「衝天鋸齒」（實機教訓：退回浮空平面高度會在山脊拉出尖刺）。
             var legacyPlaneZ = designBox.Max.Z + UnitUtils.ConvertToInternalUnits(200, UnitTypeId.Millimeters);
             var drapeOffset = UnitUtils.ConvertToInternalUnits(150, UnitTypeId.Millimeters);
-            var drapedLoops = loops
-                .Select(loop => loop
-                    .Select(p =>
+            var drapedLoops = new List<List<XYZ>>();
+            foreach (var loop in loops)
+            {
+                var samples = loop
+                    .Select(p => RevitToposolidGradingAdapter.IntersectTerrainTopZ(
+                        designSolids, p, rayBottomZ, rayTopZ)
+                        ?? RevitToposolidGradingAdapter.IntersectTerrainTopZ(
+                            originalSolids, p, rayBottomZ, rayTopZ))
+                    .ToList();
+                var lastKnown = samples.FirstOrDefault(z => z.HasValue) ?? (legacyPlaneZ - drapeOffset);
+                var draped = new List<XYZ>(loop.Count);
+                for (var index = 0; index < loop.Count; index++)
+                {
+                    if (samples[index].HasValue)
                     {
-                        var z = RevitToposolidGradingAdapter.IntersectTerrainTopZ(
-                            designSolids, p, rayBottomZ, rayTopZ);
-                        return new XYZ(p.X, p.Y, (z ?? legacyPlaneZ - drapeOffset) + drapeOffset);
-                    })
-                    .ToList())
-                .ToList();
+                        lastKnown = samples[index].Value;
+                    }
+
+                    draped.Add(new XYZ(loop[index].X, loop[index].Y, lastKnown + drapeOffset));
+                }
+
+                drapedLoops.Add(draped);
+            }
 
             int curveCount;
             using (var transaction = new Transaction(doc, "建立整地範圍線"))
