@@ -138,8 +138,20 @@ namespace RevitMCP.Core
                 throw new InvalidOperationException("量測不到擾動範圍（原地形與設計地形差異低於門檻）。");
             }
 
-            // 線環繪於水平面（設計地形頂 + 200mm），僅取 XY 呈現平面擾動範圍。
-            var planeZ = designBox.Max.Z + UnitUtils.ConvertToInternalUnits(200, UnitTypeId.Millimeters);
+            // 2026-07-08 使用者裁決：範圍線要「貼在地形上」而非浮空平面——每個環點取樣
+            // 設計地形頂面 Z＋150mm 淨空（避免與地表打架）；舊版浮空平面高程僅用於清除遷移。
+            var legacyPlaneZ = designBox.Max.Z + UnitUtils.ConvertToInternalUnits(200, UnitTypeId.Millimeters);
+            var drapeOffset = UnitUtils.ConvertToInternalUnits(150, UnitTypeId.Millimeters);
+            var drapedLoops = loops
+                .Select(loop => loop
+                    .Select(p =>
+                    {
+                        var z = RevitToposolidGradingAdapter.IntersectTerrainTopZ(
+                            designSolids, p, rayBottomZ, rayTopZ);
+                        return new XYZ(p.X, p.Y, (z ?? legacyPlaneZ - drapeOffset) + drapeOffset);
+                    })
+                    .ToList())
+                .ToList();
 
             int curveCount;
             using (var transaction = new Transaction(doc, "建立整地範圍線"))
@@ -150,14 +162,10 @@ namespace RevitMCP.Core
                     throw new InvalidOperationException("無法啟動建立整地範圍線交易。");
                 }
 
-                DeletePreviousExtentLines(doc, record, planeZ);
+                DeletePreviousExtentLines(doc, record, legacyPlaneZ);
 
-                var sketchPlane = SketchPlane.Create(
-                    doc, Plane.CreateByNormalAndOrigin(XYZ.BasisZ, new XYZ(0, 0, planeZ)));
-                var createdIds = DrawModelLoops(
-                    doc,
-                    sketchPlane,
-                    loops.Select(loop => loop.Select(p => new XYZ(p.X, p.Y, planeZ)).ToList()).ToList());
+                var lineStyle = EnsureExtentLineStyle(doc);
+                var createdIds = DrawDrapedLoops(doc, drapedLoops, lineStyle);
                 curveCount = createdIds.Count;
 
                 record["ExtentLineIds"] = new JArray(createdIds.Select(id => id.GetIdValue()));
@@ -218,8 +226,47 @@ namespace RevitMCP.Core
             }
         }
 
-        /// <summary>把各封閉點環以模型線段連成環（退化段容錯略過），回傳建立的線段元素 ID。</summary>
-        private static List<ElementId> DrawModelLoops(Document doc, SketchPlane sketchPlane, List<List<XYZ>> loops)
+        /// <summary>
+        /// 「整地範圍線」專屬線型式（Lines 子類別）：粗線寬＋深綠色，讓範圍在圖面上醒目
+        /// （2026-07-08 使用者裁決：線太細要加粗）。冪等——已存在即重用並校正粗細顏色。
+        /// </summary>
+        private static GraphicsStyle EnsureExtentLineStyle(Document doc)
+        {
+            const string styleName = "整地範圍線";
+            var linesCategory = doc.Settings.Categories.get_Item(BuiltInCategory.OST_Lines);
+            Category subCategory = null;
+            foreach (Category candidate in linesCategory.SubCategories)
+            {
+                if (candidate.Name == styleName)
+                {
+                    subCategory = candidate;
+                    break;
+                }
+            }
+
+            try
+            {
+                if (subCategory == null)
+                {
+                    subCategory = doc.Settings.Categories.NewSubcategory(linesCategory, styleName);
+                }
+
+                subCategory.SetLineWeight(10, GraphicsStyleType.Projection);
+                subCategory.LineColor = new Color(0, 130, 0);
+                return subCategory.GetGraphicsStyle(GraphicsStyleType.Projection);
+            }
+            catch (Autodesk.Revit.Exceptions.ApplicationException)
+            {
+                return null; // 建不了專屬線型式就用預設樣式，不阻斷範圍線。
+            }
+        }
+
+        /// <summary>
+        /// 把貼地形的 3D 點環以模型線段連成環（每段建立含該段的草圖平面；退化段容錯略過），
+        /// 套「整地範圍線」線型式，回傳建立的線段元素 ID。
+        /// </summary>
+        private static List<ElementId> DrawDrapedLoops(
+            Document doc, List<List<XYZ>> loops, GraphicsStyle lineStyle)
         {
             var minLength = UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters);
             var created = new List<ElementId>();
@@ -241,7 +288,21 @@ namespace RevitMCP.Core
 
                     try
                     {
+                        var direction = (end - start).Normalize();
+                        var normal = direction.CrossProduct(XYZ.BasisZ);
+                        if (normal.GetLength() < 1e-9)
+                        {
+                            normal = direction.CrossProduct(XYZ.BasisX);
+                        }
+
+                        var sketchPlane = SketchPlane.Create(
+                            doc, Plane.CreateByNormalAndOrigin(normal.Normalize(), start));
                         var curve = doc.Create.NewModelCurve(Line.CreateBound(start, end), sketchPlane);
+                        if (lineStyle != null)
+                        {
+                            curve.LineStyle = lineStyle;
+                        }
+
                         created.Add(curve.Id);
                     }
                     catch (Autodesk.Revit.Exceptions.ApplicationException)

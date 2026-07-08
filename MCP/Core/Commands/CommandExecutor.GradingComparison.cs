@@ -111,10 +111,14 @@ namespace RevitMCP.Core
             return (highest - (direction * extend), lowest + (direction * extend));
         }
 
-        /// <summary>建方案正剖面：沿共同剖面線、階段過濾顯示拆除（原地形虛線疊比）、隱藏其他方案設計地形。</summary>
+        /// <summary>
+        /// 建方案正剖面：沿共同剖面線、隱藏 otherDesignIds 中的地形。
+        /// revealDemolished=false（方案欄）：Show All 讓拆除的原地形以半色調疊比；
+        /// revealDemolished=true（原始地形基準欄）：用「整地-原地形顯示」篩選讓原地形正常顯示。
+        /// </summary>
         private static ViewSection CreateSchemeSectionView(
             Document doc, string schemeName, XYZ start, XYZ end,
-            IReadOnlyList<ElementId> otherDesignIds)
+            IReadOnlyList<ElementId> otherDesignIds, bool revealDemolished = false)
         {
             var viewFamilyType = new FilteredElementCollector(doc)
                 .OfClass(typeof(ViewFamilyType)).Cast<ViewFamilyType>()
@@ -142,18 +146,25 @@ namespace RevitMCP.Core
 
             var section = ViewSection.CreateSection(doc, viewFamilyType.Id, sectionBox);
             section.Name = UniqueViewName(doc, $"整地-{schemeName}-剖面");
-            // 顯示「拆除」的原地形（虛線疊比）：階段過濾用「全部顯示」
-            var phaseFilter = new FilteredElementCollector(doc)
-                .OfClass(typeof(PhaseFilter)).Cast<PhaseFilter>()
-                .FirstOrDefault(filter => filter.Name == "全部顯示" || filter.Name == "Show All");
-            if (phaseFilter != null)
-            {
-                section.get_Parameter(BuiltInParameter.VIEW_PHASE_FILTER)?.Set(phaseFilter.Id);
-            }
-
+            ApplyComparisonPhaseFilter(doc, section, revealDemolished);
             HideElementsSafely(doc, section, otherDesignIds);
 
             return section;
+        }
+
+        /// <summary>比較視圖階段篩選：reveal=true 用「整地-原地形顯示」（拆除正常色），否則 Show All（拆除半色調疊比）。</summary>
+        private static void ApplyComparisonPhaseFilter(Document doc, View view, bool revealDemolished)
+        {
+            var filterId = revealDemolished
+                ? EnsureRevealPhaseFilter(doc)
+                : new FilteredElementCollector(doc)
+                    .OfClass(typeof(PhaseFilter)).Cast<PhaseFilter>()
+                    .FirstOrDefault(filter => filter.Name == "全部顯示" || filter.Name == "Show All")
+                    ?.Id ?? ElementId.InvalidElementId;
+            if (filterId != ElementId.InvalidElementId)
+            {
+                view.get_Parameter(BuiltInParameter.VIEW_PHASE_FILTER)?.Set(filterId);
+            }
         }
 
         /// <summary>逐元素過濾後隱藏（不可隱藏／已隱藏者略過），避免整批 HideElements 因單一元素炸掉。</summary>
@@ -177,7 +188,7 @@ namespace RevitMCP.Core
         /// </summary>
         private static View3D CreateSchemeSectionIsoView(
             Document doc, string schemeName, XYZ start, XYZ end,
-            IReadOnlyList<ElementId> otherDesignIds)
+            IReadOnlyList<ElementId> otherDesignIds, bool revealDemolished = false)
         {
             var viewFamilyType = new FilteredElementCollector(doc)
                 .OfClass(typeof(ViewFamilyType)).Cast<ViewFamilyType>()
@@ -186,14 +197,7 @@ namespace RevitMCP.Core
 
             var view = View3D.CreateIsometric(doc, viewFamilyType.Id);
             view.Name = UniqueViewName(doc, $"整地-{schemeName}-剖立體");
-            var phaseFilter = new FilteredElementCollector(doc)
-                .OfClass(typeof(PhaseFilter)).Cast<PhaseFilter>()
-                .FirstOrDefault(filter => filter.Name == "全部顯示" || filter.Name == "Show All");
-            if (phaseFilter != null)
-            {
-                view.get_Parameter(BuiltInParameter.VIEW_PHASE_FILTER)?.Set(phaseFilter.Id);
-            }
-
+            ApplyComparisonPhaseFilter(doc, view, revealDemolished);
             HideElementsSafely(doc, view, otherDesignIds);
 
             var mid = (start + end) / 2;
@@ -269,8 +273,66 @@ namespace RevitMCP.Core
                 .Select(r => new ElementId(checked((int)r.Value<long>("DesignToposolidId"))))
                 .ToList();
 
-            // 3. 每方案確保四個視圖（逐方案容錯，沿用 presentation 的 TrySubStep 模式）
+            // 3-0. 原始地形基準欄（使用者需求 2026-07-08：最前面加原始地形，方案才有比較基準）。
+            // 原地形已被整地標記拆除，3D/坡度用「整地-原地形顯示」篩選現形；隱藏全部方案設計地形。
             var schemeColumns = new List<(string Name, long[] ViewIds, List<string> Steps)>();
+            var baselineSteps = new List<string>();
+            try
+            {
+                long base3dId;
+                using (var transaction = new Transaction(doc, "建立原始地形基準視圖"))
+                {
+                    GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
+                    transaction.Start();
+                    var baseView = CreateContextSchemeView3D(doc, _uiApp.ActiveUIDocument.ActiveView);
+                    baseView.Name = UniqueViewName(doc, "整地-原始地形");
+                    var revealId = EnsureRevealPhaseFilter(doc);
+                    if (revealId != ElementId.InvalidElementId)
+                    {
+                        baseView.get_Parameter(BuiltInParameter.VIEW_PHASE_FILTER)?.Set(revealId);
+                    }
+
+                    if (doc.GetElement(original.Id) is Element originalElement
+                        && originalElement.IsHidden(baseView))
+                    {
+                        baseView.UnhideElements(new List<ElementId> { original.Id });
+                    }
+
+                    HideElementsSafely(doc, baseView, allDesignIds);
+                    baseView.SaveOrientationAndLock();
+                    base3dId = baseView.Id.GetIdValue();
+                    transaction.Commit();
+                }
+
+                baselineSteps.Add("基準視圖");
+                var baseSlopeId = DuplicateSchemeView(doc, base3dId, "整地-原始地形-坡度");
+                TrySubStep(baselineSteps, "坡度熱區", () =>
+                    CreateSlopeHeatmapForTerrain(doc, original, baseSlopeId));
+
+                long baseSectionId, baseIsoId;
+                using (var transaction = new Transaction(doc, "建立原始地形基準剖面"))
+                {
+                    GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
+                    transaction.Start();
+                    baseSectionId = CreateSchemeSectionView(
+                        doc, "原始地形", sectionStart, sectionEnd, allDesignIds, revealDemolished: true)
+                        .Id.GetIdValue();
+                    baseIsoId = CreateSchemeSectionIsoView(
+                        doc, "原始地形", sectionStart, sectionEnd, allDesignIds, revealDemolished: true)
+                        .Id.GetIdValue();
+                    transaction.Commit();
+                }
+
+                baselineSteps.Add("剖面×2");
+                schemeColumns.Add(("原始地形", new[] { base3dId, baseSlopeId, baseSectionId, baseIsoId }, baselineSteps));
+            }
+            catch (Exception ex)
+            {
+                baselineSteps.Add($"失敗：{ex.GetType().Name}: {ex.Message}");
+                schemeColumns.Add(("原始地形", Array.Empty<long>(), baselineSteps));
+            }
+
+            // 3. 每方案確保四個視圖（逐方案容錯，沿用 presentation 的 TrySubStep 模式）
             foreach (var record in records)
             {
                 var designId = record.Value<long>("DesignToposolidId");
@@ -294,13 +356,7 @@ namespace RevitMCP.Core
                         transaction.Start();
                         sectionId = CreateSchemeSectionView(doc, schemeName, sectionStart, sectionEnd, otherDesigns)
                             .Id.GetIdValue();
-                        var isolate = new List<ElementId> { designElementId, original.Id };
-                        foreach (var floorId in (record["FloorIds"] as JArray)?.Values<long>() ?? Enumerable.Empty<long>())
-                        {
-                            isolate.Add(new ElementId(checked((int)floorId)));
-                        }
-
-                        isoId = CreateSchemeSectionIsoView(doc, schemeName, sectionStart, sectionEnd, isolate)
+                        isoId = CreateSchemeSectionIsoView(doc, schemeName, sectionStart, sectionEnd, otherDesigns)
                             .Id.GetIdValue();
                         transaction.Commit();
                     }
