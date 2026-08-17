@@ -13,6 +13,21 @@ export const baseTools: Tool[] = [
         inputSchema: { type: "object", properties: {} },
     },
     {
+        name: "set_project_units",
+        description: "一次把整個專案的顯示單位切換到指定系統/模式（全案性動作，單一 Transaction 可 Ctrl+Z 還原）。mode='taiwan' = 公制底 + Air Flow 改 m³/h（對齊建築技術規則 §102 通風量單位）；'metric' / 'imperial' 為純公制/英制預設。可再用 length/area/volume/airFlow 個別覆寫。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                mode: { type: "string", description: "預設模式：'taiwan'（公制+Air Flow m³/h，推薦台灣 MEP）、'metric'、'imperial'。與 system 擇一。" },
+                system: { type: "string", description: "基底單位系統：'metric' 或 'imperial'（未給 mode 時使用；預設 metric）。" },
+                length: { type: "string", description: "長度單位覆寫：m / mm / cm / ft / ft-in（選填）" },
+                area: { type: "string", description: "面積單位覆寫：m2 / sf（選填）" },
+                volume: { type: "string", description: "體積單位覆寫：m3 / l / cf（選填）" },
+                airFlow: { type: "string", description: "風量單位覆寫：m3/h / l/s / cfm（選填）" },
+            },
+        },
+    },
+    {
         name: "get_all_levels",
         description: "取得專案中所有樓層的清單，包括樓層名稱和標高。",
         inputSchema: { type: "object", properties: {} },
@@ -287,6 +302,23 @@ export const baseTools: Tool[] = [
                 paramName: {
                     type: "string",
                     description: "坡度回寫的目標參數名稱，預設 Comments"
+                }
+            }
+        }
+    },
+    {
+        name: "list_categories",
+        description: "列舉專案中所有品類 (Category) 及其 CategoryType (Model / Annotation / Internal / AnalyticalModel / Invalid)。回傳每個品類的 Name、CategoryType、Id、子品類數量，並附各 CategoryType 的統計。唯讀查詢。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                categoryType: {
+                    type: "string",
+                    description: "只列出指定 CategoryType 的品類 (Model / Annotation / Internal / AnalyticalModel / Invalid)；省略則全部列出。"
+                },
+                includeSubcategories: {
+                    type: "boolean",
+                    description: "是否連同各品類的子品類名稱一併回傳 (預設 false，僅回傳子品類數量)。"
                 }
             }
         }

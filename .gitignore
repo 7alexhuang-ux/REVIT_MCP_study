@@ -6,6 +6,14 @@ MCP-Server/node_modules/
 MCP.Contracts/
 MCP.CoreRuntime/
 
+# Secrets / credentials — NEVER commit tokens or API keys
+.env
+.env.*
+!.env.example
+*.pat
+*.token
+github_pat_*
+
 # IDE and Editor files
 .vs/
 .vscode/*
@@ -55,6 +63,21 @@ PRIVATE_INSTRUCTIONS.md
 thank.md
 docs/newsletters/
 
+# 個人內容盤點 2026-07-11：會議記錄/推廣文案/簡報/暫存文件（僅本機，勿公開）
+docs/0425-meeting-pr30-pr32.html
+docs/0523-copy.md
+docs/0523-posters.html
+docs/posters/
+docs/2026-06_family-inventory (1).md
+docs/automation_life.pptx
+docs/yuanjing_work_review_20260619.pptx
+docs/book_to_database.html
+docs/deploy-flow.html
+docs/gemini-code-*.html
+docs/gemini-code-*.py
+docs/mermaid-test.html
+docs/*.pptx
+
 # 教材（已開放，供學生練習使用）
 # 教材/
 
@@ -63,6 +86,15 @@ MCP/obj/
 
 # MCP 編譯輸出
 MCP/bin/
+MCP.Contracts/bin/
+MCP.Contracts/obj/
+MCP.CoreRuntime/bin/
+MCP.CoreRuntime/obj/
+
+# 通用防線：任何 C# 專案的編譯產物一律不入庫
+# （2026-07-17 清除 27 個誤入庫的 obj/bin 檔後加入；CI check-tracked-artifacts.yml 為第二道防線）
+**/obj/
+**/bin/
 
 # Result 資料夾（與此專案無關）
 result/
@@ -70,10 +102,15 @@ result/
 # 建置與除錯暫存檔
 build_error*.txt
 build_log*.txt
+build_output*.txt
+build_r*.txt
 debug_*.txt
 debug_*.json
 daylight_report.txt
 exterior_wall_check_report.json
+
+# Core Reload 測試記錄（本機個人紀錄，不提交）
+MCP-Server/scripts/core-reload-results.jsonl
 
 # MCP-Server 暫存輸出
 MCP-Server/daylight_report.txt
@@ -104,3 +141,10 @@ docs/fork-audit/
 
 # Codex 隔離工作目錄
 .worktrees/
+
+# 本機 AI client 工具產生的工作檔（非 repo 內容）
+# 已知來源：使用者端安裝的 OpenAI Codex 桌面 app 會掃描專案，
+# 自行產生 .codex/（含帶絕對路徑的 hooks.json）與 .agents/skills/ 下的 skill 鏡像。
+# .agents/skills/ 是混合命名空間：貢獻者在 commit 604cafe 提交的 8 個鏡像是 repo 內容
+# （已被追蹤，不受此規則影響），其餘由本機工具產生者一律不進版控。
+.codex/

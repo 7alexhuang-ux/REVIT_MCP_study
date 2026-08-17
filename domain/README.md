@@ -32,7 +32,7 @@
 | `wall-check.md` | wall-orientation-check | 牆壁方向、內外側 |
 | `dependent-view-crop-workflow.md` | dependent-view-crop | 從屬視圖、分區出圖 |
 
-### 不需要成為 Skill 的 Domain（11 個，含 README）
+### 不需要成為 Skill 的 Domain（17 個，含 README）
 
 | Domain 文件 | 類型 | 不成為 Skill 的原因 |
 |------------|------|-------------------|
@@ -41,11 +41,18 @@
 | `session-context-guard.md` | AI 內部守衛 | 定義 AI 互動安全等級（L1-L3），是所有 Skill 的通用行為規範，不由使用者觸發 |
 | `tool-capability-boundary.md` | 工具邊界定義 | 定義 MCP 工具「不能做的事」（L1-L5 能力等級），防止 AI 嘗試超出能力的操作，是 meta-reference |
 | `path-maintenance-qa.md` | 內部維護指南 | 目錄重構後的路徑交叉參照檢查清單，是開發者維護用文件 |
+| `core-reload-boundary.md` | 開發流程知識（opt-in） | 定義 Loader/Core 熱重載邊界、重啟條件與效率估算；對應 opt-in 開發分支，非 main 單一 csproj 架構，供進階開發者引用 |
 | `skill-authoring-standard.md` | Skill 品質規範 | 定義 Skill 編寫標準與品質要求，是 meta-reference |
 | `parking-auto-numbering.md` | 輔助工作流程 | 停車位自動編號邏輯，被 `parking-check` Skill 引用 |
 | `revit-fill-pattern-conversion.md` | 技術參考 | 填充圖案轉換規則，被多個 Skill 引用 |
 | `room-numbering-workflow.md` | 輔助工作流程 | 房間自動編號邏輯，被其他 Skill 引用 |
 | `room-surface-area-review.md` | 輔助工作流程 | 房間表面積與粉刷檢討，可被 `building-compliance` Skill 引用 |
+| `finish-schedule-governance.md` | 輔助工作流程 | 粉刷明細表材料代碼治理 SOP，供房間粉刷相關工作流程引用，無專屬 Skill |
+| `beam-slab-alignment.md` | 輔助工作流程 | 既有結構降樑貼齊樓板底邏輯，屬結構同步背景知識，無專屬 Skill |
+| `ifc-structural-native-sync.md` | 輔助工作流程 | IFC 結構轉 Revit 原生梁柱同步邏輯，屬結構背景知識，無專屬 Skill |
+| `quantity-takeoff-excel.md` | 技術參考 | 以房間為基礎的數量計算 Excel 共通方法，被數量相關工作流程引用 |
+| `matchline-automation.md` | 輔助工作流程 | 銜接線自動標註邏輯，屬從屬視圖出圖流程背景知識，無專屬 Skill |
+| `viewport-type-scale-sync.md` | 輔助工作流程 | 視埠標題類型依比例同步邏輯，屬圖紙管理背景知識，無專屬 Skill |
 | `README.md` | 目錄導航 | 本檔案，不是工作流程 |
 
 ---

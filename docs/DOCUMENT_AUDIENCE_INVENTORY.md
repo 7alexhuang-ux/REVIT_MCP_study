@@ -7,7 +7,7 @@ This inventory defines which project documents are for AI agents, human readers,
 | Audience | Rule |
 |---|---|
 | AI-only | Write in English. Keep instructions explicit, operational, and encoding-safe. |
-| Human-facing | Use the reader's language. `README.md` is Traditional Chinese; `README.en.md` is English. |
+| Human-facing | Use the reader's language. `README.md` is English; `README.zh-TW.md` is Traditional Chinese. |
 | Shared | Keep readable for both humans and AI. Domain files must not become English-only. |
 | Historical | Preserve unless the user explicitly asks for migration. Do not let archive content drive current rules. |
 
@@ -15,9 +15,9 @@ This inventory defines which project documents are for AI agents, human readers,
 
 | Item | Count | Source |
 |---|---:|---|
-| Runtime MCP tools | 96 | `registerRevitTools()` |
-| Domain SOP files | 45 | `domain/*.md` except README, plus `domain/references/*.md` |
-| Claude skills | 22 | `.claude/skills/*/SKILL.md` |
+| Runtime MCP tools | 173 | `registerRevitTools()` |
+| Domain SOP files | 76 | `domain/*.md` except README, plus `domain/references/*.md` |
+| Claude skills | 54 | `.claude/skills/*/SKILL.md` |
 
 ## AI-Only Documents
 
@@ -34,6 +34,8 @@ These should be English-first.
 | `.mcp.json` | machine config | Project-level MCP server config |
 | `.vscode/mcp.json` | machine config | VS Code MCP server config |
 | `templates/personal-vault/VAULT-CLAUDE.md` | local-only template | Personal vault schema; Fixed Core copied verbatim by users' agents, never loaded by this repo's agents |
+| `docs/mcp2026-upgrade/impl-log.md` | implementation audit log | English, append-only `[step ...]` entries recording the MCP 2026-07-28 upgrade's build/verify results; audit trail for AI agents and maintainers, not onboarding content |
+| `docs/mcp2026-upgrade/doc-alignment-log.md` | implementation audit log | English, append-only log of the documentation-alignment pass that synced `CLAUDE.md` / README / audience inventory to the MCP 2026-07-28 upgrade |
 
 ## Shared Human + AI Documents
 
@@ -51,8 +53,8 @@ These must remain understandable by both sides.
 
 | Path | Audience | Notes |
 |---|---|---|
-| `README.md` | Traditional Chinese onboarding | Installation, architecture, common workflows |
-| `README.en.md` | English onboarding | English counterpart of README |
+| `README.md` | English onboarding | Installation, architecture, common workflows |
+| `README.zh-TW.md` | Traditional Chinese onboarding | Traditional Chinese counterpart of README |
 | `CONTRIBUTING.md` | contributors | Contribution process |
 | `CHANGELOG.md` | users and maintainers | Release history |
 | `scripts/README.md` | installers and maintainers | Script usage |
@@ -62,6 +64,8 @@ These must remain understandable by both sides.
 | `docs/slides.md` | presenters | Slide index |
 | `Antigravity_MCP_Complete_Guide.md` | Antigravity users | Manual MCP setup for Antigravity client |
 | `docs/UPDATE-PULL-GUIDE.md`, `docs/branch-index.md` | users and maintainers | Update flow and branch overview |
+| `docs/MIGRATION_GUIDE.md` | users and fork contributors | Traditional Chinese; append-only, newest-first record of upgrades that affect existing users or fork contributors (e.g. the MCP 2026-07-28 dual-era upgrade) |
+| `docs/integrations/*.md` | users, fork contributors, and the `archicad-skill-adapter` Skill | Traditional Chinese; opt-in Archicad MCP backend docs (setup, Revit/Archicad Skill portability matrix, Wave 2 translation proposal) salvaged from issue #98. Not yet Skill-level live-tested; carry explicit status disclaimers where claims are unverified. |
 | `docs/claude-code-cheatsheet.html`, `docs/karpathy-gist-zh-tw.html` | readers | Reference pages |
 | other `docs/*.md` topic guides | mixed | Per-topic guides (agent handoff, guard rails, architecture, slope analysis, docs structure); classify individually if promoted to canonical |
 | root-level Chinese notes (`HJPLUS *.md`, `[好學生筆記]*.md`) | community readers | Event notes and adoption guides |
