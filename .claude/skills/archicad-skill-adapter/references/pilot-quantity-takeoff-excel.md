@@ -78,6 +78,38 @@ convention. Without that convention, no total over those Zones is meaningful.
 - **"Not obviously over the limit" is not "compliant."** The first is a planning aid; the second
   requires the formal area calculation and review.
 
+### Rounding: round each item first, then sum
+
+Backend-independent — it applies equally on the Revit side — but it governs whether a number taken
+from the model can ever line up with the drawings.
+
+A permit review does not accept a computed area written straight onto a drawing. It has to be
+accompanied by 面積單線圖, the area calculation line drawings, which state each shape and its
+lengths, followed by the formulas. The area produced that way **will differ in the last decimals**
+from the area a program computes directly. That difference is expected, not an error.
+
+The required order:
+
+1. Lengths come from what the drawing displays, in metres, to at least three decimals
+   (three or four; no fixed upper bound).
+2. **One shape, one formula.** Each result is in square metres.
+3. Each formula's result is rounded to **two decimals individually**.
+4. Only then are the displayed values summed.
+
+**Never sum the raw values.** Adding six-decimal figures and rounding at the end produces a
+different total from rounding each item first, because of carry. Rounding first is what keeps every
+later step reconcilable against the drawings, and keeps the eventual property registration clean.
+
+This reframes the two-layer numeric model for takeoff work:
+
+| Layer | Returns | Role in an area calculation |
+|---|---|---|
+| Property layer | display strings formatted to the project's calculation units (2 decimals here) | closest in *form* to the required displayed value, but still not a valid basis — it is not tied to a shape and its lengths on the line drawing |
+| Geometry layer | raw SI floats (6+ decimals) | **must not be summed directly** — these are exactly the raw values the rule forbids |
+
+The geometry layer's extra precision is not an advantage here. A total summed from it will not match
+a properly prepared area calculation, and the mismatch cannot be reconciled after the fact.
+
 ### What this pilot actually demonstrates
 
 That the MCP tooling can reach Zone areas through the Domain method, with the source property named
@@ -110,6 +142,7 @@ Use these only as discovery hints:
 - Workbook rows cannot retain source GUIDs and warnings.
 - Two area or perimeter definitions disagree, which means the Zones were not built to one shared convention — resolve that in the model, not in the report.
 - The requested output would be used as a building-permit area basis, or reported as a compliance result.
+- Totals are being produced by summing raw geometry values instead of rounding each item to two decimals first.
 
 ## Live-Test Evidence
 
