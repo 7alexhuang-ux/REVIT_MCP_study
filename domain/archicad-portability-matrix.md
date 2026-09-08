@@ -52,13 +52,21 @@ repo 正本使用 A／B／C，issue #98 提案原文使用另一組英文詞。*
 
 ## 3. Wave 1 三支 Pilot：目前狀態
 
-`element-query`、`room-numbering`、`quantity-takeoff-excel` 三支有正式 pilot 規格檔，位於 `.claude/skills/archicad-skill-adapter/references/pilot-*.md`。目前**一支已達 `verified`，兩支未達**：
+`element-query`、`room-numbering`、`quantity-takeoff-excel` 三支有正式 pilot 規格檔，位於 `.claude/skills/archicad-skill-adapter/references/pilot-*.md`。目前狀態**一支 `verified`、一支 `approximate mapping`、一支待審**：
 
 | Pilot | 分級 | 證據現況 | 還缺什麼 |
 |---|---|---|---|
 | `element-query` | B | 有一次 live-test evidence（fork 側提交，**尚待維護者審閱**），全程只經三支公開 MCP 工具、未直接打 JSON API 埠 | 審閱通過後才可標 `verified` |
 | `room-numbering` | B | **`verified`（2026-09-08 實機）**：42 個 Zone 完成 dry-run→核准→寫入→read-back，`executionResults` ok=42/failed=0，read-back success=42/unchanged=0 | 維護者複核；本 repo 無 Archicad，無法複驗 |
-| `quantity-takeoff-excel` | B | `Live-Test Evidence` 區塊**仍是空白模板** | Zone 邊界與牆門窗關聯的證據鏈、開口扣除、Excel 可追溯欄位 |
+| `quantity-takeoff-excel` | B | **`approximate mapping`（2026-09-08 實機）**：42 個 Zone 跑完 7 步並產出含公式與證據鏈的 workbook（明細 42 列、wallParts 證據 233 列、0 公式錯誤） | 5 項 unresolved：完成面邊界、逐一開口尺寸、幾何淨高、面積定義未裁定、內外邊界分割 |
+
+### `quantity-takeoff-excel` 為什麼停在 `approximate mapping`
+
+workbook 可重現、每個數字都能追到具名 GUID 上的具名屬性，但方法的三個核心輸入在 Archicad 是**替代方案而非等價物**：完成面邊界（Revit `GetBoundarySegments(Finish)` 無對應指令）、逐一開口扣除（改用 Zone 層級的門窗表面面積合計）、幾何淨高（改用 Zone 高度屬性，未與天花／樓板底比對）。
+
+再加上一個必須由人裁定的問題：**Zone 的「面積」不只一個**。實測同一個 Zone 的 `計算面積` 是 `'49.95'`、`被測量的面積` 是 `'53.34'`，週長也有 `區域淨週長 44.91` 與 `區域總週長 44.60` 兩種。42 個 Zone 中有 **36 個**兩種面積不一致。選哪一個要記進報表，不可平均、不可默默偏好其一。
+
+所以 pipeline 證明跑得通，但還沒證明數字與 Revit 側方法同義。
 
 ### `room-numbering` 通過的條件，以及一個必要的新前置檢查
 

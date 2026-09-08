@@ -357,6 +357,35 @@ comes from a project setting, not from the value. Note also that one Zone carrie
 - Working order: ask the element what it has (`properties_get_all_property_ids_of_elements`), then
   join against the definition table. Do not pick names out of the global definition list.
 
+### A Zone has several "areas" and several "perimeters"
+
+Reading one of them without recording which one was read is enough to make a takeoff disagree with
+the model. On a single Zone:
+
+| Property | Value |
+|---|---|
+| `區域/計算面積` | `'49.95'` |
+| `區域/測得淨面積` | `'49.95'` |
+| `區域/縮小面積` | `'49.95'` |
+| `區域/被測量的面積` | `'53.34'` |
+| `常規參數/面積` | `'53.34'` |
+| `區域/牆週長` | `'44.91'` |
+| `區域/區域淨週長` | `'44.91'` |
+| `區域/區域總週長` | `'44.60'` |
+
+Across 42 Zones on one story, calculated area and measured area differed on **36**. Resolve which
+definition governs, say so in the output, and warn on the rows where they disagree.
+
+### `elements_get_elements_related_to_zones` returns a flat, repeating list
+
+It answers "which elements relate to this Zone" but the payload is a single `elements` array per
+Zone with no type grouping and with GUIDs repeated (one GUID appeared three times in the first
+result). `elements_get_relations_of_elements` answers the same question with
+`elementsGroupedByType` *and* the per-segment `wallParts` evidence, so prefer it. Observed grouping
+over 42 Zones: Wall 233, Riser 168, Tread 160, Object 98, Beam 73, Door 60, StairStructure 60,
+Column 47, Window 24, Stair 8 — note that stair sub-elements dominate the count, so any "related
+element" tally has to say which types it includes.
+
 ### Writes report success at the wrong level
 
 `properties_set_property_values_of_elements` returns a per-element `executionResults` array. A call
