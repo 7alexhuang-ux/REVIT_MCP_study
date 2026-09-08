@@ -36,7 +36,7 @@ metadata:
 
 ## 實測基準
 
-本檔的能力判斷來自下列環境的實機測試。換版本必須重測。
+本檔的能力判斷來自下列環境的實機測試。換版本必須重測。**各節的證據日期不同**，沿用先前觀察的部分已於該節標明。
 
 | 項目 | 值 |
 |---|---|
@@ -64,12 +64,17 @@ metadata:
 
 ### A. 圖面視覺覆寫（Graphic Overrides）
 
+> 證據日期：Highlight 指令的行為與清除路徑沿用 **2026-08-19** 的 schema 觀察，本次未重測；
+> 下方的單位風險則由 2026-09-08 的 property 實測直接支持。
+
 - **限制**：Revit 可對特定視圖永久覆寫元件顏色；Archicad MCP 目前只提供暫時性的 `elements_highlight_elements`。
 - **邊界**：降級為「暫時高亮」。不宣稱能寫入圖層或存進特定 View。
 - **清除路徑**：內建於同一支指令 —— 傳入空的 `elements` 陣列即清除所有既有 highlight。因此「可清除」這項前置條件**讀 schema 即可確認**，不需要真的先染色再測試清除。
 - **附帶風險**：若以 property 值作為分組上色的鍵，該值是依專案計算單位格式化的字串（見 [archicad-terminology-map.md](archicad-terminology-map.md)），兩個實際不同的數值可能格式化後相同而被併成同一組。
 
 ### B. 碰撞檢查（Clash Detection）
+
+> 證據日期：本節全部沿用 **2026-08-19** 的觀察，**2026-09-08 未重測**。
 
 - **限制**：`elements_get_collisions` 只回傳 GUID 對與布林結果，無法提供穿透深度、截面積或精確出入口座標。
 - **`settings` 的正確用法**：可以整個省略（預設 null）；但**一旦給定，`volumeTolerance`、`performSurfaceCheck`、`surfaceTolerance` 三者皆為必填**（預設值 `0.001` / `false` / `0.001`）。給一半會被拒絕。
