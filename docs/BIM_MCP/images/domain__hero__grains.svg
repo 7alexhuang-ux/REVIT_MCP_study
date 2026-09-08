@@ -10,7 +10,7 @@
   .lg{fill:rgba(255,255,255,.72);font-size:21px}
 </style>
   <rect width="1200" height="1142" rx="0" fill="#0a0a0a"/>
-  <text x="118" y="150" class="num">86</text>
+  <text x="118" y="150" class="num">83</text>
   <text x="120" y="205" class="t">Domain · 知識層</text>
   <text x="120" y="240" class="s">SHARED BIM SOP · 5 CATEGORIES</text>
   <rect class="g" x="120" y="250" width="70" height="70" rx="14" fill="#ef4444" style="animation-delay:0.150s"/>
@@ -77,9 +77,9 @@
   <rect class="g" x="208" y="778" width="70" height="70" rx="14" fill="#fbbf24" style="animation-delay:2.895s"/>
   <rect class="g" x="296" y="778" width="70" height="70" rx="14" fill="#fbbf24" style="animation-delay:2.940s"/>
   <rect class="g" x="384" y="778" width="70" height="70" rx="14" fill="#fbbf24" style="animation-delay:2.985s"/>
-  <rect class="g" x="472" y="778" width="70" height="70" rx="14" fill="#fbbf24" style="animation-delay:3.030s"/>
-  <rect class="g" x="560" y="778" width="70" height="70" rx="14" fill="#fbbf24" style="animation-delay:3.075s"/>
-  <rect class="g" x="648" y="778" width="70" height="70" rx="14" fill="#fbbf24" style="animation-delay:3.120s"/>
+  <rect class="g" x="472" y="778" width="70" height="70" rx="14" fill="#4ade80" style="animation-delay:3.030s"/>
+  <rect class="g" x="560" y="778" width="70" height="70" rx="14" fill="#4ade80" style="animation-delay:3.075s"/>
+  <rect class="g" x="648" y="778" width="70" height="70" rx="14" fill="#4ade80" style="animation-delay:3.120s"/>
   <rect class="g" x="736" y="778" width="70" height="70" rx="14" fill="#4ade80" style="animation-delay:3.165s"/>
   <rect class="g" x="824" y="778" width="70" height="70" rx="14" fill="#4ade80" style="animation-delay:3.210s"/>
   <rect class="g" x="912" y="778" width="70" height="70" rx="14" fill="#4ade80" style="animation-delay:3.255s"/>
@@ -95,13 +95,10 @@
   <rect class="g" x="912" y="866" width="70" height="70" rx="14" fill="#4ade80" style="animation-delay:3.705s"/>
   <rect class="g" x="120" y="954" width="70" height="70" rx="14" fill="#4ade80" style="animation-delay:3.750s"/>
   <rect class="g" x="208" y="954" width="70" height="70" rx="14" fill="#4ade80" style="animation-delay:3.795s"/>
-  <rect class="g" x="296" y="954" width="70" height="70" rx="14" fill="#4ade80" style="animation-delay:3.840s"/>
-  <rect class="g" x="384" y="954" width="70" height="70" rx="14" fill="#4ade80" style="animation-delay:3.885s"/>
-  <rect class="g" x="472" y="954" width="70" height="70" rx="14" fill="#4ade80" style="animation-delay:3.930s"/>
-  <rect class="g" x="560" y="954" width="70" height="70" rx="14" fill="#a78bfa" style="animation-delay:3.975s"/>
+  <rect class="g" x="296" y="954" width="70" height="70" rx="14" fill="#a78bfa" style="animation-delay:3.840s"/>
   <g transform="translate(120,1082)"><rect width="22" height="22" rx="6" fill="#ef4444"/><text x="32" y="17" class="lg">法規 · 11</text></g>
   <g transform="translate(320,1082)"><rect width="22" height="22" rx="6" fill="#60a5fa"/><text x="32" y="17" class="lg">流程 · 42</text></g>
-  <g transform="translate(520,1082)"><rect width="22" height="22" rx="6" fill="#fbbf24"/><text x="32" y="17" class="lg">維運 · 14</text></g>
+  <g transform="translate(520,1082)"><rect width="22" height="22" rx="6" fill="#fbbf24"/><text x="32" y="17" class="lg">維運 · 11</text></g>
   <g transform="translate(720,1082)"><rect width="22" height="22" rx="6" fill="#4ade80"/><text x="32" y="17" class="lg">MEP · 18</text></g>
   <g transform="translate(920,1082)"><rect width="22" height="22" rx="6" fill="#a78bfa"/><text x="32" y="17" class="lg">外部 · 1</text></g>
 </svg>

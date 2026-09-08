@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Domain 索引（86 個 SOP）· BIM_MCP</title>
-<meta property="og:title" content="BIM_MCP Domain SOP Index — 86 個知識層檔案">
+<title>Domain 索引（83 個 SOP）· BIM_MCP</title>
+<meta property="og:title" content="BIM_MCP Domain SOP Index — 83 個知識層檔案">
 <meta property="og:description" content="依 domain/*.md 整理的 BIM compliance 與 workflow SOP 索引。五分類各自彩色，含觸發關鍵字、反查 Skill、5 個重點 domain 抽屜摘要。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -72,10 +72,10 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">DOMAIN INDEX <span class="accent">86 個 SOP / 5 分類</span></div>
+  <div class="bim-hero-eyebrow">DOMAIN INDEX <span class="accent">83 個 SOP / 5 分類</span></div>
   <h1 class="bim-hero-title">Domain · <span class="accent">知識層</span><br>方法寫一次，多個 Skill 共用</h1>
-  <p class="bim-hero-sub">Domain 是<strong>知識本身</strong>——法規條文、SOP、公式、例外。Skill 是<strong>編排</strong>（61 個）。Tool 是<strong>原子執行</strong>（192 個）。<strong>知識不應該重複在每個 Skill 裡</strong>——這是本專案核心架構原則。本頁列 86 個 <code>domain/*.md</code>，依五大類彩色標示，每張 card 含觸發關鍵字與反查 Skill。</p>
-  <figure class="bim-hero-figure"><img src="../images/domain__hero__grains.svg" alt="86 個 domain SOP，依五大類彩色方塊排列" width="1200" height="1142"></figure>
+  <p class="bim-hero-sub">Domain 是<strong>知識本身</strong>——法規條文、SOP、公式、例外。Skill 是<strong>編排</strong>（61 個）。Tool 是<strong>原子執行</strong>（192 個）。<strong>知識不應該重複在每個 Skill 裡</strong>——這是本專案核心架構原則。本頁列 83 個 <code>domain/*.md</code>，依五大類彩色標示，每張 card 含觸發關鍵字與反查 Skill。</p>
+  <figure class="bim-hero-figure"><img src="../images/domain__hero__grains.svg" alt="83 個 domain SOP，依五大類彩色方塊排列" width="1200" height="1142"></figure>
 </header>
 
 <section data-collapse class="bim-section bim-anchor" data-cat="frame" id="frame">
@@ -91,7 +91,7 @@
       <span class="cat-num">42</span><span class="cat-label">Workflow · 模型 / 圖面</span>
     </a>
     <a href="#ops" class="cat-summary-item" data-cat="ops" style="text-decoration:none;border-bottom:none;color:inherit;">
-      <span class="cat-num">14</span><span class="cat-label">Ops · QA / authoring</span>
+      <span class="cat-num">11</span><span class="cat-label">Ops · QA / authoring</span>
     </a>
     <a href="#mep" class="cat-summary-item" data-cat="mep" style="text-decoration:none;border-bottom:none;color:inherit;">
       <span class="cat-num">18</span><span class="cat-label">MEP / 構件 / 穿梁</span>
@@ -103,7 +103,7 @@
 
   <div class="bim-grid bim-grid-3">
     <div class="bim-card"><h4>Tool（192）</h4><p style="font-size:13px;">執行 Revit 查詢、建立、修改。<strong>所有具體資料</strong>必須來自工具回傳。</p></div>
-    <div class="bim-card bim-card-accent"><h4>Domain（86）</h4><p style="font-size:13px;">保存 SOP、公式、例外與判斷流程。<strong>方法的單一來源</strong>。</p></div>
+    <div class="bim-card bim-card-accent"><h4>Domain（83）</h4><p style="font-size:13px;">保存 SOP、公式、例外與判斷流程。<strong>方法的單一來源</strong>。</p></div>
     <div class="bim-card"><h4><a href="skills-index.html" style="border-bottom:1px solid var(--accent-border);">Skill（61）</a></h4><p style="font-size:13px;">把 Domain 與工具串成工作流。<strong>不藏方法在 Skill body</strong>。</p></div>
   </div>
   <p class="bim-section-desc" style="margin-top:var(--gap-sm);">完整三層定義見 <a href="architecture-v2.html">三層架構 V2</a>。</p>
@@ -719,43 +719,10 @@
 <!-- ============================================ -->
 <section data-collapse class="bim-section bim-anchor" data-cat="ops" id="ops">
   <div class="bim-section-eyebrow">SECTION 04 · OPS / QA / AUTHORING</div>
-  <h2 class="bim-section-title">維運、QA 與 authoring 標準（14）</h2>
+  <h2 class="bim-section-title">維運、QA 與 authoring 標準（11）</h2>
   <p class="bim-section-desc">不是 BIM 作業本身，而是<strong>專案治理層</strong>——讓專案在多人多 AI client 協作時不會走樣。</p>
 
   <div class="bim-grid bim-grid-3">
-
-    <div id="archicad-adapter-boundary" class="bim-card domain-card">
-      <div>
-        <div class="domain-name">archicad-adapter-boundary.md</div>
-        <div class="domain-desc">Archicad backend 的架構原則、執行前提與能力降級策略——Revit 預設不變、Archicad opt-in，並列出必須改道或縮限的功能。</div>
-      </div>
-      <div class="domain-meta">
-        <span class="domain-trigger">Archicad 轉譯邊界</span><span class="domain-trigger">capability gap</span><span class="domain-trigger">opt-in backend</span>
-        <a href="skills-index.html#skills" class="domain-skill">↔ /archicad-skill-adapter</a>
-      </div>
-    </div>
-
-    <div id="archicad-terminology-map" class="bim-card domain-card">
-      <div>
-        <div class="domain-name">archicad-terminology-map.md</div>
-        <div class="domain-desc">Revit↔Archicad 名詞與資料歸屬對照，以及讀取數值前必須先確認單位基準的鐵律（屬性層回字串、幾何層回 SI）。</div>
-      </div>
-      <div class="domain-meta">
-        <span class="domain-trigger">Zone vs Room</span><span class="domain-trigger">Story vs Level</span><span class="domain-trigger">calculation units</span>
-        <a href="skills-index.html#skills" class="domain-skill">↔ /archicad-skill-adapter</a>
-      </div>
-    </div>
-
-    <div id="archicad-portability-matrix" class="bim-card domain-card">
-      <div>
-        <div class="domain-name">archicad-portability-matrix.md</div>
-        <div class="domain-desc">BIM_MCP 工作流在 Archicad 的 A/B/C 可攜性分級判準，以及各 Wave pilot 的實際驗證狀態與缺口。</div>
-      </div>
-      <div class="domain-meta">
-        <span class="domain-trigger">可攜性分級</span><span class="domain-trigger">adapter-required</span><span class="domain-trigger">pilot 進度</span>
-        <a href="skills-index.html#skills" class="domain-skill">↔ /archicad-skill-adapter</a>
-      </div>
-    </div>
 
     <button id="skill-authoring-standard" class="bim-card domain-card" data-drawer-open data-source="#skill-authoring-drawer-content" data-title="skill-authoring-standard.md ★" data-eyebrow="DOMAIN / OPS / 編寫標準">
       <div>
@@ -1321,7 +1288,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / domain-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-07-09 · 86 個 domain SOP 完整索引，五分類彩色標示，5 個重點 domain 含抽屜摘要。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-07-09 · 83 個 domain SOP 完整索引，五分類彩色標示，5 個重點 domain 含抽屜摘要。</p>
 </footer>
 
 <script src="../shared.js"></script><script>initAll();</script>
