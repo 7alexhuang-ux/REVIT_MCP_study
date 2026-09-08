@@ -36,7 +36,7 @@ These counts must be derived from source, not copied by memory.
 | Item | Current Count | Source of Truth |
 |---|---:|---|
 | Runtime MCP tools | 192 | `registerRevitTools()` from `MCP-Server/src/tools/index.ts` |
-| Domain SOP files | 83 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
+| Domain SOP files | 86 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
 | Claude skills | 61 | `.claude/skills/*/SKILL.md` |
 
 When these numbers change, update `CLAUDE.md`, `README.md`, `README.zh-TW.md`, `docs/DOCUMENT_AUDIENCE_INVENTORY.md`, and any public site copy that makes grand-total claims. Then run `scripts/verify-qaqc.ps1 -SkipBuild -SkipDeploy`.
@@ -325,6 +325,9 @@ Read the matching file before applying a workflow or calculation.
 | view link cleanup, 清理視圖, 隱藏連結, 關閉連結基準, link visibility | `domain/view-link-cleanup-workflow.md` |
 | local update, 本機更新, pull 後部署, 重新編譯部署, 環境專屬部署 | `domain/local-update-workflow.md` |
 | wall orientation, wall check | `domain/wall-check.md` |
+| Archicad boundary, 轉譯邊界, capability gap, Archicad 降級, opt-in backend | `domain/archicad-adapter-boundary.md` |
+| Archicad terminology, Revit to Archicad, Zone vs Room, Story vs Level, property 單位, calculation units | `domain/archicad-terminology-map.md` |
+| Archicad portability, 可攜性分級, backend-neutral, adapter-required, pilot 進度 | `domain/archicad-portability-matrix.md` |
 | finish schedule, 粉刷明細, material code governance, 材料代碼 | `domain/finish-schedule-governance.md` |
 | room finish parameter, 房間粉刷參數, shared parameters, 共用參數綁定, room finish schedule, 房間粉刷明細表, BatchAddRoomParams, CreateJJPRoomSchedule | `domain/room-finish-parameter-schedule.md` |
 | beam top alignment, 樑頂貼齊, slab soffit, 樓板底 | `domain/beam-slab-alignment.md` |
