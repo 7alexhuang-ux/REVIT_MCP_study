@@ -357,6 +357,63 @@ comes from a project setting, not from the value. Note also that one Zone carrie
 - Working order: ask the element what it has (`properties_get_all_property_ids_of_elements`), then
   join against the definition table. Do not pick names out of the global definition list.
 
+### Writes report success at the wrong level
+
+`properties_set_property_values_of_elements` returns a per-element `executionResults` array. A call
+whose elements *all* failed still comes back as a normal tool result — no `isError`, nothing that a
+caller checking only for a tool-level error would notice:
+
+```json
+{"executionResults": [
+  {"success": false, "error": {"code": -2130312909, "message": "Failed to set property value for element"}},
+  {"success": false, "error": {"code": -2130312909, "message": "Failed to set property value for element"}}
+]}
+```
+
+Observed end to end: renumbering 105 Zones on a locked story reported five successful batches in
+1.1 s and changed nothing; the read-back returned the original value for all 105. **Check
+`executionResults` element by element, and still read back.** This is the concrete case the
+terminology map's "mutate then trust success -> re-read affected GUIDs" rule exists for.
+
+### Editability is a precondition, and it is not visible in the property definition
+
+The failure above is not a permissions model on built-in properties. On one locked Zone, writes to
+`StaticBuiltIn`, `Custom` and `DynamicBuiltIn` properties all failed — every one of them with
+`propertyIsEditable: true` in its definition. The same command against an editable Zone succeeded,
+verified by read-back, and was restored the same way.
+
+`propertyIsEditable` describes the property, not whether *this element* can currently be written.
+The element-level check is the `IsEditable` element filter:
+
+| Query | Result |
+|---|---|
+| `Zone` + `filters: ["OnActualFloor"]` | 105 |
+| `Zone` + `filters: ["OnActualFloor", "IsEditable"]` | **0** |
+| `Zone` + `filters: ["IsVisibleByLayer", "OnActualFloor"]` | 105 |
+| `Zone` + `filters: ["IsEditable"]`, project-wide | 480 (of 2723) |
+
+So the story was locked while remaining fully visible and readable. Filters combine as AND, and
+`IsEditable` is the one that predicts whether a write will land. Run it as a precondition and report
+the elements that drop out as skipped.
+
+### Verified write path
+
+With editability confirmed, the write path itself is sound. Renumbering 42 Zones on story `1FL`:
+`executionResults` ok=42 / failed=0 in 2.0 s across two batches of 25, and read-back returned
+`success=42 / unchanged=0 / other=0`. A single-element write followed by a restore to the original
+value also succeeded both ways, so the operation is reversible.
+
+Two properties named `區域號碼` exist in different groups (`區域` and `ID和類別`). They mirror one
+underlying value: identical on all 105 Zones before the write, and identical on all 42 after it.
+Writing either appears to be equivalent, but confirm the mirror by reading both rather than assuming.
+
+### Story membership currently has to be inferred
+
+`elements_get_details_of_elements` carries the floor index and is broken, so there is no direct read
+of which story a Zone belongs to. The working substitute is `elements_get3_d_bounding_boxes` and
+comparing `zMin` against the `project_get_stories` level table. This is an inference: record it as
+one, and prefer `OnActualFloor` when the target story is the active one.
+
 ### The Add-On stops responding under sustained load
 
 After roughly 7.4k GUID enumerations, 1766 property definitions and 105 Zone relation queries in

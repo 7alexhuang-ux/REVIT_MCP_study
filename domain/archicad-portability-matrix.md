@@ -52,13 +52,22 @@ repo 正本使用 A／B／C，issue #98 提案原文使用另一組英文詞。*
 
 ## 3. Wave 1 三支 Pilot：目前狀態
 
-`element-query`、`room-numbering`、`quantity-takeoff-excel` 三支有正式 pilot 規格檔，位於 `.claude/skills/archicad-skill-adapter/references/pilot-*.md`。**三支都尚未達到 `verified`**：
+`element-query`、`room-numbering`、`quantity-takeoff-excel` 三支有正式 pilot 規格檔，位於 `.claude/skills/archicad-skill-adapter/references/pilot-*.md`。目前**一支已達 `verified`，兩支未達**：
 
 | Pilot | 分級 | 證據現況 | 還缺什麼 |
 |---|---|---|---|
 | `element-query` | B | 有一次 live-test evidence（fork 側提交，**尚待維護者審閱**），全程只經三支公開 MCP 工具、未直接打 JSON API 埠 | 審閱通過後才可標 `verified` |
-| `room-numbering` | B | pilot 檔的 `Live-Test Evidence` 區塊**仍是空白模板** | dry-run 預覽、使用者確認、實際寫入 Zone 編號、write-back 驗證 |
-| `quantity-takeoff-excel` | B | 同上，**仍是空白模板** | Zone 邊界與牆門窗關聯的證據鏈、開口扣除、Excel 可追溯欄位 |
+| `room-numbering` | B | **`verified`（2026-09-08 實機）**：42 個 Zone 完成 dry-run→核准→寫入→read-back，`executionResults` ok=42/failed=0，read-back success=42/unchanged=0 | 維護者複核；本 repo 無 Archicad，無法複驗 |
+| `quantity-takeoff-excel` | B | `Live-Test Evidence` 區塊**仍是空白模板** | Zone 邊界與牆門窗關聯的證據鏈、開口扣除、Excel 可追溯欄位 |
+
+### `room-numbering` 通過的條件，以及一個必要的新前置檢查
+
+同一套程序在**鎖定的樓層**上跑，會回報五個批次全部成功卻一個 Zone 都沒改。差別只在目標元素是否可編輯：
+
+- `properties_set_property_values_of_elements` 的失敗訊息在 **per-element 的 `executionResults`** 裡，工具層不會回報錯誤。只看工具層結果就會誤判成功。
+- `propertyIsEditable` 描述的是**屬性**，不是這個元素當下能不能寫。元素層級的判準是 `elements_get_elements_by_type` 的 `IsEditable` filter。實測鎖定樓層：`["OnActualFloor"]` 回 105 個，`["OnActualFloor","IsEditable"]` 回 **0** 個，而該層仍完全可見可讀。
+
+因此所有 Archicad 寫入流程都必須加入兩道關卡：**寫入前用 `IsEditable` 過濾確認目標可寫**（掉出來的列為 skipped），**寫入後逐筆檢查 `executionResults` 並 read-back**。細節見 [archicad-adapter-boundary.md](archicad-adapter-boundary.md) 第 3 節 E。
 
 讀取路徑上已取得的可用材料（2026-09-08 實測，`0.5.3` + Archicad 28 + Tapir 1.5.8）：
 

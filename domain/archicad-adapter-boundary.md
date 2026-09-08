@@ -109,6 +109,43 @@ metadata:
 - 但**分頁未走完就下結論，是本轉譯層最容易犯的錯**。實測中 `properties_get_all_properties` 首頁只回 100 筆，據此會誤判「專案裡沒有面積屬性」；走完分頁實際有 **1766 筆／18 頁**。
 - **規則**：任何「查不到 ⇒ 能力不存在」的結論，必須先證明分頁已走完。
 
+### E. 模型寫入（兩道強制關卡）
+
+Archicad 的 property 寫入有一個會讓人誤判成功的失敗模式，**任何寫入流程都必須加上這兩道關卡**。
+
+**關卡一：寫入前確認目標可編輯。**
+
+`propertyIsEditable` 描述的是**屬性本身**，不是「這個元素現在能不能寫」。元素層級的判準是
+`elements_get_elements_by_type` 的 `IsEditable` filter。實測一個鎖定的樓層：
+
+| 查詢 | 結果 |
+|---|---|
+| `Zone` + `["OnActualFloor"]` | 105 |
+| `Zone` + `["OnActualFloor", "IsEditable"]` | **0** |
+| `Zone` + `["IsVisibleByLayer", "OnActualFloor"]` | 105 |
+
+該層完全可見、可讀，但一個元素都寫不進去。filter 之間是 AND，`IsEditable` 是唯一能預測寫入會不會生效的那一個。**掉出過濾的元素列為 skipped 回報，不要硬寫。**
+
+**關卡二：逐筆檢查 `executionResults`，並且一定要 read-back。**
+
+`properties_set_property_values_of_elements` 把失敗放在 per-element 的 `executionResults` 裡，**工具層不會回報錯誤**：
+
+```json
+{"executionResults": [
+  {"success": false, "error": {"code": -2130312909, "message": "Failed to set property value for element"}}
+]}
+```
+
+實測：對鎖定樓層的 105 個 Zone 重新編號，回報「五個批次全部成功、耗時 1.1 秒」，實際一個都沒改。只檢查工具層結果的呼叫端會直接宣稱成功。
+
+**確認可編輯後，寫入路徑本身是可靠且可逆的**：42 個 Zone 的編號寫入 `executionResults` ok=42／failed=0，read-back `success=42／unchanged=0`；單筆寫入後改回原值也同樣成功。
+
+**其他寫入注意事項**：
+
+- **沒有 `elements_modify_zones`。** Wall／Column／Beam／Door／Object 等都有對應的 `elements_modify_*`，Zone 沒有。Zone 的資料修改只能走 property 寫入。
+- **原子性未知。** 無法假設批次寫入具備交易或 rollback 保證，使用最小可驗證批次，並在寫入前就向使用者聲明這個限制。
+- **同名屬性可能互為鏡像。** `區域/區域號碼` 與 `ID和類別/區域號碼` 指向同一份底層資料（寫入前 105/105 相同、寫入後 42/42 相同）。寫任一個看似等價，但要用讀取確認鏡像關係，不要假設。
+
 ## 4. 穩定性與收手條件
 
 連續大量請求之後，實測出現過 Tapir Add-On 停止回應：`discovery_list_active_archicads` 退化為空陣列 `[]`，而 port 仍在監聽、Archicad 行程仍存活。**空陣列與「Add-On 未載入」「沒有 Archicad 在跑」三種情況無法從回應區分。**
