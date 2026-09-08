@@ -64,12 +64,15 @@ metadata:
 
 ### A. 圖面視覺覆寫（Graphic Overrides）
 
-> 證據日期：Highlight 指令的行為與清除路徑沿用 **2026-08-19** 的 schema 觀察，本次未重測；
-> 下方的單位風險則由 2026-09-08 的 property 實測直接支持。
+> 證據日期：schema 於 **2026-09-08** 重讀確認（欄位與必填組合如下）；下方的單位風險由同日的
+> property 實測直接支持。
 
 - **限制**：Revit 可對特定視圖永久覆寫元件顏色；Archicad MCP 目前只提供暫時性的 `elements_highlight_elements`。
 - **邊界**：降級為「暫時高亮」。不宣稱能寫入圖層或存進特定 View。
-- **清除路徑**：內建於同一支指令 —— 傳入空的 `elements` 陣列即清除所有既有 highlight。因此「可清除」這項前置條件**讀 schema 即可確認**，不需要真的先染色再測試清除。
+- **視覺副作用比「高亮」兩個字大得多。** schema 有一個 `wireframe3D` 選項，開啟後**會把 3D 視窗裡所有未被高亮的元素切換成線框**（另有 `nonHighlightedColor` 可改非高亮元素的顏色）。使用者看到的是「整個模型變線框，只剩一個元件有顏色」——那是一次 highlight 呼叫的結果，不是兩件事，也不是模型損壞。
+- **這不是 Archicad 的顯示設定，UI 裡關不掉。** 它是 Tapir 疊加的臨時狀態；3D Styles 與 Model View Options 都沒有對應開關，實測 Model View Options 本身也不會被改動。使用者在自己的軟體裡找不到地方關，是預期行為。
+- **清除路徑**：內建於同一支指令 —— `elements` 與 `highlightedColors` **兩者皆為必填**，各傳一個空陣列即清除所有既有 highlight，線框同時恢復。因此「可清除」這項前置條件**讀 schema 即可確認**，不需要真的先染色再測試清除。
+- **對使用者的義務**：任何會下 highlight 的流程，必須在同一次互動中一併告知如何清除，或在流程結束時自動清除。否則使用者會面對一個在自己軟體裡找不到開關的狀態。
 - **附帶風險**：若以 property 值作為分組上色的鍵，該值是依專案計算單位格式化的字串（見 [archicad-terminology-map.md](archicad-terminology-map.md)），兩個實際不同的數值可能格式化後相同而被併成同一組。
 
 ### B. 碰撞檢查（Clash Detection）

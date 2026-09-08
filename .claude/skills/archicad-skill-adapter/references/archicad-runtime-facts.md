@@ -446,6 +446,35 @@ of which story a Zone belongs to. The working substitute is `elements_get3_d_bou
 comparing `zMin` against the `project_get_stories` level table. This is an inference: record it as
 one, and prefer `OnActualFloor` when the target story is the active one.
 
+### `elements_highlight_elements` changes more than colour
+
+Schema re-read on 2026-09-08. Two required fields and two optional ones:
+
+| Field | Required | Effect |
+|---|---|---|
+| `elements` | yes | elements to highlight |
+| `highlightedColors` | yes | one colour per element |
+| `wireframe3D` | no | **switches every non-highlighted element in the 3D window to wireframe** |
+| `nonHighlightedColor` | no | `[r, g, b, a]` for everything not highlighted |
+
+Two consequences worth stating plainly, because both surfaced as a confused user rather than as an
+error:
+
+- **The visual change is far larger than "highlight" suggests.** With `wireframe3D` set, the user
+  sees their whole model turn to wireframe with a single coloured element left in it. That is one
+  call's doing, not two separate problems, and nothing is damaged.
+- **It is not an Archicad display setting, so it cannot be switched off in Archicad.** The state is
+  overlaid by the Add-On. 3D Styles and Model View Options carry no corresponding toggle, and
+  `navigator_get_model_view_options` confirms the project's own option sets are untouched. Looking
+  for a switch in the host application and not finding one is the expected outcome.
+
+Clearing is built into the same command, but **both required fields must be present**: send
+`elements: []` *and* `highlightedColors: []`. Passing only an empty `elements` array is rejected by
+the schema. Clearing restores the wireframed elements at the same time.
+
+Any workflow that issues a highlight should either clear it when it finishes or tell the user how
+to, in the same exchange. Otherwise it leaves them holding a state their own software cannot undo.
+
 ### The Add-On stops responding under sustained load
 
 After roughly 7.4k GUID enumerations, 1766 property definitions and 105 Zone relation queries in

@@ -89,7 +89,7 @@ workbook 可重現、每個數字都能追到具名 GUID 上的具名屬性，�
 
 | Skill | 原判斷 | 結論 | 證據來源 |
 |---|---|---|---|
-| `element-coloring` | 降級為暫時 Highlight | **維持**，並新增單位風險：以 property 值分組上色，會因格式化字串把不同數值併成同一組 | 分組風險由 2026-09-08 的 property 實測直接支持（回傳為 2 位小數字串、小數位來自專案設定）；**Highlight 指令本身的行為未於本次重測**，沿用 2026-08-19 的 schema 觀察 |
+| `element-coloring` | 降級為暫時 Highlight | **維持**，並新增單位風險：以 property 值分組上色，會因格式化字串把不同數值併成同一組 | 分組風險由 2026-09-08 的 property 實測直接支持（回傳為 2 位小數字串、小數位來自專案設定）；Highlight 指令的 schema 亦於同日重讀，確認 `wireframe3D` 會將 3D 視窗中未高亮元素轉為線框、且清除需同時傳空的 `elements` 與 `highlightedColors`。指令的實際染色行為本身未執行 |
 | `detect-clashes` | 縮限為 GUID 對撞、排除 Hotlink | **維持** | **本次完全未重測**，`settings` 三欄必填與 Hotlink 反面證據（`project_get_hotlinks` 不回 GUID ownership）皆沿用 2026-08-19 |
 | `wall-orientation-check` | 能力缺口，降級人工檢查 | **前提不成立，建議升為 pilot 候選** | 2026-09-08 實測，見下 |
 
