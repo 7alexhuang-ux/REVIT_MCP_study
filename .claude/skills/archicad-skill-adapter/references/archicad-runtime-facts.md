@@ -373,8 +373,11 @@ the model. On a single Zone:
 | `區域/區域淨週長` | `'44.91'` |
 | `區域/區域總週長` | `'44.60'` |
 
-Across 42 Zones on one story, calculated area and measured area differed on **36**. Resolve which
-definition governs, say so in the output, and warn on the rows where they disagree.
+Across 42 Zones on one story, calculated area and measured area differed on **36**. Which definition
+governs is a modelling convention, fixed when the Zones are built, not something to pick at read
+time. Record which property was read, and warn on rows where the two disagree. What the resulting
+number may then be used for is a separate question again — see
+[pilot-quantity-takeoff-excel.md](pilot-quantity-takeoff-excel.md).
 
 ### `elements_get_elements_related_to_zones` returns a flat, repeating list
 

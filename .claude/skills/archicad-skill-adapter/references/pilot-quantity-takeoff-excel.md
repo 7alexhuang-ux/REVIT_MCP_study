@@ -4,6 +4,8 @@
 
 Reuse the evidence and workbook method from `quantity-takeoff-excel` with current-turn Archicad data. The first pilot covers Zone inventory and evidence-backed boundary quantities. Partition, finish-height, opening deduction, and scaffold results remain partial until every required Archicad relationship is verified.
 
+The scope of this pilot is to prove that the MCP tooling can reach Zone quantities through the Domain method, with every number traceable to a named property on a named GUID. It is **not** a claim that the extracted areas are fit for any regulatory purpose — see [What a Zone area may and may not be used for](#what-a-zone-area-may-and-may-not-be-used-for).
+
 ## Backend Route
 
 - Revit selected: return to `.claude/skills/quantity-takeoff-excel/SKILL.md` and use its existing Revit workflow.
@@ -32,29 +34,59 @@ Reuse the evidence and workbook method from `quantity-takeoff-excel` with curren
 6. Build the workbook with source GUIDs, formulas, warning columns, fallback counts, and a selected-project/port provenance sheet.
 7. Reconcile detail rows against totals and scan formulas for spreadsheet errors before delivery.
 
-## There is more than one area, and more than one perimeter
+## What a Zone area may and may not be used for
 
-A Zone carries several quantities whose names all read like "the area". They are not equal, and
-picking one without saying so is how a takeoff silently disagrees with the model. Observed on one
-Zone:
+Extracting an area from a Zone does not make that number usable for any purpose. This boundary is a
+professional judgement, not an API limit, and **nothing in the runtime will warn you when it is
+crossed.**
+
+**The modelling convention comes first.** Whether a Zone means gross or net area has to be decided
+and applied consistently *when the model is built* — not chosen later at takeoff time. How the Zone
+was constructed (boundary at wall centreline or finish face, columns included or not) is what
+determines the meaning of every number extracted from it.
+
+Archicad offers several properties that all read like "the area", and they do not agree. Observed
+on one Zone:
 
 | Property | Value |
 |---|---|
 | `區域/計算面積` | `'49.95'` |
-| `區域/被測量的面積` | `'53.34'` |
 | `區域/測得淨面積` | `'49.95'` |
 | `區域/縮小面積` | `'49.95'` |
+| `區域/被測量的面積` | `'53.34'` |
 | `常規參數/面積` | `'53.34'` |
 | `區域/牆週長` | `'44.91'` |
 | `區域/區域淨週長` | `'44.91'` |
 | `區域/區域總週長` | `'44.60'` |
 
-Across the 42 Zones tested, calculated area and measured area differed on **36 of them**. Resolve
-which definition the project team means, record the choice in the workbook, and emit a warning row
-where the two disagree. Do not average them and do not silently prefer one.
+Calculated and measured area differed on **36 of the 42 Zones** tested. That spread is not a
+question to adjudicate inside a takeoff report — it is the symptom of Zones built without one shared
+convention. Without that convention, no total over those Zones is meaningful.
 
-All of these are property-layer values: display strings formatted to the project's calculation
-units. See the unit contract in [revit-archicad-terminology.md](revit-archicad-terminology.md).
+### Permitted use
+
+- **Early-stage massing checks**: a rough read on whether floor area ratio or building coverage is
+  obviously over the regulatory limit, used to steer scheme adjustments.
+
+### Not permitted
+
+- **Not a basis for building-permit area.** Permit area calculation is a separate workflow that must
+  be proven item by item with 面積單線圖 (the area calculation line drawings) and the accompanying
+  formulas. A model's Zone areas cannot stand in for it.
+- **Not a floor-area-ratio or building-coverage result.** Each of those has its own rules about what
+  counts, what is discounted and what is exempt; neither is a sum of Zone areas.
+- **"Not obviously over the limit" is not "compliant."** The first is a planning aid; the second
+  requires the formal area calculation and review.
+
+### What this pilot actually demonstrates
+
+That the MCP tooling can reach Zone areas through the Domain method, with the source property named
+and the value traceable to a GUID. It demonstrates nothing about whether those areas are fit for a
+downstream regulatory purpose — that depends on how the Zones were built.
+
+Any output leaving this adapter must state **which area property was read, what the Zone
+construction convention was, and what the number may be used for.** Missing any of the three, the
+number can be consumed downstream as something it is not.
 
 ## Observed Capability Hints
 
@@ -76,7 +108,8 @@ Use these only as discovery hints:
 - Door/window ownership is inferred rather than returned as a verified relationship.
 - Net height requires a ceiling/slab match that the discovered commands cannot establish.
 - Workbook rows cannot retain source GUIDs and warnings.
-- Two area or perimeter definitions disagree and no one has decided which one governs.
+- Two area or perimeter definitions disagree, which means the Zones were not built to one shared convention — resolve that in the model, not in the report.
+- The requested output would be used as a building-permit area basis, or reported as a compliance result.
 
 ## Live-Test Evidence
 
@@ -118,7 +151,8 @@ unresolved_inputs: 5
   2. per-opening dimensions: deducted from Zone-level door/window surface totals,
      not from individual Door/Window width x height
   3. net height: taken from the Zone height property, not matched against ceiling/slab geometry
-  4. area definition: calculated vs measured disagree on 36 of 42 Zones; not adjudicated
+  4. area definition: calculated vs measured disagree on 36 of 42 Zones — a modelling-convention
+     gap to be resolved in the model, not a choice to be made at report time
   5. elements_get_zone_boundaries (isExternal, SI area) unusable at scale, so external/internal
      boundary split is absent from the workbook
 workbook: 3 sheets — Zone 明細 (42 rows, formulas retained + SUM totals row),
@@ -132,8 +166,9 @@ verification: SUM(perimeter)=1142.92 m; SUM(door+window surface)=412.66 m2;
 **Why this is `approximate mapping` and not `verified`:** the workbook is reproducible and every
 number traces to a named property on a named GUID, but three of the method's core inputs — finish-face
 boundary, per-opening deduction, and geometric net height — are substitutes rather than equivalents,
-and the area definition is undecided. The pilot proves the pipeline runs; it does not yet prove the
-numbers mean what the Revit-side method means.
+and the Zones were not built to one shared area convention. The pilot proves the pipeline runs; it
+does not prove the numbers mean what the Revit-side method means, and it says nothing about whether
+they are fit for a regulatory purpose.
 
 ## Reference
 
