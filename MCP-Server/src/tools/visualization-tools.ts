@@ -421,6 +421,17 @@ export const visualizationTools: Tool[] = [
         },
     },
     {
+        name: "get_view_graphics_diagnostics",
+        description: "唯讀診斷『這張圖現在為什麼長這樣』：依 Revit 覆寫優先序一次回報視覺型式 (DisplayStyle)、套用中的視圖樣板與它鎖住的參數、視圖篩選器（含是否抓到目標元素、是否把它隱藏）、指定元素的個別圖形覆寫、其品類覆寫與可見性，以及該元素材料的 Surface/Cut 填充樣式與顏色。Verdict 會列出『所有』命中的成因並依優先序排序（不是只回第一個），涵蓋填滿顏色、線色、線寬、半色調、透明度與隱藏，每筆附影響範圍與修正方式。用於接手他人模型時追查表現法被誰改掉，省去逐層手動比對。不開 Transaction、不修改模型。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                viewId: { type: "number", description: "要診斷的視圖 Element ID（省略 = 目前作用中的視圖）" },
+                elementId: { type: "number", description: "要追查的元素 Element ID（選填）。省略時只回報視圖層級資訊，不含元素覆寫與材料。" },
+            },
+        },
+    },
+    {
         name: "get_view_templates",
         description: "取得專案中所有視圖樣版的完整設定。可用於視圖樣版比對與整併分析。",
         inputSchema: {

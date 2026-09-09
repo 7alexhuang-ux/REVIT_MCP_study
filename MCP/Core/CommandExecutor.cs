@@ -238,6 +238,10 @@ namespace RevitMCP.Core
                     case "get_active_view":
                         result = GetActiveView();
                         break;
+
+                    case "get_view_graphics_diagnostics":
+                        result = GetViewGraphicsDiagnostics(parameters);
+                        break;
                     
                     case "rename_view":
                         result = RenameView(parameters);
