@@ -5,6 +5,7 @@ using Autodesk.Revit.DB.Events;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Events;
 using System.Reflection;
+using System.Windows.Media.Imaging;
 using RevitMCP.Core;
 using RevitMCP.Configuration;
 using RevitMCP.UI;
@@ -36,6 +37,7 @@ namespace RevitMCP
 
         public static SocketService SocketService => _socketService;
         public static UIApplication UIApp => _uiApp;
+        public static PushButton ToggleButton { get; private set; }
 
         public Result OnStartup(UIControlledApplication application)
         {
@@ -64,8 +66,10 @@ namespace RevitMCP
                     "MCP 服務\n(開/關)",
                     assemblyPath,
                     "RevitMCP.Commands.ToggleServiceCommand");
-                toggleButtonData.ToolTip = "啟動或停止 MCP WebSocket 服務";
-                panel.AddItem(toggleButtonData);
+                int configuredPort = ConfigManager.Instance.Settings.Port;
+                toggleButtonData.ToolTip = $"MCP 服務：關閉\r\n點擊啟動（port {configuredPort}）";
+                toggleButtonData.LargeImage = new BitmapImage(new Uri("/RevitMCP;component/Resources/icon-32-off.png", UriKind.RelativeOrAbsolute));
+                ToggleButton = panel.AddItem(toggleButtonData) as PushButton;
 
                 // 2. 開啟日誌按鈕
                 PushButtonData logButtonData = new PushButtonData(
