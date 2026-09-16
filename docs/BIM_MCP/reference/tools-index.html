@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tools 索引（193 個）· BIM_MCP</title>
-<meta property="og:title" content="RevitMCP Tools 索引：193 個執行層工具">
-<meta property="og:description" content="193 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
+<title>Tools 索引（194 個）· BIM_MCP</title>
+<meta property="og:title" content="RevitMCP Tools 索引：194 個執行層工具">
+<meta property="og:description" content="194 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@300;400;600;700;800&display=swap">
@@ -89,9 +89,9 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">193 個</span></div>
+  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">194 個</span></div>
   <h1 class="bim-hero-title">Tools · <span class="accent">執行層</span><br>模型上真正被動到的那一下</h1>
-  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 193 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
+  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 194 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
 </header>
 
 <section class="bim-section">
@@ -99,7 +99,7 @@
   <p>每張卡右上角的標記來自工具自己宣告的 <code>annotations</code>，不是這一頁另外標的——閘門 <code>9-1</code> 會驗證它們與程式碼一致。</p>
   <ul>
     <li><strong>唯讀</strong>（86 個）——只讀不寫。跑錯了不會留下痕跡，可以放心探索。</li>
-    <li><strong>會寫入</strong>（104 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
+    <li><strong>會寫入</strong>（105 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
     <li><strong>破壞性</strong>（3 個）——刪除或不可逆地取代既有內容：<code>curate_mep_sizes · dedup_detail_elements_in_view · delete_element</code>。這份名單是白名單，程式碼裡多一個就會被閘門擋下。</li>
   </ul>
   <p style="color:var(--text-muted);font-size:13px;">「唯讀」是工具作者的宣告，不是執行時的沙箱。它告訴你這支工具<em>設計上</em>不寫入，不是保證它<em>不可能</em>寫入。</p>
@@ -117,16 +117,16 @@
         <tr><td><strong>C</strong></td><td>房間與空間</td><td class="num">18</td><td>房間邊界、編號、面積、走廊、施工架周長。</td></tr>
         <tr><td><strong>D</strong></td><td>MEP 與碰撞</td><td class="num">17</td><td>風管系統、空間代表點、套管開孔、CSA 干涉。</td></tr>
         <tr><td><strong>E</strong></td><td>法規檢核</td><td class="num">13</td><td>排煙、偵煙、樓梯——有法源、有判準的檢查。</td></tr>
-        <tr><td><strong>F</strong></td><td>視圖與圖紙</td><td class="num">26</td><td>建視圖、裁剪、圖紙配置、視埠定位、跨專案複製。</td></tr>
+        <tr><td><strong>F</strong></td><td>視圖與圖紙</td><td class="num">27</td><td>建視圖、裁剪、圖紙配置、視埠定位、跨專案複製。</td></tr>
         <tr><td><strong>G</strong></td><td>標註與詳圖</td><td class="num">25</td><td>尺寸、詳圖元件、填充區域、圖例、明細表、文字。</td></tr>
         <tr><td><strong>H</strong></td><td>視覺化</td><td class="num">21</td><td>上色、覆寫、隱藏顯示，也含材質與 Type 建構。</td></tr>
     </tbody>
   </table>
-  <p style="color:var(--text-muted);font-size:13px;">分類是 40 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 193。這一頁由 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
+  <p style="color:var(--text-muted);font-size:13px;">分類是 40 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 194。這一頁由 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
 </section>
 
 <section class="bim-section">
-  <h2 class="bim-section-title">193 個工具 · 依用途分組</h2>
+  <h2 class="bim-section-title">194 個工具 · 依用途分組</h2>
 
     <div class="cat-header">A · 基礎與查詢（26 個）</div>
     <p class="cat-blurb">讀模型、找元素、問參數，多數工作的第一步；也包含少數寫入型前置工具（如載入共用參數檔 load_shared_parameters）。</p>
@@ -1351,7 +1351,7 @@
         <div class="tool-desc">依照法規判定結果對偵煙探測器上色：綠=PASS、紅=FAIL、橙=WARN（出風口資料缺失）。</div>
       </div>
     </div>
-    <div class="cat-header">F · 視圖與圖紙（26 個）</div>
+    <div class="cat-header">F · 視圖與圖紙（27 個）</div>
     <p class="cat-blurb">建視圖、裁剪、圖紙配置、視埠定位、跨專案複製。</p>
     <div class="tool-card" id="align_titleblocks_on_sheets" data-tool="align_titleblocks_on_sheets">
       <div>
@@ -1370,7 +1370,7 @@
         <div class="tool-module">view-cropbox-tools</div>
       </div>
       <div>
-        <div class="tool-desc">將指定視圖的 CropBox 對齊到目標元素（如 Detail Group 圖框）的 BoundingBox。保留原 Z 軸深度與 CropBox Transform。viewId 不指定時使用 active view。</div>
+        <div class="tool-desc">將指定視圖對齊到目標元素的 BoundingBox。2D 使用 CropBox；3D 為舊客戶端相容入口，會轉交 set_3d_section_box 並使用真正的 View3D Section Box。3D 可分別設定 XY、上方與下方 padding。</div>
       </div>
     </div>
     <div class="tool-card" id="arrange_viewports_on_sheet" data-tool="arrange_viewports_on_sheet">
@@ -1581,6 +1581,16 @@
       </div>
       <div>
         <div class="tool-desc">縮放圖紙上所有 DraftingView 中表格的寬度（僅 X 軸），高度不變。以每個 view 的左邊緣為錨點，將所有 DetailCurve 和 TextNote 的 X 座標按比例縮放。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="set_3d_section_box" data-tool="set_3d_section_box">
+      <div>
+        <div class="tool-name">set_3d_section_box</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">view-cropbox-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">將非樣板 3D 視圖的真正 Section Box 對齊到指定元素的完整 XYZ BoundingBox，並關閉 CropBox。可分別設定水平、上方與下方 padding，也可自動納入與目標底面相接的完整支承樑，同時排除上一層樓板。</div>
       </div>
     </div>
     <div class="tool-card" id="set_scope_box_for_views" data-tool="set_scope_box_for_views">
@@ -2088,7 +2098,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / tools-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">193 個 MCP 工具完整索引，由 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">194 個 MCP 工具完整索引，由 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
 </footer>
 
 <script src="../shared.js"></script>

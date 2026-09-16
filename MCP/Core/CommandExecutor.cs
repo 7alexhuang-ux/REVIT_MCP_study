@@ -574,6 +574,9 @@ namespace RevitMCP.Core
                     case "align_view_cropbox_to_element":
                         result = AlignViewCropBoxToElement(parameters);
                         break;
+                    case "set_3d_section_box":
+                        result = Set3DSectionBox(parameters);
+                        break;
                     case "shift_view_cropbox":
                         result = ShiftViewCropBox(parameters);
                         break;
