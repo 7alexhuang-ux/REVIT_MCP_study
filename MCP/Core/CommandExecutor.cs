@@ -593,6 +593,17 @@ namespace RevitMCP.Core
                         result = SetCategoryVisibility(parameters);
                         break;
 
+                    // === 視圖篩選器（規則式表現法控制）===
+                    case "get_filterable_parameters":
+                        result = GetFilterableParameters(parameters);
+                        break;
+                    case "create_view_filter":
+                        result = CreateViewFilter(parameters);
+                        break;
+                    case "remove_view_filter":
+                        result = RemoveViewFilter(parameters);
+                        break;
+
                     // === 尺寸標註模組 ===
                     case "create_dimension_by_ray":
                         result = CreateDimensionByRay(parameters);
