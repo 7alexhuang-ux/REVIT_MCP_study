@@ -1,6 +1,6 @@
 ---
 name: smoke-exhaust
-description: "排煙窗法規檢討：無窗居室判定、無開口樓層判定、排煙有效面積計算、剖面標註、Excel 報告匯出。觸發條件：使用者提到排煙、排煙窗、無窗居室、無開口樓層、建技規§101、消防§188、天花板下80cm、有效開口、煙層。工具：check_smoke_exhaust_windows、check_floor_effective_openings、create_section_view、create_detail_lines、create_filled_region、create_text_note、export_smoke_review_excel。"
+description: "排煙窗法規檢討：無窗居室判定、無開口樓層判定、排煙有效面積計算、剖面標註、Excel 報告匯出。觸發條件：使用者提到排煙、排煙窗、無窗居室、無開口樓層、建技規§101、消防§188、天花板下80cm、有效開口、煙層。工具：check_smoke_exhaust_windows、check_floor_effective_openings、create_section_view、set_3d_section_box、create_detail_lines、create_filled_region、create_text_note、export_smoke_review_excel。"
 metadata:
   references:
     - domain/smoke-exhaust-review.md
@@ -62,6 +62,12 @@ metadata:
 
 ### 步驟 3：剖面檢視（選用）
 `create_section_view` → 建立面向指定牆面的剖面視圖，檢視窗戶與天花板高度關係
+
+逐房 3D 檢視用 `set_3d_section_box`（elementId = Room，`includeSupportingBeams=true`，`padding_bottom_mm=0`）。上方結構是使用者的選擇，未指定時先問，不要自行決定：
+- `upperStructureMode="current_level_only"`（預設，`padding_top_mm=0`）：只看當層，上層結構切掉。
+- `upperStructureMode="include_upper_structure_without_slab"`：延伸到上層樓板底，看得到上層樑、看不到樓板。
+
+找不到上層樓板時工具會報錯且不改視圖；照實回報，不要用猜的樓高重試。回傳 `UpperStructureBeamCount=0` 或 `TopBelowTargetTop=true` 時要告知使用者。方法細節見 `domain/smoke-exhaust-review.md`「逐房 3D Section Box 檢視」。
 
 ### 步驟 4：標註（選用）
 - `create_detail_lines` → 繪製天花板線、有效帶範圍線

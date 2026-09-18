@@ -15,13 +15,15 @@ export const viewCropBoxTools: Tool[] = [
                 padding_top_mm: { type: "number", description: "3D Section Box 向上外擴距離（mm）；省略時沿用 padding_mm" },
                 includeSupportingBeams: { type: "boolean", description: "3D 時將與目標底面相接且 XY 相交的結構構架完整納入 Section Box", default: false },
                 supportingBeamTolerance_mm: { type: "number", description: "判定樑頂貼近目標底面的容許值（mm），預設 300", default: 300 },
+                upperStructureMode: { type: "string", enum: ["current_level_only", "include_upper_structure_without_slab"], description: "3D 上層結構路由。current_level_only（預設）：頂面＝目標頂 + padding_top_mm，上層結構全部切掉。include_upper_structure_without_slab：頂面延伸到最近上層樓板底（扣 upperSlabClearance_mm），上層樑可見但不含樓板本體，此時忽略 padding_top_mm；找不到上層樓板會報錯且不修改 Section Box", default: "current_level_only" },
+                upperSlabClearance_mm: { type: "number", description: "include_upper_structure_without_slab 時，Section Box 頂面位於上層樓板底下方的距離（mm），預設 10", default: 10 },
             },
             required: ["elementId"],
         },
     },
     {
         name: "set_3d_section_box",
-        description: "將非樣板 3D 視圖的真正 Section Box 對齊到指定元素的完整 XYZ BoundingBox，並關閉 CropBox 避免雙重裁切。可分別設定水平、上方與下方 padding，並可自動納入與目標底面相接的完整支承樑，同時排除上一層樓板。若只需清理由舊流程誤啟用的 3D CropBox，設 clearCropOnly=true，此時可省略 elementId。",
+        description: "將非樣板 3D 視圖的真正 Section Box 對齊到指定元素的完整 XYZ BoundingBox，並關閉 CropBox 避免雙重裁切。可分別設定水平、上方與下方 padding，並可自動納入與目標底面相接的完整支承樑，可用 upperStructureMode 選擇只看當層，或延伸到上層樓板底以顯示上層樑但不含樓板。若只需清理由舊流程誤啟用的 3D CropBox，設 clearCropOnly=true，此時可省略 elementId。",
         inputSchema: {
             type: "object",
             properties: {
@@ -33,6 +35,8 @@ export const viewCropBoxTools: Tool[] = [
                 padding_top_mm: { type: "number", description: "頂面向上外擴距離（mm）；省略時沿用 padding_mm" },
                 includeSupportingBeams: { type: "boolean", description: "將與目標底面相接且 XY 相交的結構構架完整納入 Section Box；房間檢討建議 true", default: false },
                 supportingBeamTolerance_mm: { type: "number", description: "判定樑頂貼近目標底面的容許值（mm），預設 300", default: 300 },
+                upperStructureMode: { type: "string", enum: ["current_level_only", "include_upper_structure_without_slab"], description: "3D 上層結構路由。current_level_only（預設）：頂面＝目標頂 + padding_top_mm，上層結構全部切掉。include_upper_structure_without_slab：頂面延伸到最近上層樓板底（扣 upperSlabClearance_mm），上層樑可見但不含樓板本體，此時忽略 padding_top_mm；找不到上層樓板會報錯且不修改 Section Box", default: "current_level_only" },
+                upperSlabClearance_mm: { type: "number", description: "include_upper_structure_without_slab 時，Section Box 頂面位於上層樓板底下方的距離（mm），預設 10", default: 10 },
                 setActive: { type: "boolean", description: "完成後切換至目標 3D 視圖，預設 true", default: true },
                 selectElement: { type: "boolean", description: "完成後選取目標元素，預設 true；clearCropOnly 時忽略", default: true },
                 clearCropOnly: { type: "boolean", description: "只關閉 3D 視圖的 CropBox，不修改 Section Box；用於清理舊錯誤狀態", default: false },

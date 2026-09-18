@@ -135,6 +135,12 @@ namespace RevitMCP.Core
             double paddingTopMm = parameters["padding_top_mm"]?.Value<double>() ?? paddingMm;
             if (paddingMm < 0 || paddingXYMm < 0 || paddingBottomMm < 0 || paddingTopMm < 0 || supportingBeamToleranceMm < 0)
                 throw new Exception("Section Box padding 不可小於 0");
+            string upperStructureMode = parameters["upperStructureMode"]?.Value<string>() ?? "current_level_only";
+            if (upperStructureMode != "current_level_only" && upperStructureMode != "include_upper_structure_without_slab")
+                throw new Exception($"upperStructureMode 只接受 current_level_only 或 include_upper_structure_without_slab，收到 '{upperStructureMode}'");
+            double upperSlabClearanceMm = parameters["upperSlabClearance_mm"]?.Value<double>() ?? 10;
+            if (upperSlabClearanceMm < 0)
+                throw new Exception("upperSlabClearance_mm 不可小於 0");
 
             if (clearCropOnly)
             {
@@ -197,50 +203,28 @@ namespace RevitMCP.Core
                 maxZ = Math.Max(maxZ, worldPoint.Z);
             }
 
+            // Capture the target element bounds before unioning, otherwise each
+            // newly included beam could recursively pull in the next beam bay.
+            double targetMinX = minX;
+            double targetMinY = minY;
+            double targetMinZ = minZ;
+            double targetMaxX = maxX;
+            double targetMaxY = maxY;
+            double targetMaxZ = maxZ;
+            double toleranceFeet = supportingBeamToleranceMm / 304.8;
+
             int supportingBeamCount = 0;
             if (includeSupportingBeams)
             {
-                // Capture the target element bounds before unioning, otherwise each
-                // newly included beam could recursively pull in the next beam bay.
-                double targetMinX = minX;
-                double targetMinY = minY;
-                double targetMinZ = minZ;
-                double targetMaxX = maxX;
-                double targetMaxY = maxY;
-                double toleranceFeet = supportingBeamToleranceMm / 304.8;
-
                 var framing = new FilteredElementCollector(doc)
                     .OfCategory(BuiltInCategory.OST_StructuralFraming)
                     .WhereElementIsNotElementType();
 
                 foreach (Element beam in framing)
                 {
-                    BoundingBoxXYZ beamBox = beam.get_BoundingBox(null);
-                    if (beamBox == null) continue;
-
-                    Transform beamTransform = beamBox.Transform ?? Transform.Identity;
-                    double beamMinX = double.PositiveInfinity;
-                    double beamMinY = double.PositiveInfinity;
-                    double beamMinZ = double.PositiveInfinity;
-                    double beamMaxX = double.NegativeInfinity;
-                    double beamMaxY = double.NegativeInfinity;
-                    double beamMaxZ = double.NegativeInfinity;
-
-                    for (int ix = 0; ix <= 1; ix++)
-                    for (int iy = 0; iy <= 1; iy++)
-                    for (int iz = 0; iz <= 1; iz++)
-                    {
-                        XYZ beamPoint = beamTransform.OfPoint(new XYZ(
-                            ix == 0 ? beamBox.Min.X : beamBox.Max.X,
-                            iy == 0 ? beamBox.Min.Y : beamBox.Max.Y,
-                            iz == 0 ? beamBox.Min.Z : beamBox.Max.Z));
-                        beamMinX = Math.Min(beamMinX, beamPoint.X);
-                        beamMinY = Math.Min(beamMinY, beamPoint.Y);
-                        beamMinZ = Math.Min(beamMinZ, beamPoint.Z);
-                        beamMaxX = Math.Max(beamMaxX, beamPoint.X);
-                        beamMaxY = Math.Max(beamMaxY, beamPoint.Y);
-                        beamMaxZ = Math.Max(beamMaxZ, beamPoint.Z);
-                    }
+                    double beamMinX, beamMinY, beamMinZ, beamMaxX, beamMaxY, beamMaxZ;
+                    if (!TryGetWorldBounds(beam, out beamMinX, out beamMinY, out beamMinZ, out beamMaxX, out beamMaxY, out beamMaxZ))
+                        continue;
 
                     bool overlapsTargetXY =
                         beamMaxX >= targetMinX - toleranceFeet && beamMinX <= targetMaxX + toleranceFeet &&
@@ -261,8 +245,96 @@ namespace RevitMCP.Core
             double paddingXYFeet = paddingXYMm / 304.8;
             double paddingBottomFeet = paddingBottomMm / 304.8;
             double paddingTopFeet = paddingTopMm / 304.8;
-            XYZ sectionMin = new XYZ(minX - paddingXYFeet, minY - paddingXYFeet, minZ - paddingBottomFeet);
-            XYZ sectionMax = new XYZ(maxX + paddingXYFeet, maxY + paddingXYFeet, maxZ + paddingTopFeet);
+            double sectionMinZ = minZ - paddingBottomFeet;
+            double sectionMaxZ = maxZ + paddingTopFeet;
+
+            // Upper-structure routing. current_level_only keeps the validated
+            // behaviour (top = target top + padding_top). The other route raises
+            // the top to just under the nearest upper slab soffit, so beams hanging
+            // below that slab become visible while the slab body stays cut away.
+            // No slab found is a hard error: never guess a height.
+            object upperStructure = null;
+            if (upperStructureMode == "include_upper_structure_without_slab")
+            {
+                Element upperSlab = null;
+                double slabBottomZ = double.PositiveInfinity;
+                double slabTopZ = double.NaN;
+                int slabCandidateCount = 0;
+
+                var floors = new FilteredElementCollector(doc)
+                    .OfCategory(BuiltInCategory.OST_Floors)
+                    .WhereElementIsNotElementType();
+
+                foreach (Element floor in floors)
+                {
+                    double fMinX, fMinY, fMinZ, fMaxX, fMaxY, fMaxZ;
+                    if (!TryGetWorldBounds(floor, out fMinX, out fMinY, out fMinZ, out fMaxX, out fMaxY, out fMaxZ))
+                        continue;
+
+                    bool overlapsTargetXY =
+                        fMaxX > targetMinX && fMinX < targetMaxX &&
+                        fMaxY > targetMinY && fMinY < targetMaxY;
+                    // Exclude the target's own slab (bottom below the target base)
+                    // and low platforms that do not reach the target top.
+                    bool isAboveTargetBase = fMinZ > targetMinZ + toleranceFeet;
+                    bool reachesTargetTop = fMaxZ >= targetMaxZ - toleranceFeet;
+                    if (!overlapsTargetXY || !isAboveTargetBase || !reachesTargetTop) continue;
+
+                    slabCandidateCount++;
+                    if (fMinZ < slabBottomZ)
+                    {
+                        slabBottomZ = fMinZ;
+                        slabTopZ = fMaxZ;
+                        upperSlab = floor;
+                    }
+                }
+
+                if (upperSlab == null)
+                    throw new Exception(
+                        "upperStructureMode=include_upper_structure_without_slab：在目標元素上方找不到與其 XY 重疊的樓板，" +
+                        "無法決定上層樓板底高度。上層樓板可能尚未建模、位於連結模型（目前不支援），或 XY 未覆蓋目標。" +
+                        "Section Box 未修改；請先建模樓板，或改用 current_level_only。");
+
+                double clearanceFeet = upperSlabClearanceMm / 304.8;
+                sectionMaxZ = slabBottomZ - clearanceFeet;
+                if (sectionMaxZ <= sectionMinZ)
+                    throw new Exception($"上層樓板底 ({slabBottomZ * 304.8:F0} mm) 扣除 upperSlabClearance_mm 後低於 Section Box 底面，Section Box 未修改");
+
+                int upperBeamCount = 0;
+                var upperFraming = new FilteredElementCollector(doc)
+                    .OfCategory(BuiltInCategory.OST_StructuralFraming)
+                    .WhereElementIsNotElementType();
+                foreach (Element beam in upperFraming)
+                {
+                    double bMinX, bMinY, bMinZ, bMaxX, bMaxY, bMaxZ;
+                    if (!TryGetWorldBounds(beam, out bMinX, out bMinY, out bMinZ, out bMaxX, out bMaxY, out bMaxZ))
+                        continue;
+                    bool overlapsXY =
+                        bMaxX >= targetMinX - paddingXYFeet && bMinX <= targetMaxX + paddingXYFeet &&
+                        bMaxY >= targetMinY - paddingXYFeet && bMinY <= targetMaxY + paddingXYFeet;
+                    bool hangsIntoBox = bMinZ < sectionMaxZ && bMaxZ > targetMaxZ + toleranceFeet;
+                    if (overlapsXY && hangsIntoBox) upperBeamCount++;
+                }
+
+                upperStructure = new
+                {
+                    UpperSlabId = upperSlab.Id.GetIdValue(),
+                    UpperSlabName = upperSlab.Name,
+                    UpperSlabBottom_mm = slabBottomZ * 304.8,
+                    UpperSlabTop_mm = slabTopZ * 304.8,
+                    UpperSlabCandidateCount = slabCandidateCount,
+                    UpperSlabClearance_mm = upperSlabClearanceMm,
+                    TargetTop_mm = targetMaxZ * 304.8,
+                    TopBelowTargetTop = sectionMaxZ < targetMaxZ,
+                    UpperStructureBeamCount = upperBeamCount,
+                    Note = upperBeamCount == 0
+                        ? "Section Box 已延伸至上層樓板底，但範圍內未偵測到上層結構構架；請確認上層樑是否已建模"
+                        : "Section Box 頂面位於上層樓板底下方，上層樑可見、樓板本體已排除"
+                };
+            }
+
+            XYZ sectionMin = new XYZ(minX - paddingXYFeet, minY - paddingXYFeet, sectionMinZ);
+            XYZ sectionMax = new XYZ(maxX + paddingXYFeet, maxY + paddingXYFeet, sectionMaxZ);
             BoundingBoxXYZ sectionBox = new BoundingBoxXYZ
             {
                 Min = sectionMin,
@@ -299,6 +371,9 @@ namespace RevitMCP.Core
                 PaddingXY_mm = paddingXYMm,
                 PaddingBottom_mm = paddingBottomMm,
                 PaddingTop_mm = paddingTopMm,
+                UpperStructureMode = upperStructureMode,
+                PaddingTopApplied = upperStructureMode == "current_level_only",
+                UpperStructure = upperStructure,
                 IncludeSupportingBeams = includeSupportingBeams,
                 SupportingBeamTolerance_mm = supportingBeamToleranceMm,
                 SupportingBeamCount = supportingBeamCount,
@@ -313,6 +388,38 @@ namespace RevitMCP.Core
                     Height = (sectionMax.Z - sectionMin.Z) * 304.8
                 }
             };
+        }
+
+        /// <summary>
+        /// 取得元素在模型座標中的軸向 BoundingBox（套用 BoundingBox Transform 後重算 8 角點）。
+        /// </summary>
+        private static bool TryGetWorldBounds(Element element,
+            out double minX, out double minY, out double minZ,
+            out double maxX, out double maxY, out double maxZ)
+        {
+            minX = minY = minZ = double.PositiveInfinity;
+            maxX = maxY = maxZ = double.NegativeInfinity;
+
+            BoundingBoxXYZ box = element.get_BoundingBox(null);
+            if (box == null) return false;
+
+            Transform transform = box.Transform ?? Transform.Identity;
+            for (int ix = 0; ix <= 1; ix++)
+            for (int iy = 0; iy <= 1; iy++)
+            for (int iz = 0; iz <= 1; iz++)
+            {
+                XYZ p = transform.OfPoint(new XYZ(
+                    ix == 0 ? box.Min.X : box.Max.X,
+                    iy == 0 ? box.Min.Y : box.Max.Y,
+                    iz == 0 ? box.Min.Z : box.Max.Z));
+                minX = Math.Min(minX, p.X);
+                minY = Math.Min(minY, p.Y);
+                minZ = Math.Min(minZ, p.Z);
+                maxX = Math.Max(maxX, p.X);
+                maxY = Math.Max(maxY, p.Y);
+                maxZ = Math.Max(maxZ, p.Z);
+            }
+            return true;
         }
 
         /// <summary>

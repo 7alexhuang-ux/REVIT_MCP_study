@@ -2,8 +2,8 @@
 name: smoke-exhaust-review
 description: "在 Revit 中自動檢討建築物排煙窗是否符合法規要求，涵蓋無開口樓層判定、無窗居室判定、排煙窗有效面積計算、改善建議、視覺化標註、Excel 報告匯出。"
 metadata:
-  version: "1.2"
-  updated: "2026-09-16"
+  version: "1.3"
+  updated: "2026-09-17"
   created: "2026-03-18"
   contributors:
     - "Alex Huang"
@@ -168,6 +168,22 @@ Step 2（無窗居室判定）與 Step 5（排煙窗計算）檢查的是同一�
 - `create_filled_region`：有效帶範圍的半透明填充
 - `create_text_note`：統計摘要文字
 - `create_dimension`（既有）：窗戶寬高、帶內高度標註
+
+**逐房 3D Section Box 檢視**（`set_3d_section_box`，目標元素為 Room）：
+
+共同設定：`includeSupportingBeams=true`、`padding_bottom_mm=0`（由支承樑決定底面）、`padding_xy_mm` 依需要（實測 600 mm）。上方以 `upperStructureMode` 分兩條路由，由使用者選擇：
+
+| 路由 | 頂面高度 | 看到什麼 | 適用 |
+|------|----------|----------|------|
+| `current_level_only`（預設） | 房間頂 + `padding_top_mm`（建議 0） | 當層與當層支承樑；上層結構全部切掉 | 只看本層窗與天花板關係，畫面最乾淨 |
+| `include_upper_structure_without_slab` | 最近上層樓板底 − `upperSlabClearance_mm`（預設 10 mm） | 另含吊在上層樓板下的樑；樓板本體不顯示 | 需要確認上層樑下緣與排煙有效帶（天花板下 80 cm）的關係 |
+
+上層樓板判定：與房間 XY 重疊的 Floor，底面高於房間底 + 容許值、頂面不低於房間頂 − 容許值，取底面最低者。容許值沿用 `supportingBeamTolerance_mm`。
+
+誠實規則：
+- 找不到上層樓板（未建模、在連結模型、XY 未覆蓋）時工具直接報錯、不修改視圖；**不得改用口述或推測的樓高替代**。回報使用者後，由使用者決定先建模樓板或改走 `current_level_only`。
+- 回傳 `UpperStructure.UpperStructureBeamCount = 0` 表示範圍內沒有偵測到上層樑，需向使用者揭露，不可宣稱「上層結構已顯示」。
+- `TopBelowTargetTop = true` 表示房間上限高於上層樓板底，Section Box 會切到房間頂以下，需一併回報。
 
 ## Step 8：§101 補充法規檢討
 
