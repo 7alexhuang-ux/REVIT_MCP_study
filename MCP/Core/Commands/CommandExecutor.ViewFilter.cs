@@ -506,26 +506,84 @@ namespace RevitMCP.Core
             else if (patternMode == "surface") useCut = false;
             else useCut = isPlanView;
 
-            if (parameters["fillColor"] != null && parameters["fillColor"].Type != JTokenType.Null)
+            // 前景填充層。patternName 省略時沿用舊行為（實心填滿），所以既有呼叫端不受影響；
+            // 給了名稱就改用該填充樣式，讓篩選器能畫 hatch 而不只是色塊。
+            string patternName = parameters["patternName"]?.Value<string>();
+            bool hasPatternName = !string.IsNullOrWhiteSpace(patternName);
+            ElementId foregroundPatternId = hasPatternName
+                ? ResolveFillPatternIdOrThrow(doc, patternName)
+                : solid;
+
+            bool hasFillColor = parameters["fillColor"] != null && parameters["fillColor"].Type != JTokenType.Null;
+
+            if (hasFillColor || hasPatternName)
             {
-                var c = parameters["fillColor"];
-                var color = new Color((byte)c["r"].Value<int>(), (byte)c["g"].Value<int>(), (byte)c["b"].Value<int>());
+                Color foreColor = null;
+                if (hasFillColor)
+                {
+                    var c = parameters["fillColor"];
+                    foreColor = new Color((byte)c["r"].Value<int>(), (byte)c["g"].Value<int>(), (byte)c["b"].Value<int>());
+                }
+
+                bool patternUsable = foregroundPatternId != null && foregroundPatternId != ElementId.InvalidElementId;
+
                 if (useCut)
                 {
-                    ogs.SetCutForegroundPatternColor(color);
-                    if (solid != null && solid != ElementId.InvalidElementId)
+                    if (foreColor != null) ogs.SetCutForegroundPatternColor(foreColor);
+                    if (patternUsable)
                     {
-                        ogs.SetCutForegroundPatternId(solid);
+                        ogs.SetCutForegroundPatternId(foregroundPatternId);
                         ogs.SetCutForegroundPatternVisible(true);
                     }
                 }
                 else
                 {
-                    ogs.SetSurfaceForegroundPatternColor(color);
-                    if (solid != null && solid != ElementId.InvalidElementId)
+                    if (foreColor != null) ogs.SetSurfaceForegroundPatternColor(foreColor);
+                    if (patternUsable)
                     {
-                        ogs.SetSurfaceForegroundPatternId(solid);
+                        ogs.SetSurfaceForegroundPatternId(foregroundPatternId);
                         ogs.SetSurfaceForegroundPatternVisible(true);
+                    }
+                }
+            }
+
+            // 背景填充層。典型用法：前景放 hatch 線、背景放實心底色（例如淺綠底 + 草地紋）。
+            string backgroundPatternName = parameters["backgroundPatternName"]?.Value<string>();
+            bool hasBackgroundPattern = !string.IsNullOrWhiteSpace(backgroundPatternName);
+            bool hasBackgroundColor = parameters["backgroundColor"] != null &&
+                                      parameters["backgroundColor"].Type != JTokenType.Null;
+
+            if (hasBackgroundPattern || hasBackgroundColor)
+            {
+                ElementId backgroundPatternId = hasBackgroundPattern
+                    ? ResolveFillPatternIdOrThrow(doc, backgroundPatternName)
+                    : solid;
+
+                Color backColor = null;
+                if (hasBackgroundColor)
+                {
+                    var c = parameters["backgroundColor"];
+                    backColor = new Color((byte)c["r"].Value<int>(), (byte)c["g"].Value<int>(), (byte)c["b"].Value<int>());
+                }
+
+                bool backPatternUsable = backgroundPatternId != null && backgroundPatternId != ElementId.InvalidElementId;
+
+                if (useCut)
+                {
+                    if (backColor != null) ogs.SetCutBackgroundPatternColor(backColor);
+                    if (backPatternUsable)
+                    {
+                        ogs.SetCutBackgroundPatternId(backgroundPatternId);
+                        ogs.SetCutBackgroundPatternVisible(true);
+                    }
+                }
+                else
+                {
+                    if (backColor != null) ogs.SetSurfaceBackgroundPatternColor(backColor);
+                    if (backPatternUsable)
+                    {
+                        ogs.SetSurfaceBackgroundPatternId(backgroundPatternId);
+                        ogs.SetSurfaceBackgroundPatternVisible(true);
                     }
                 }
             }

@@ -239,6 +239,62 @@ namespace RevitMCP.Core
                         result = GetActiveView();
                         break;
 
+                    case "capture_view_image":
+                        result = CaptureViewImage(parameters);
+                        break;
+
+                    case "list_fill_patterns":
+                        result = ListFillPatterns(parameters);
+                        break;
+
+                    case "get_view_range":
+                        result = GetViewRange(parameters);
+                        break;
+
+                    case "get_camera_info":
+                        result = GetCameraInfo(parameters);
+                        break;
+
+                    case "get_material_graphics":
+                        result = GetMaterialGraphics(parameters);
+                        break;
+
+                    case "set_material_graphics":
+                        result = SetMaterialGraphics(parameters);
+                        break;
+
+                    case "set_view_range":
+                        result = SetViewRange(parameters);
+                        break;
+
+                    case "get_link_display_settings":
+                        result = GetLinkDisplaySettings(parameters);
+                        break;
+
+                    case "set_link_display_settings":
+                        result = SetLinkDisplaySettings(parameters);
+                        break;
+
+                    case "list_open_documents":
+                        result = ListOpenDocuments();
+                        break;
+
+                    case "open_document":
+                        result = OpenDocument(parameters);
+                        break;
+
+                    case "save_document":
+                        result = SaveDocument(parameters);
+                        break;
+
+                    case "reload_links":
+                        result = ReloadLinks(parameters);
+                        break;
+
+                    case "close_document":
+                        result = CloseDocument(parameters);
+                        break;
+
                     case "get_view_graphics_diagnostics":
                         result = GetViewGraphicsDiagnostics(parameters);
                         break;

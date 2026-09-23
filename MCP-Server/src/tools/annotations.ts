@@ -96,6 +96,8 @@ export const OVERRIDE: Record<string, ClassificationHints> = {
     export_clash_report: { readOnlyHint: true, destructiveHint: false },
     export_smoke_review_excel: { readOnlyHint: true, destructiveHint: false },
     import_excel_to_drafting_views: { readOnlyHint: true, destructiveHint: false },
+    // 讀模型、寫系統暫存圖檔（預設用完即刪），不異動 Revit 模型 → 同 export_* 歸類為唯讀
+    capture_view_image: { readOnlyHint: true, destructiveHint: false },
 
     select_element: { readOnlyHint: false, destructiveHint: false },
     set_active_view: { readOnlyHint: false, destructiveHint: false },
@@ -105,6 +107,9 @@ export const OVERRIDE: Record<string, ClassificationHints> = {
     set_category_visibility: { readOnlyHint: false, destructiveHint: false },
     hide_elements: { readOnlyHint: false, destructiveHint: false },
     unhide_elements: { readOnlyHint: false, destructiveHint: false },
+    // 只改視圖屬性（視圖範圍、連結在該視圖的顯示方式），不異動模型幾何
+    set_view_range: { readOnlyHint: false, destructiveHint: false },
+    set_link_display_settings: { readOnlyHint: false, destructiveHint: false },
 
     diagnose_curtain_wall_elevation_dimensions: { readOnlyHint: false, destructiveHint: false },
 };

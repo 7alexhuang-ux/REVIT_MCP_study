@@ -51,6 +51,28 @@ import { scaffoldTools } from "./scaffold-tools.js";
 import { viewDuplicateTools } from "./view-duplicate-tools.js";
 import { fillRegionTools } from "./fill-region-tools.js";
 import { ifcStructuralSyncTools } from "./ifc-structural-sync-tools.js";
+import { viewCaptureTools } from "./view-capture-tools.js";
+import { fillPatternTools } from "./fill-pattern-tools.js";
+import { viewRangeTools } from "./view-range-tools.js";
+import { linkDisplayTools } from "./link-display-tools.js";
+import { documentTools } from "./document-tools.js";
+import { cameraTools } from "./camera-tools.js";
+import { materialGraphicsTools } from "./material-graphics-tools.js";
+
+/**
+ * 診斷與環境層工具：擷取畫面、填充樣式查詢、視圖範圍、連結顯示設定、文件操作、相機位置、材質圖形。
+ * 這些不綁特定專業領域（排查「為什麼看不到」「為什麼設了沒反應」到處都會用到），
+ * 所以每個 profile 都要有，不隨 architect/mep/structural 切換而消失。
+ */
+const DIAGNOSTIC_TOOLS = [
+    viewCaptureTools,
+    fillPatternTools,
+    viewRangeTools,
+    linkDisplayTools,
+    documentTools,
+    cameraTools,
+    materialGraphicsTools,
+];
 
 /**
  * Profile 對照表：每個 profile 包含哪些模組
@@ -62,6 +84,12 @@ const PROFILE_MODULES: Record<string, Tool[][]> = {
     structural: [baseTools, wallTools, visualizationTools, dwgColumnTools, dwgBeamTools, clashTools, structureTools, gradingTools, ifcStructuralSyncTools],
     "fire-safety": [baseTools, roomTools, corridorAnalysisTools, visualizationTools, smokeExhaustTools, smokeDetectorTools],
 };
+
+// 診斷層工具對每個 profile 都補上。用迴圈而不是往五個陣列各貼一次，
+// 是為了避免日後新增 profile 時漏掉其中一個（那種漏法不會報錯，只會安靜地少工具）。
+for (const profileName of Object.keys(PROFILE_MODULES)) {
+    PROFILE_MODULES[profileName] = [...PROFILE_MODULES[profileName], ...DIAGNOSTIC_TOOLS];
+}
 
 /**
  * 根據 MCP_PROFILE 環境變數註冊工具

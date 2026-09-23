@@ -33,7 +33,12 @@ export async function executeRevitTool(
 
     // 跨文件命令需要較長 timeout（開啟 .rvt/.rfa 檔案較費時）
     const CROSS_DOC_COMMANDS = new Set(["read_source_file_sheets", "copy_sheets_from_file", "sync_sheet_parameters_from_source", "inject_green_material_into_family"]);
-    const timeoutMs = CROSS_DOC_COMMANDS.has(commandName) ? 120000 : 30000;
+
+    // 開檔、存檔、重載連結、匯出影像都可能遠超過 30 秒（大模型存檔、地形連結重載尤其明顯）。
+    // 逾時斷在中途會讓使用者以為失敗，實際上 Revit 還在跑 —— 所以一律給長 timeout。
+    const SLOW_COMMANDS = new Set(["open_document", "save_document", "reload_links", "capture_view_image"]);
+
+    const timeoutMs = CROSS_DOC_COMMANDS.has(commandName) || SLOW_COMMANDS.has(commandName) ? 120000 : 30000;
 
     // 發送命令到 Revit
     const response = await client.sendCommand(commandName, args, timeoutMs);

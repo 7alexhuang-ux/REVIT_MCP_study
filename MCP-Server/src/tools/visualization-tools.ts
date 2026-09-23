@@ -504,7 +504,20 @@ export const visualizationTools: Tool[] = [
                 visible: { type: "boolean", description: "命中的元素在視圖中是否可見。false = 隱藏（用於把干擾元素移出畫面）", default: true },
                 fillColor: {
                     type: "object",
-                    description: "填滿顏色 RGB (0-255)",
+                    description: "前景填滿顏色 RGB (0-255)。未指定 patternName 時搭配實心填滿。",
+                    properties: { r: { type: "number" }, g: { type: "number" }, b: { type: "number" } },
+                },
+                patternName: {
+                    type: "string",
+                    description: "前景填充樣式名稱（如 'Earth'、'Sand - Dense'、'Diagonal Crosshatch'）。省略 = 實心填滿。同名有 Model 與 Drafting 兩種時優先取 Model（隨視圖比例縮放）。名稱請先用 list_fill_patterns 查，填錯會直接報錯而不是靜默退回實心。",
+                },
+                backgroundPatternName: {
+                    type: "string",
+                    description: "背景填充樣式名稱。典型用法：前景放 hatch 線條、背景放 'Solid fill' 當底色（例如草地＝淺綠底＋土壤紋）。",
+                },
+                backgroundColor: {
+                    type: "object",
+                    description: "背景填滿顏色 RGB (0-255)，搭配 backgroundPatternName 使用",
                     properties: { r: { type: "number" }, g: { type: "number" }, b: { type: "number" } },
                 },
                 lineColor: {
