@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tools 索引（197 個）· BIM_MCP</title>
-<meta property="og:title" content="RevitMCP Tools 索引：197 個執行層工具">
-<meta property="og:description" content="197 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
+<title>Tools 索引（211 個）· BIM_MCP</title>
+<meta property="og:title" content="RevitMCP Tools 索引：211 個執行層工具">
+<meta property="og:description" content="211 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@300;400;600;700;800&display=swap">
@@ -89,17 +89,17 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">197 個</span></div>
+  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">211 個</span></div>
   <h1 class="bim-hero-title">Tools · <span class="accent">執行層</span><br>模型上真正被動到的那一下</h1>
-  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 197 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
+  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 211 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
 </header>
 
 <section class="bim-section">
   <h2 class="bim-section-title">先看懂三個標記</h2>
   <p>每張卡右上角的標記來自工具自己宣告的 <code>annotations</code>，不是這一頁另外標的——閘門 <code>9-1</code> 會驗證它們與程式碼一致。</p>
   <ul>
-    <li><strong>唯讀</strong>（87 個）——只讀不寫。跑錯了不會留下痕跡，可以放心探索。</li>
-    <li><strong>會寫入</strong>（107 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
+    <li><strong>唯讀</strong>（94 個）——只讀不寫。跑錯了不會留下痕跡，可以放心探索。</li>
+    <li><strong>會寫入</strong>（114 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
     <li><strong>破壞性</strong>（3 個）——刪除或不可逆地取代既有內容：<code>curate_mep_sizes · dedup_detail_elements_in_view · delete_element</code>。這份名單是白名單，程式碼裡多一個就會被閘門擋下。</li>
   </ul>
   <p style="color:var(--text-muted);font-size:13px;">「唯讀」是工具作者的宣告，不是執行時的沙箱。它告訴你這支工具<em>設計上</em>不寫入，不是保證它<em>不可能</em>寫入。</p>
@@ -112,23 +112,23 @@
       <tr><th>類</th><th>名稱</th><th class="num">數量</th><th>涵蓋</th></tr>
     </thead>
     <tbody>
-        <tr><td><strong>A</strong></td><td>基礎與查詢</td><td class="num">26</td><td>讀模型、找元素、問參數，也含少數寫入前置（載入共用參數）。</td></tr>
+        <tr><td><strong>A</strong></td><td>基礎與查詢</td><td class="num">31</td><td>讀模型、找元素、問參數，也含少數寫入前置（載入共用參數）。</td></tr>
         <tr><td><strong>B</strong></td><td>建模與構件</td><td class="num">47</td><td>產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</td></tr>
         <tr><td><strong>C</strong></td><td>房間與空間</td><td class="num">18</td><td>房間邊界、編號、面積、走廊、施工架周長。</td></tr>
         <tr><td><strong>D</strong></td><td>MEP 與碰撞</td><td class="num">17</td><td>風管系統、空間代表點、套管開孔、CSA 干涉。</td></tr>
         <tr><td><strong>E</strong></td><td>法規檢核</td><td class="num">13</td><td>排煙、偵煙、樓梯——有法源、有判準的檢查。</td></tr>
-        <tr><td><strong>F</strong></td><td>視圖與圖紙</td><td class="num">27</td><td>建視圖、裁剪、圖紙配置、視埠定位、跨專案複製。</td></tr>
+        <tr><td><strong>F</strong></td><td>視圖與圖紙</td><td class="num">31</td><td>建視圖、裁剪、圖紙配置、視埠定位、跨專案複製。</td></tr>
         <tr><td><strong>G</strong></td><td>標註與詳圖</td><td class="num">25</td><td>尺寸、詳圖元件、填充區域、圖例、明細表、文字。</td></tr>
-        <tr><td><strong>H</strong></td><td>視覺化</td><td class="num">24</td><td>上色、覆寫、隱藏顯示，也含材質與 Type 建構。</td></tr>
+        <tr><td><strong>H</strong></td><td>視覺化</td><td class="num">29</td><td>上色、覆寫、隱藏顯示，也含材質與 Type 建構。</td></tr>
     </tbody>
   </table>
-  <p style="color:var(--text-muted);font-size:13px;">分類是 40 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 197。這一頁由 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
+  <p style="color:var(--text-muted);font-size:13px;">分類是 40 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 211。這一頁由 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
 </section>
 
 <section class="bim-section">
-  <h2 class="bim-section-title">197 個工具 · 依用途分組</h2>
+  <h2 class="bim-section-title">211 個工具 · 依用途分組</h2>
 
-    <div class="cat-header">A · 基礎與查詢（26 個）</div>
+    <div class="cat-header">A · 基礎與查詢（31 個）</div>
     <p class="cat-blurb">讀模型、找元素、問參數，多數工作的第一步；也包含少數寫入型前置工具（如載入共用參數檔 load_shared_parameters）。</p>
     <div class="tool-card" id="adjust_section_datums" data-tool="adjust_section_datums">
       <div>
@@ -148,6 +148,16 @@
       </div>
       <div>
         <div class="tool-desc">分析樓板頂面排水坡度：以 Solid→PlanarFace 法向量與 Z 軸夾角計算每片朝上頂面的坡度百分比，回傳每片樓板的 Min/Max 坡度，並可回寫至指定參數（預設 Comments）。未指定 elementIds 時自動收集 Function=Exterior 的樓板。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="close_document" data-tool="close_document">
+      <div>
+        <div class="tool-name">close_document</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">document-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">關閉這個 Revit 進程中已開啟的非連結文件（依標題比對）。常見情境：連結檔被獨立開啟編輯後，須先關閉才能讓宿主文件正常載入該連結。作用中的文件無法用程式關閉（Revit API 限制）；連結文件會被拒絕。文件已修改時預設拒絕關閉，需指定 save 先儲存或 discardChanges 放棄變更。</div>
       </div>
     </div>
     <div class="tool-card" id="create_level" data-tool="create_level">
@@ -280,6 +290,16 @@
         <div class="tool-desc">列舉專案中所有品類 (Category) 及其 CategoryType (Model / Annotation / Internal / AnalyticalModel / Invalid)。回傳每個品類的 Name、CategoryType、Id、子品類數量，並附各 CategoryType 的統計。唯讀查詢。</div>
       </div>
     </div>
+    <div class="tool-card" id="list_open_documents" data-tool="list_open_documents">
+      <div>
+        <div class="tool-name">list_open_documents</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">document-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">列出這個 Revit 進程目前開啟的所有非連結文件，含標題、路徑、是否為作用文件、是否已修改。</div>
+      </div>
+    </div>
     <div class="tool-card" id="load_shared_parameters" data-tool="load_shared_parameters">
       <div>
         <div class="tool-name">load_shared_parameters</div>
@@ -320,6 +340,16 @@
         <div class="tool-desc">移動指定的 Revit 元素（依 dx, dy, dz 指定位移量）。</div>
       </div>
     </div>
+    <div class="tool-card" id="open_document" data-tool="open_document">
+      <div>
+        <div class="tool-name">open_document</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">document-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">開啟指定路徑的 Revit 文件並設為作用文件。已開啟的文件不會報錯，但 Revit API 無法用程式切換已開啟文件的作用視窗，此時需使用者手動點選該視窗。</div>
+      </div>
+    </div>
     <div class="tool-card" id="query_elements" data-tool="query_elements">
       <div>
         <div class="tool-name">query_elements</div>
@@ -340,6 +370,16 @@
         <div class="tool-desc">[Phase 3: Retrieval] Query elements with multi-filter support. NOTE: The &#x27;field&#x27; name MUST match names from &#x27;get_category_fields&#x27;.</div>
       </div>
     </div>
+    <div class="tool-card" id="reload_links" data-tool="reload_links">
+      <div>
+        <div class="tool-name">reload_links</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">document-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">重新載入專案中的連結模型（RevitLinkType）。可指定 ID 或名稱，省略 = 全部。逐個獨立處理，一個失敗不影響其他。</div>
+      </div>
+    </div>
     <div class="tool-card" id="rename_view" data-tool="rename_view">
       <div>
         <div class="tool-name">rename_view</div>
@@ -348,6 +388,16 @@
       </div>
       <div>
         <div class="tool-desc">重新命名指定的 Revit 視圖（包含剖面圖、平面圖等），此工具不受軟體語系本地化影響。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="save_document" data-tool="save_document">
+      <div>
+        <div class="tool-name">save_document</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">document-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">儲存指定文件（省略 = 作用文件）。唯讀文件會明確報錯。不提供 SaveAs。</div>
       </div>
     </div>
     <div class="tool-card" id="select_element" data-tool="select_element">
@@ -1351,7 +1401,7 @@
         <div class="tool-desc">依照法規判定結果對偵煙探測器上色：綠=PASS、紅=FAIL、橙=WARN（出風口資料缺失）。</div>
       </div>
     </div>
-    <div class="cat-header">F · 視圖與圖紙（27 個）</div>
+    <div class="cat-header">F · 視圖與圖紙（31 個）</div>
     <p class="cat-blurb">建視圖、裁剪、圖紙配置、視埠定位、跨專案複製。</p>
     <div class="tool-card" id="align_titleblocks_on_sheets" data-tool="align_titleblocks_on_sheets">
       <div>
@@ -1421,6 +1471,16 @@
       </div>
       <div>
         <div class="tool-desc">計算給定 X 與 Y 網格範圍的邊界 BoundingBox 座標。可指定外擴偏移量 (offset_mm)。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="capture_view_image" data-tool="capture_view_image">
+      <div>
+        <div class="tool-name">capture_view_image</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">view-capture-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">把指定視圖匯出成點陣圖並直接回傳影像，讓 AI 看得見 Revit 畫面，不必請使用者手動截圖。用於確認圖形設定的實際效果、判斷 hatch 密度與配色、排查「設了卻看不到」的問題。只寫系統暫存檔，不異動模型。</div>
       </div>
     </div>
     <div class="tool-card" id="copy_sheets_from_file" data-tool="copy_sheets_from_file">
@@ -1503,6 +1563,16 @@
         <div class="tool-desc">取得專案中所有的圖紙清單，包含 ID、編號與名稱。</div>
       </div>
     </div>
+    <div class="tool-card" id="get_camera_info" data-tool="get_camera_info">
+      <div>
+        <div class="tool-name">get_camera_info</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">camera-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">讀取 3D 視圖／相機的實際位置：眼睛的 XYZ 座標（內部原點座標系 mm）、在哪一層之上、離各樓層多高、視線俯仰角（0° = 水平）。同時讀出性質面板的 Eye Elevation / Target Elevation 參數，並用實際眼睛高度反推該參數的 0 點，逐一比對內部原點、專案基準點、測量點與每個樓層，回報它跟哪一個一致。用途：排查「在 1F 平面放相機，Eye Elevation 卻是負值」這類看不出基準的問題，以及確認人視高是否真的在樓板上方 150–175 cm。</div>
+      </div>
+    </div>
     <div class="tool-card" id="get_sheet_viewport_details" data-tool="get_sheet_viewport_details">
       <div>
         <div class="tool-name">get_sheet_viewport_details</div>
@@ -1521,6 +1591,16 @@
       </div>
       <div>
         <div class="tool-desc">取得專案中所有可用的圖框（Title Blocks）類型。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="get_view_range" data-tool="get_view_range">
+      <div>
+        <div class="tool-name">get_view_range</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">view-range-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">讀取平面類視圖的視圖範圍四個平面（頂部／剖切面／底部／視圖深度）與偏移量，並回報是否被視圖樣板鎖住。排查「元素在模型裡卻在平面圖看不到」的第一順位檢查。</div>
       </div>
     </div>
     <div class="tool-card" id="get_viewport_map" data-tool="get_viewport_map">
@@ -1601,6 +1681,16 @@
       </div>
       <div>
         <div class="tool-desc">批次將 ScopeBox 套用到一組 views（透過設定 view 的 VIEWER_VOLUME_OF_INTEREST_CROP 參數）。被套用後 view 的 CropBox 會自動跟隨 ScopeBox 的範圍，以後 ScopeBox 移動或調整大小時 view 會跟著更新。三選一指定目標 views，優先序：viewIds（最精確）&gt; viewNames &gt; viewNameContains。可選 viewTypeFilter 進一步篩選。View template、不支援 ScopeBox 的 view（Schedule, Legend 等）會自動跳過並記錄在 Skipped 中。觸發條件：使用者提到 scope box、範圍框、套用 scope box、批次設定 scope box、scopebox to views。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="set_view_range" data-tool="set_view_range">
+      <div>
+        <div class="tool-name">set_view_range</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">view-range-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">設定平面類視圖的視圖範圍。level 可填樓層名稱或 Unlimited / Level Above / Level Below / Current。典型用途：把視圖深度設成 Unlimited，讓樓板下方的地形或基礎在平面圖顯示出來。被視圖樣板鎖住時直接報錯而不是靜默失敗。</div>
       </div>
     </div>
     <div class="tool-card" id="shift_view_cropbox" data-tool="shift_view_cropbox">
@@ -1875,7 +1965,7 @@
         <div class="tool-desc">自動同步所有詳圖元件的類型參數（詳圖圖號、圖說名稱）與其所在圖紙的編號和名稱。僅更新類型名稱已匹配圖紙編號的元件，不會影響共用標準詳圖。</div>
       </div>
     </div>
-    <div class="cat-header">H · 視覺化（24 個）</div>
+    <div class="cat-header">H · 視覺化（29 個）</div>
     <p class="cat-blurb">上色、覆寫、隱藏顯示——把分析結果畫回模型上；也涵蓋材質與 Type 建構（含綠建材材質）。</p>
     <div class="tool-card" id="assign_existing_material" data-tool="assign_existing_material">
       <div>
@@ -2007,6 +2097,26 @@
         <div class="tool-desc">列出指定類別可以拿來當「視圖篩選器規則」的參數清單（唯讀）。回傳的就是 Revit 篩選器對話框下拉選單的實際內容，每筆附 StorageType 與支援的運算子。</div>
       </div>
     </div>
+    <div class="tool-card" id="get_link_display_settings" data-tool="get_link_display_settings">
+      <div>
+        <div class="tool-name">get_link_display_settings</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">link-display-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">列出指定視圖中每個連結模型的 Display Settings（ByHostView / ByLinkView / Custom）。關鍵欄位 HostFiltersApply 為 false 時，主檔的篩選器與類別覆寫完全不會作用在連結元素上。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="get_material_graphics" data-tool="get_material_graphics">
+      <div>
+        <div class="tool-name">get_material_graphics</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">material-graphics-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">讀取材質「圖形」頁籤的設定：是否使用彩現外觀著色、著色顏色、透明度，以及表面／切割的前景與背景填充樣式與顏色。作用在目前作用中的文件；要讀連結檔的材質，須先把該連結檔開成作用文件。</div>
+      </div>
+    </div>
     <div class="tool-card" id="get_types_by_category" data-tool="get_types_by_category">
       <div>
         <div class="tool-name">get_types_by_category</div>
@@ -2057,6 +2167,16 @@
         <div class="tool-desc">門窗／獨立元件 RFA 綠建材導入：以使用者指定的既有 FamilySymbol 為基底，開啟家族文件→立即另存可復原備份→在家族文件內新增一個 Type（絕不改動來源 Type）→寫入 Identity Data 與 GreenMaterial_Mat1_* 共享參數＋遮陽係數/隔音等級等門窗專屬欄位→另存為新家族檔→LoadFamily 載回專案，並以載入前後同名 Type 的參數簽章快照比對，一偵測到非目標 Type 被異動就整批回滾不靜默覆蓋。單一原子呼叫涵蓋整個家族文件生命週期。</div>
       </div>
     </div>
+    <div class="tool-card" id="list_fill_patterns" data-tool="list_fill_patterns">
+      <div>
+        <div class="tool-name">list_fill_patterns</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">fill-pattern-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">列出專案中所有填充樣式的名稱、ID 與 Model/Drafting 類型。指定任何 hatch 之前應先查這裡，不要憑印象猜名稱。Model 樣式隨視圖比例縮放，Drafting 樣式在圖紙上固定大小。</div>
+      </div>
+    </div>
     <div class="tool-card" id="override_element_graphics" data-tool="override_element_graphics">
       <div>
         <div class="tool-name">override_element_graphics</div>
@@ -2097,6 +2217,26 @@
         <div class="tool-desc">將綠建材共享參數 Schema（GreenMaterial_SharedParams.txt，Mat1~Mat6 六槽位 + Construction 群組）實體寫入指定 ElementType 的 Identity Data。參數須已透過 load_shared_parameters 綁定至該 Type 所屬品類，否則對應欄位會列在回傳的 MissingParameters。Mat1=主體/牆板、Mat2=面材/塗料、Mat3=附屬/膠材（僅基本欄位）、Mat4~Mat6=追加構造層。</div>
       </div>
     </div>
+    <div class="tool-card" id="set_link_display_settings" data-tool="set_link_display_settings">
+      <div>
+        <div class="tool-name">set_link_display_settings</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">link-display-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">設定視圖中連結模型的 Display Settings。設成 byHostView 後主檔的視圖篩選器與類別覆寫才會套用到連結元素，通常是讓主檔覆寫對連結生效的前置步驟。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="set_material_graphics" data-tool="set_material_graphics">
+      <div>
+        <div class="tool-name">set_material_graphics</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">material-graphics-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">修改材質「圖形」頁籤：著色顏色、透明度、表面／切割的前景與背景填充樣式與顏色。改的是材質本身，所有用到這個材質的元件與視圖會一起變——這是與 create_view_filter／V/G 覆寫（只作用單一視圖）的關鍵差異。支援 dryRun 只驗證不寫入，回傳 Before/After。</div>
+      </div>
+    </div>
     <div class="tool-card" id="set_material_surface_pattern" data-tool="set_material_surface_pattern">
       <div>
         <div class="tool-name">set_material_surface_pattern</div>
@@ -2128,7 +2268,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / tools-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">197 個 MCP 工具完整索引，由 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">211 個 MCP 工具完整索引，由 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
 </footer>
 
 <script src="../shared.js"></script>
