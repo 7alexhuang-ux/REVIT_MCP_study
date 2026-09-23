@@ -38,7 +38,7 @@ metadata:
 {
   "ceilingHeightSource": "room_parameter",
   "projectedOpeningRatio": 1.0,
-  "casementOpeningRatio": 0.5,
+  "casementOpeningRatio": 1.0,
   "slidingOpeningRatio": 0.5,
   "unknownWindowAssumption": "projected"
 }
@@ -53,7 +53,7 @@ metadata:
 | 正式名稱 | 常見別名／關鍵字 | 本案係數 |
 |---|---|---:|
 | 推射窗 | 外推、上懸、awning、projected | 1.0 |
-| 推開窗 | 平開、側開、casement | 0.5 |
+| 推開窗 | 平開、側開、casement | 1.0 |
 | 橫拉窗 | 推拉、sliding、單拉、雙拉 | 0.5 |
 | 固定窗 | fixed、picture、固定 | 0 |
 | 無法判定 | 其他名稱 | 暫按推射窗 1.0，但必須保留人工確認標記 |

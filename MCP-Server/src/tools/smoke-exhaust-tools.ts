@@ -18,7 +18,7 @@ export const smokeExhaustTools: Tool[] = [
                 colorize: { type: "boolean", description: "是否自動上色窗戶", default: true },
                 smokeZoneHeight: { type: "number", description: "有效帶高度（mm），預設 800", default: 800 },
                 excludeKeywords: { type: "array", items: { type: "string" }, description: "非居室排除關鍵字" },
-                casementOpeningRatio: { type: "number", minimum: 0, maximum: 1, description: "推開/平開窗有效面積係數；預設 1.0，本案可設 0.5", default: 1.0 },
+                casementOpeningRatio: { type: "number", minimum: 0, maximum: 1, description: "推開/平開窗有效面積係數；預設 1.0（可完整開啟），實際開啟角度受限時可調低", default: 1.0 },
                 slidingOpeningRatio: { type: "number", minimum: 0, maximum: 1, description: "橫拉窗有效面積係數；按整樘窗面積計時預設 0.5", default: 0.5 },
                 projectedOpeningRatio: { type: "number", minimum: 0, maximum: 1, description: "推射/外推/上懸窗有效面積係數；預設 1.0（可完整開啟），實際開啟角度受限時可調低", default: 1.0 },
                 unknownWindowAssumption: { type: "string", enum: ["manual", "projected", "casement", "sliding"], description: "無法由族群名稱判定時的暫定窗型；仍標記需人工確認", default: "manual" },
