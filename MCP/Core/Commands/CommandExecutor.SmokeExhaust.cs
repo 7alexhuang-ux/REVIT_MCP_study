@@ -34,7 +34,7 @@ namespace RevitMCP.Core
             string typeName,
             double casementOpeningRatio = 1.0,
             double slidingOpeningRatio = 0.5,
-            double projectedOpeningRatio = 0.5,
+            double projectedOpeningRatio = 1.0,
             string unknownWindowAssumption = "manual")
         {
             string name = (familyName + " " + typeName).ToLower();
@@ -206,7 +206,7 @@ namespace RevitMCP.Core
             double smokeZoneHeight = parameters["smokeZoneHeight"]?.Value<double>() ?? 800; // 預設 80cm
             double casementOpeningRatio = parameters["casementOpeningRatio"]?.Value<double>() ?? 1.0;
             double slidingOpeningRatio = parameters["slidingOpeningRatio"]?.Value<double>() ?? 0.5;
-            double projectedOpeningRatio = parameters["projectedOpeningRatio"]?.Value<double>() ?? 0.5;
+            double projectedOpeningRatio = parameters["projectedOpeningRatio"]?.Value<double>() ?? 1.0;
             string unknownWindowAssumption = (parameters["unknownWindowAssumption"]?.Value<string>() ?? "manual").ToLowerInvariant();
 
             if (casementOpeningRatio < 0 || casementOpeningRatio > 1 ||
