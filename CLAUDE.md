@@ -27,15 +27,17 @@ Revit Add-in (C#)
 
 There is also an optional embedded-chat direction where a Revit WPF window can call an AI API directly. That embedded option is separate from the MCP stdio server path.
 
+A second, unrelated stdio MCP server ships in the repo: `scripts/monstrare_mcp_server.py` exposes the Monstrare kanban cards (`tools/kanban/cards/*.json`) as MCP tools. It does not talk to Revit and is not part of the bridge above. See "Monstrare" below.
+
 ## Current Source-of-Truth Counts
 
 These counts must be derived from source, not copied by memory.
 
 | Item | Current Count | Source of Truth |
 |---|---:|---|
-| Runtime MCP tools | 173 | `registerRevitTools()` from `MCP-Server/src/tools/index.ts` |
-| Domain SOP files | 76 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
-| Claude skills | 54 | `.claude/skills/*/SKILL.md` |
+| Runtime MCP tools | 192 | `registerRevitTools()` from `MCP-Server/src/tools/index.ts` |
+| Domain SOP files | 83 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
+| Claude skills | 61 | `.claude/skills/*/SKILL.md` |
 
 When these numbers change, update `CLAUDE.md`, `README.md`, `README.zh-TW.md`, `docs/DOCUMENT_AUDIENCE_INVENTORY.md`, and any public site copy that makes grand-total claims. Then run `scripts/verify-qaqc.ps1 -SkipBuild -SkipDeploy`.
 
@@ -70,6 +72,7 @@ If the Revit MCP tools are unavailable, state that limitation and provide generi
 
 The Revit-side WebSocket service (`MCP/Core/SocketService.cs`) holds an exclusive lock: while one MCP client is connected, additional incoming connections are rejected with HTTP 409 before the WebSocket upgrade (no more clobbering the active connection). Consequences:
 
+- Any handshake carrying an `Origin` header is rejected with HTTP 403 **before** the exclusive-lock check and before the upgrade (issue #125). WebSocket handshakes are exempt from the same-origin policy and do no CORS preflight, so without this a malicious page open in the user's browser could drive the add-in. The node MCP bridge (`ws`) sends no `Origin`; browsers always do per RFC 6455, which separates the two at zero cost to the bridge. It sits before the lock so an untrusted handshake can neither learn the lock state nor squat on it. This gate has **no settings opt-out** — unlike `ExclusiveLock` below.
 - Multiple AI clients are used by switching, never concurrently — a second client is cleanly refused, not swapped in.
 - Do not advise users to run two MCP-connected AI clients against the same Revit session.
 - To hand the connection to another client, use the "切換/釋放連線" (Switch/Release Connection) ribbon button — it releases the current connection so the next reconnecting client can take the lock. Because WebSocket connections are anonymous at the transport level, the switch accepts whoever reconnects first, not a guaranteed named target.
@@ -122,7 +125,11 @@ If pulling the 2026-07-17 cleanup commit fails with "local changes would be over
 | `MCP-Server/src/apps/clash-viewer/` | The first MCP App: `app.ts` (ext-apps client) + `template.html`, bundled by `scripts/build-apps.mjs` into a self-contained `ui://clash-viewer/index.html` served for `detect_clashes` |
 | `MCP-Server/scripts/build-apps.mjs` | esbuild single-file bundler that produces `MCP-Server/build/apps/*/index.html` for each MCP App |
 | `bridge/python/skills/ezdxf_worker.py` | Optional Python subprocess (spawned by `DwgColumnExecutor`) that reads DXF/DWG text for column-number mapping (`dwg-column-import` mode C). Needs system Python + `ezdxf`; DWG additionally needs ODA File Converter. Deployed to `%APPDATA%\RevitMCP` by `install-addon.ps1`. |
+| `scripts/monstrare_mcp_server.py` | Optional second stdio MCP server exposing the Monstrare kanban (`tools/kanban/cards/*.json`). Independent of the Revit bridge; protocol `2024-11-05`, not covered by the dual-era posture below |
+| `.agents/AGENTS.md` | Monstrare entry point. Carries a governance-precedence banner stating `CLAUDE.md` wins on any conflict. **Not** the root `AGENTS.md`, which is a redirect to this file |
 | `scripts/verify-qaqc.ps1` | Repository QA/QC gate |
+| `docs/BIM_MCP/reference/mep-playbook.html` | Hub page for the MEP design playbook (`docs/mep-design-playbook-ch1..ch3` + the model guide). The chapters are teaching material derived from an Autodesk certification course model — **not a client project**; the page states that provenance up front. Method definition stays in `domain/mep-space-demand-matrix.md` |
+| `docs/BIM_MCP/reference/tools-index.html` | Generated index of every runtime tool (one card each, badge = `readOnlyHint`/`destructiveHint`). Regenerate from `registerRevitTools()`; `7-14` fails on hand-edits that drift |
 | `docs/DOCUMENT_AUDIENCE_INVENTORY.md` | Canonical AI/human/shared document classification |
 | `.claude-plugin/marketplace.json` | Plugin marketplace manifest — packages shareable skills (currently `hj-pr-proposal`) as installable plugins for `/plugin marketplace add` → `/plugin install`. |
 
@@ -223,6 +230,28 @@ Use `get_active_view` before the dependent operation; if it is unavailable, call
 
 If the anchor tool times out, retry once. If it still fails, stop and report the limitation.
 
+### Subagent Delegation Boundaries
+
+**A constraint you are operating under does not propagate to a subagent unless you write it into the delegation message.** The subagent cannot see your system prompt, this file, or the earlier conversation. It sees only what you send.
+
+Before spawning or messaging a subagent, restate every constraint that applies to the work you are handing over. At minimum:
+
+- **What must not be written**, and to which files. Name the confidential source explicitly (e.g. "client documents under `<path>` are confidential; this repo is public — pass methods only, never client names, project codes, document titles, or client-specific figures").
+- **Which files the subagent may write**, and which it must not touch.
+- **Which tools it must not call** (git operations, Revit MCP, network).
+- **What to do when your instruction conflicts with what it observes** — it should trust the repository and say so.
+
+Two failure modes to guard against:
+
+1. **You quote the confidential material while describing the task.** A delegation message that says "record what we found in the client's unit inventory" is safe; one that names the client and the document is not. **The subagent will faithfully record whatever you put in front of it — that is its job.** If confidential content reaches it, the leak is already yours.
+2. **You assume a rule stated once in the session still governs.** It governs *you*, not the agent you spawn ten turns later.
+
+**Applies to every delegation path**: `Agent`, `SendMessage` to a resumed agent, `Workflow` scripts, and skills that run in a subagent.
+
+> **Incident (2026-08-12)**: A background recorder agent wrote client identifiers into a repo-tracked file across three commits, which were pushed to a public repository and remained reachable for roughly 21 hours. The confidentiality rule had been stated repeatedly in the session and was already written in `log/2026-08.md` — but it was never included in the messages sent to the agent, and the messages themselves named the client. The agent behaved correctly throughout; it later detected the violation itself and redacted the working file. Remediation required deleting the remote branch and filing a GitHub Support ticket for cache purging, neither of which restores the exposure window.
+>
+> **Rule that would have prevented it**: constraints travel with the work, not with the person who knows them.
+
 ## Domain vs Skill
 
 Domain files and skills have different responsibilities:
@@ -234,6 +263,7 @@ Domain files and skills have different responsibilities:
 | Command | `.claude/commands/*.md` | Slash-command behavior | English preferred |
 | AI constitution | `CLAUDE.md` | Global AI rules and project map | English only |
 | Human docs | `README.md`, `README.zh-TW.md`, `docs/` | Installation, onboarding, teaching | Use the target human audience language |
+| Teaching companion | `docs/mep-design-playbook-*.md` | A worked walkthrough of one domain method, for people meeting it for the first time. **Not a fourth layer** — the domain file still defines the method, and wins on any conflict | Traditional Chinese |
 
 ## Domain Knowledge and Workflow Files
 
@@ -274,6 +304,7 @@ Read the matching file before applying a workflow or calculation.
 | MEP clash, CSA clash, penetration, beam penetration | `domain/mep-csa-clash-detection.md` |
 | MEP extension, pyRevit MEP guide | `domain/mep-extension-guide.md` |
 | mechanical settings, MEP settings, segments and sizes, duct size, pipe segment, 管徑目錄, 風管尺寸表, fitting angle, pipe slope, 尺寸增減, curate size, CNS 對帳 | `domain/mep-mechanical-settings.md` |
+| space demand matrix, 空間需求矩陣, MEP tag, 容量包絡, 機房面積反算, 前期容量, 基本設計容量, programming, SMP, concept design, Space 明細表, 逐空間通風檢核, FUM | `domain/mep-space-demand-matrix.md` |
 | parking numbering, auto parking numbering | `domain/parking-auto-numbering.md` |
 | parking clearance, vehicle clearance, 210cm | `domain/parking-clearance-check.md` |
 | parking count, parking space review | `domain/parking-space-review.md` |
@@ -306,8 +337,14 @@ Read the matching file before applying a workflow or calculation.
 | threshold opening, 門檻開口, 門窗統計, door count, window count, get_room_door_counts, get_room_window_counts | `domain/threshold-opening-takeoff.md` |
 | RC filled region, RC 填充區域, 批次填充, batch fill region, batch_create_rc_filled_region, create_rc_filled_region | `domain/rc-filled-region-workflow.md` |
 | curtain wall elevation, 帷幕立面, 帷幕外立面, curtain elevation, create_curtain_wall_elevations | `domain/curtain-wall-elevation-workflow.md` |
+| green building material, green material, 綠建材, 綠建材標章, TABC, 綠建材採購指南, 健康綠建材, 高性能綠建材, 再生綠建材, 生態綠建材 | `domain/GM_catalog.md` |
+| green material parameter, 綠建材參數, GreenMaterial_ 共享參數, 綠建材標註, 六槽位, Mat1, layerComposition, materialSlotAssignment | `domain/GM_parameter-schema.md` |
+| green material search, 綠建材關鍵字, 關鍵字檢索, 同義擴充, DATA Engine, GBM 證號查詢 | `domain/GM_keyword-search.md` |
+| RFA family injection, 門窗綠建材, 獨立元件, RFA 導入, loadable family, 防音門窗, Low-E玻璃, 遮陽係數, 隔音Rw | `domain/GM_rfa-family-injection.md` |
 | opening candidate, 開孔候選, opening scan, 開孔預掃, scan_opening_candidates, 套管前置檢核, clearanceMm | `domain/mep-opening-candidate-scan.md` |
-| cad 圖塊放置, block 轉族群, 灑水頭建模, 閥件建模, point placement from CAD block, INSERT to FamilyInstance | `domain/cad-block-point-placement.md` |
+| cad 圖塊放置, block 轉族群, 灑水頭建模, 閥件建模, point placement from CAD block, INSERT to FamilyInstance, get_dwg_block_instances, preview_family_instances_from_dwg_blocks, create_family_instances_from_dwg_blocks | `domain/cad-block-point-placement.md` |
+| space centroid, 空間中心點, 代表點, centroid, 批次放置, 逐室放置, 風口放置, air terminal, place_family_instances, get_space_centroid, IsPointInSpace | `domain/space-centroid-placement.md` |
+| 機電教戰手冊, MEP playbook, 教戰手冊, 五種量, 量從哪裡來, 決定的量, 教學假設, 放風口, 系統流量 vs 端點需求, 旗標誠實但問錯問題 | `domain/mep-space-demand-matrix.md`（方法） + `docs/BIM_MCP/reference/mep-playbook.html`（教學導覽） |
 | pyRevit, UI API, 按鈕觸發, 觸發按鈕, PostableCommandId, PostCommand, Reload, ribbon 按鈕, 外掛 UI 命令 | `domain/tool-capability-boundary.md` |
 
 Meta and governance domain files:
@@ -317,6 +354,7 @@ Meta and governance domain files:
 | Domain catalog | `domain/README.md` |
 | QA/QC checklist | `domain/qa-checklist.md` |
 | Lessons learned | `domain/lessons.md` |
+| Anti-lessons (negative examples) | `domain/anti-lessons.md` |
 | Frontmatter standard | `domain/frontmatter-standard.md` |
 | Path maintenance QA | `domain/path-maintenance-qa.md` |
 | Session context guard | `domain/session-context-guard.md` |
@@ -327,9 +365,18 @@ Meta and governance domain files:
 
 ## Skills
 
-The canonical skill catalog is the .claude/skills/ directory itself (54 skills; count table above is the gate).
+The canonical skill catalog is the .claude/skills/ directory itself (61 skills; count table above is the gate).
 
 Use the smallest relevant skill set. If a skill and a domain file conflict on the method, the domain file wins.
+
+## Monstrare (Opt-In Process Layer)
+
+`ai/` (35 files), `tools/kanban/` (25 files), `.agents/AGENTS.md`, and `scripts/monstrare_mcp_server.py` are **Monstrare** — a gate-based spec/plan/verify/review workflow contributed with PR #116 (@CWLin0518) and harvested 2026-08-31.
+
+- **It is opt-in, not the project default.** Nothing requires you to follow it unless explicitly asked.
+- **`CLAUDE.md` wins on any conflict.** `.agents/AGENTS.md` carries this precedence banner explicitly.
+- **`ai/skills/*.md` are not Claude Code skills.** They do not live in `.claude/skills/`, are not counted in the 61, and are not bound by `domain/skill-authoring-standard.md`.
+- An audit against this file's AI Guard Rails, Deployment Rules, and Logging Protocol found no contradicting rule — only unstated precedence, now stated.
 
 ## Skill Packaging & Upstream Watch
 
@@ -398,7 +445,11 @@ QA/QC must cover:
 - AI/human/shared document audience classification
 - mojibake risk in AI-only and human-facing canonical docs
 - markdown count-table claims (`| Runtime MCP tools | N |` style) in CLAUDE.md, README, README.zh-TW, and the audience inventory
-- client config template portability (no hardcoded user paths; `<YOUR_PROJECT_PATH>` placeholder required)
+- claim-site scan scope (Phase 7 checks `7-1`/`7-2`/`7-3`): `$scanPaths` walks `docs\BIM_MCP\**\*.html` recursively. Exclusions live in `$skipPatterns` and nowhere else — never narrow coverage by editing a glob, because a file that is never read produces the same green report as a file that passes
+- three-layer enumeration parity (Phase 7 checks `7-9`/`7-10`/`7-14`): every Domain file, every Skill, and every runtime tool must have exactly one card on its BIM_MCP index page, checked in both directions. `7-1`/`7-2`/`7-3` only verify that the stated *numbers* are right — a correct count is fully compatible with zero items being documented, which is how the Tool layer stayed unlisted while every count claim passed. `7-14` additionally checks that `tools-index.html`'s own derived tallies (badge counts, per-category counts) agree with the cards it actually contains; that page is generated from `registerRevitTools()`, so regenerate it rather than hand-editing
+- claim-pattern liveness (Phase 7 check `7-13`): every pattern in `$claimSites` must still match at least one live site. A pattern that matches nothing reports PASS exactly like one that matches N correct sites, so reworded pages silently lose their guard. When a claim site legitimately disappears, mark that entry `Dormant = $true` — an explicit, reviewable decision rather than a silent zero
+- hardcoded user account name scan (Phase 3 check `3-4`): scans every tracked text file (not just client config templates) for a literal account name in a `Users\`/`Users/` path; acceptable placeholder forms are enumerated in `$allowedUsers` (e.g. `<YOUR_USERNAME>`, `<YOUR_PROJECT_PATH>`, `<CONTRIBUTOR_USERNAME>`, `<OTHER_MACHINE_USER>`); any exclusion in `$pathScanSkip` must be listed by exact file path, never by prefix — a self-check FAILs if the hit count drifts from the list length; if `git ls-files` returns an empty scan universe (not a git repo, or run outside one), the check SKIPs rather than reporting a false PASS on zero files scanned
+- registered-tool ↔ dispatcher reconciliation (Phase 7 check `7-15`): every tool `registerRevitTools()` declares must resolve to a `case "..."` label somewhere in `MCP/Core/CommandExecutor.cs` or a globbed `MCP/Core/Commands/*.cs` (never a hand-typed file list), after the rename map in `MCP-Server/src/tools/revit-tools.ts` is applied and comments are stripped from the C# source. Forward direction only — case labels also serve internal non-tool switches (filter operators, etc.), so a reverse check would be pure noise. An orphan (declared but unimplemented) is a FAIL; `$knownUnimplemented` is a named, reasoned quarantine list that still WARNs on every run rather than silently filtering the tool out, and FAILs if a quarantined name gains a dispatcher case without being removed from the list (drift self-check). This exists because "TS registers a tool, C# has no case for it" reaches callers as `NotImplementedException` while staying invisible to QA/QC — it has recurred more than once
 - snapshot banner (`data-snapshot="YYYY-MM-DD"`) on date-prefixed `docs/MMDD-*.html`
 - MCP Registry publish consistency (`server.json` ↔ `MCP-Server/package.json` ↔ schema; 3-place version parity) — Phase 7 check `7-11`, see below
 - MCP 2026 compliance (Phase 9): 9-1 every tool declares a non-empty `title` and boolean `readOnlyHint`, with `destructiveHint=true` confined to the allow-list (`delete_element`, `dedup_detail_elements_in_view`, `curate_mep_sizes`); 9-2 every MCP Apps `ui://` resource resolves with the correct MIME (`text/html;profile=mcp-app`) and is self-contained (no external `src`/`href`/`url()` references)

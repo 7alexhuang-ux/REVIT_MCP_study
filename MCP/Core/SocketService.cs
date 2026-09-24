@@ -32,6 +32,7 @@ namespace RevitMCP.Core
         private string _activeClientName;   // 來自 ws 連線 query string ?client= (MCP clientInfo.name)
         private DateTime? _connectedAtUtc;
         private DateTime _lastRejectLogUtc = DateTime.MinValue;
+        private DateTime _lastRejectOriginLogUtc = DateTime.MinValue;
 
         public event EventHandler<RevitCommandRequest> CommandReceived;
         public bool IsRunning => _isRunning;
@@ -152,6 +153,26 @@ namespace RevitMCP.Core
 
                     if (context.Request.IsWebSocketRequest)
                     {
+                        // 安全閘門 (issue #125)：跨站 WebSocket 劫持防護。必須放在鎖定檢查、
+                        // AcceptWebSocketAsync 之前——未信任的 handshake 不該得知目前鎖定狀態，
+                        // 更不能搶先佔用鎖讓合法的 MCP 客戶端被 409 卡住。
+                        // 依 RFC 6455，瀏覽器發起的 WebSocket handshake 一律會帶 Origin header；
+                        // node MCP bridge 使用的 ws 套件則不會送出 Origin。兩者可用有無 Origin
+                        // 完全區分，對既有 bridge 零影響。此規則沒有 settings 開關可關閉。
+                        string origin = context.Request.Headers["Origin"];
+                        if (!string.IsNullOrEmpty(origin))
+                        {
+                            // 必須在 Close() 之前先取出 RemoteEndPoint：Close() 會釋放底層
+                            // HttpListenerRequest，事後才讀取會丟 ObjectDisposedException，
+                            // 導致這筆本該限流的 log 被外層 catch 換成一筆不限流的 [ERROR]。
+                            var remoteEndPoint = context.Request.RemoteEndPoint;
+                            // 不做 101 upgrade，直接拒絕 (403)，避免任何瀏覽器分頁連進 Revit。
+                            context.Response.StatusCode = 403;
+                            context.Response.Close();
+                            RateLimitedRejectOriginLog(remoteEndPoint, origin);
+                            continue;
+                        }
+
                         bool locked;
                         lock (_connectionLock)
                         {
@@ -160,11 +181,14 @@ namespace RevitMCP.Core
 
                         if (locked)
                         {
+                            // 同上：先取 RemoteEndPoint 再 Close()，避免 ObjectDisposedException
+                            // 把這筆限流 log 換成不限流的 [ERROR]。
+                            var remoteEndPoint = context.Request.RemoteEndPoint;
                             // 已有連線鎖定中：在 AcceptWebSocketAsync 之前直接拒絕 (409)，
                             // 不做 101 upgrade。client 端會視為 handshake 失敗，之後每 5 秒自動重試。
                             context.Response.StatusCode = 409;
                             context.Response.Close();
-                            RateLimitedRejectLog(context.Request.RemoteEndPoint);
+                            RateLimitedRejectLog(remoteEndPoint);
                             continue;
                         }
 
@@ -212,7 +236,21 @@ namespace RevitMCP.Core
             if ((now - _lastRejectLogUtc).TotalSeconds >= 30)
             {
                 _lastRejectLogUtc = now;
-                Logger.Info("[Socket] 已拒絕重複連線 (連線已被鎖定) 來源: " + remote + ". 後續拒絕將靜默 30 秒。");
+                Logger.Info("[Socket] 已拒絕重複連線 (連線已被鎖定, 409) 來源: " + remote + ". 後續拒絕將靜默 30 秒。");
+            }
+        }
+
+        /// <summary>
+        /// 限流記錄拒絕跨站來源 handshake 的 log (403)，與鎖定拒絕 (409) 分開限流、分開標示，
+        /// 避免惡意網頁重試造成洗版，也讓事後追查能分清是哪一種拒絕。
+        /// </summary>
+        private void RateLimitedRejectOriginLog(System.Net.IPEndPoint remote, string origin)
+        {
+            var now = DateTime.UtcNow;
+            if ((now - _lastRejectOriginLogUtc).TotalSeconds >= 30)
+            {
+                _lastRejectOriginLogUtc = now;
+                Logger.Info("[Socket] 已拒絕跨站來源 handshake (帶 Origin, 403) 來源: " + remote + " Origin: " + origin + ". 後續拒絕將靜默 30 秒。");
             }
         }
 

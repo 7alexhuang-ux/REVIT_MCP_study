@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Skills 索引（54 個）· BIM_MCP</title>
-<meta property="og:title" content="RevitMCP Skills 索引：54 個編排層工作流">
-<meta property="og:description" content="54 個 Skill × 描述 × 觸發關鍵字 × 對應 Domain 表。Skill 是編排（何時/順序），Domain 是知識（法規/SOP）。從 CLAUDE.md 抽出。">
+<title>Skills 索引（61 個）· BIM_MCP</title>
+<meta property="og:title" content="RevitMCP Skills 索引：61 個編排層工作流">
+<meta property="og:description" content="61 個 Skill × 描述 × 觸發關鍵字 × 對應 Domain 表。Skill 是編排（何時/順序），Domain 是知識（法規/SOP）。從 CLAUDE.md 抽出。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@300;400;600;700;800&display=swap">
@@ -100,7 +100,7 @@
   }
 </style>
 </head>
-<body>
+<body data-prev="spectrum-decision.html" data-next="domain-index.html">
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -118,9 +118,9 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">SKILLS INDEX <span class="accent">54 個</span></div>
+  <div class="bim-hero-eyebrow">SKILLS INDEX <span class="accent">61 個</span></div>
   <h1 class="bim-hero-title">Skills · <span class="accent">編排層</span><br>何時觸發 / 什麼順序</h1>
-  <p class="bim-hero-sub">Skills 是<strong>編排</strong>（orchestration），不是知識本身。一個 Skill 規定「<em>什麼關鍵字觸發 / 呼叫哪些工具 / 套用哪個 Domain SOP</em>」。Skill metadata 永遠常駐於 AI Client context；body 與 Domain 被引用時才載入。本頁列 50 個 Skill 的描述、觸發關鍵字與對應 Domain。</p>
+  <p class="bim-hero-sub">Skills 是<strong>編排</strong>（orchestration），不是知識本身。一個 Skill 規定「<em>什麼關鍵字觸發 / 呼叫哪些工具 / 套用哪個 Domain SOP</em>」。Skill metadata 永遠常駐於 AI Client context；body 與 Domain 被引用時才載入。本頁列 61 個 Skill 的描述、觸發關鍵字與對應 Domain。</p>
 </header>
 
 <section data-collapse class="bim-section">
@@ -129,15 +129,15 @@
   <div class="bim-grid bim-grid-3">
     <div class="bim-card">
       <h4>Skill（編排）</h4>
-      <p style="font-size:13px;">何時觸發 + 呼叫哪些 tool + 什麼順序。50 個。</p>
+      <p style="font-size:13px;">何時觸發 + 呼叫哪些 tool + 什麼順序。61 個。</p>
     </div>
     <div class="bim-card">
       <h4><a href="domain-index.html" style="border-bottom:1px solid var(--accent-border);">Domain（知識）</a></h4>
-      <p style="font-size:13px;">法規條文、SOP、計算公式。72 個。被 Skill 引用。</p>
+      <p style="font-size:13px;">法規條文、SOP、計算公式。83 個。被 Skill 引用。</p>
     </div>
     <div class="bim-card">
       <h4>Tool（執行）</h4>
-      <p style="font-size:13px;">原子操作（query / create / modify）。173 個 MCP tools。</p>
+      <p style="font-size:13px;">原子操作（query / create / modify）。192 個 MCP tools。</p>
     </div>
   </div>
   <p class="bim-section-desc" style="margin-top:var(--gap-md);">「<strong>不要把每個 Domain 都升級成 Skill</strong>」——這是本專案的核心架構原則。詳見 <a href="philosophy-22-propositions.html">22 命題</a>。</p>
@@ -145,11 +145,11 @@
 </section>
 
 <!-- ============================================ -->
-<!-- 50 個 Skill 列表 -->
+<!-- 61 個 Skill 列表 -->
 <!-- ============================================ -->
 <section data-collapse class="bim-section bim-anchor" id="skills">
-  <div class="bim-section-eyebrow">CATALOG · 50 個 Skill</div>
-  <h2 class="bim-section-title">50 個 Skill · 依用途分組</h2>
+  <div class="bim-section-eyebrow">CATALOG · 61 個 Skill</div>
+  <h2 class="bim-section-title">61 個 Skill · 依用途分組</h2>
 
   <div class="cat-header">A · 法規檢核（6 個）</div>
 
@@ -515,7 +515,7 @@
     </div>
   </div>
 
-  <div class="cat-header">D · 模型分析（19 個）</div>
+  <div class="cat-header">D · 模型分析（23 個）</div>
 
   <div class="skill-card">
     <div>
@@ -780,7 +780,61 @@
     </div>
   </div>
 
-  <div class="cat-header">E · 開發運維（4 個）</div>
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_import</div>
+      <div class="skill-cat">D · 模型分析</div>
+    </div>
+    <div>
+      <div class="skill-desc">解析從 green-material-showcase.html「對齊需求與擬訂計畫」複製的 Set 對齊請求，產生 Revit 綠建材注入計畫（規劃／報告用途；純材料 Set 額外做唯讀 Revit 查詢供挑選目標 Type，本身不寫入 Revit）。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">/GM_import</span><span class="trigger-tag">Set 對齊</span><span class="trigger-tag">注入計畫</span>
+      </div>
+    </div>
+  </div>
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_inject</div>
+      <div class="skill-cat">D · 模型分析</div>
+    </div>
+    <div>
+      <div class="skill-desc">/GM_inject revit——把已對齊的綠建材 Set 實際寫入目前開啟的 Revit 專案：支援 Wall 單一組合／各別建立／Material 純材料三種 Set，以及門窗 RFA 家族注入與柱樑結構材質指派。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">/GM_inject revit</span><span class="trigger-tag">綠建材寫入</span><span class="trigger-tag">RFA 注入</span>
+        <a href="domain-index.html#GM_parameter-schema" class="domain-link">→ GM_parameter-schema</a>
+        <a href="domain-index.html#GM_rfa-family-injection" class="domain-link">→ GM_rfa-family-injection</a>
+      </div>
+    </div>
+  </div>
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_query</div>
+      <div class="skill-cat">D · 模型分析</div>
+    </div>
+    <div>
+      <div class="skill-desc">查詢與檢視 Revit 模型中已寫入的綠建材認證資訊：依品類彙整已寫入的 Type、證書字號與槽位內容（或柱樑結構材質名稱），並可依認證狀態上色標記。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">查詢綠建材</span><span class="trigger-tag">green material query</span><span class="trigger-tag">GreenMaterial_Mat</span>
+        <a href="domain-index.html#GM_parameter-schema" class="domain-link">→ GM_parameter-schema</a>
+        <a href="domain-index.html#GM_catalog" class="domain-link">→ GM_catalog</a>
+        <a href="domain-index.html#GM_rfa-family-injection" class="domain-link">→ GM_rfa-family-injection</a>
+      </div>
+    </div>
+  </div>
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_set</div>
+      <div class="skill-cat">D · 模型分析</div>
+    </div>
+    <div>
+      <div class="skill-desc">/GM_set compare——比對 exported_material_sets.json 已存的 Set 與最新 tabc_master_database.json 快照（缺失／過期／改名的材料），為使用者確認過的 Set 更新其注入計畫。不寫入 Revit。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">/GM_set compare</span><span class="trigger-tag">Set 過期檢查</span><span class="trigger-tag">憑證過期</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="cat-header">E · 開發運維（8 個）</div>
 
   <div class="skill-card">
     <div>
@@ -852,6 +906,43 @@
     </div>
   </div>
 
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_update</div>
+      <div class="skill-cat">E · 開發運維</div>
+    </div>
+    <div>
+      <div class="skill-desc">從 TABC 官方網站（tabcmgr.hopto.org）更新本機 tabc_master_database.json 並重新同步展示網頁離線快取；也是全新 clone 後的初次啟動指令，兩份本機檔皆不存在時會從零建立。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">GM_update</span><span class="trigger-tag">更新 TABC 資料庫</span><span class="trigger-tag">第一次抓取</span>
+      </div>
+    </div>
+  </div>
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_web</div>
+      <div class="skill-cat">E · 開發運維</div>
+    </div>
+    <div>
+      <div class="skill-desc">直接以單一 open 參數開啟綠建材檢索平台與 Set Manager 網頁（assets/green-material-showcase.html，透過 local_server.py 於 http://localhost:8888 提供服務）。僅限 Windows。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">GM_web open</span><span class="trigger-tag">開啟檢索平台網頁</span><span class="trigger-tag">Set Manager</span>
+      </div>
+    </div>
+  </div>
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_kanban</div>
+      <div class="skill-cat">E · 開發運維</div>
+    </div>
+    <div>
+      <div class="skill-desc">開啟專案看板（tools/green-material/GM_kanban.html）。Windows 專用，透過 PowerShell Start-Process 開啟。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">GM_kanban</span><span class="trigger-tag">專案看板</span><span class="trigger-tag">kanban</span>
+      </div>
+    </div>
+  </div>
+
   <div class="cat-header">F · 進階開發 / 文件作者（4 個）</div>
 
   <div class="skill-card">
@@ -915,11 +1006,11 @@
 <!-- ============================================ -->
 <section data-collapse class="bim-section bim-anchor" id="quick-table">
   <div class="bim-section-eyebrow">QUICK TABLE · 速查表</div>
-  <h2 class="bim-section-title">速查：54 Skill 一覽</h2>
+  <h2 class="bim-section-title">速查：61 Skill 一覽</h2>
   <p class="bim-section-desc">複製給合作對象 / 列印貼牆。</p>
 
   <figure class="bim-figure">
-    <img src="../images/skills__hero__22-grains.svg" alt="Forty-two skills arranged as category-coded squares" width="1200" height="900" loading="lazy">
+    <img src="../images/skills__hero__grains.svg" alt="Sixty-one skills arranged as category-coded squares" width="1200" height="966" loading="lazy">
   </figure>
 
   <table>
@@ -972,11 +1063,18 @@
       <tr><td><code>/room-numbering</code></td><td>D 分析</td><td>房間重新排序 / 自動編號</td><td>room-numbering-workflow</td></tr>
       <tr><td><code>/ifc-structural-sync</code></td><td>D 分析</td><td>IFC 同步原生梁柱</td><td>ifc-structural-native-sync</td></tr>
       <tr><td><code>/finish-schedule-governance</code></td><td>D 分析</td><td>粉刷明細表材料代碼治理</td><td>finish-schedule-governance</td></tr>
+      <tr><td><code>/GM_import</code></td><td>D 分析</td><td>解析 Set 對齊請求，產生 Revit 注入計畫</td><td>&#8212;</td></tr>
+      <tr><td><code>/GM_inject</code></td><td>D 分析</td><td>把已對齊 Set 實際寫入 Revit（材質/Type/參數）</td><td>GM_parameter-schema / GM_rfa-family-injection</td></tr>
+      <tr><td><code>/GM_query</code></td><td>D 分析</td><td>查詢模型中已寫入的綠建材認證資訊</td><td>GM_parameter-schema / GM_catalog / GM_rfa-family-injection</td></tr>
+      <tr><td><code>/GM_set</code></td><td>D 分析</td><td>比對已存 Set 與最新 TABC 快照，更新過期計畫</td><td>&#8212;</td></tr>
       <tr><td><code>/build-revit</code></td><td>E 運維</td><td>多版本 build</td><td>(deployment-guide)</td></tr>
       <tr><td><code>/deploy-addon</code></td><td>E 運維</td><td>DLL 部署</td><td>(deployment-guide)</td></tr>
       <tr><td><code>/claude-md-sync</code></td><td>E 運維</td><td>CLAUDE.md 雙向同步</td><td>path-maintenance-qa</td></tr>
       <tr><td><code>/loop-up</code></td><td>E 運維</td><td>多模型分工自動迴圈修正</td><td>qa-checklist</td></tr>
       <tr><td><code>/hj-pr-proposal</code></td><td>E 運維</td><td>domain/skill 轉譯為 HJ PR 草案</td><td>skill-authoring-standard</td></tr>
+      <tr><td><code>/GM_update</code></td><td>E 運維</td><td>從 TABC 官網更新本機資料庫 + 展示網頁快取</td><td>&#8212;</td></tr>
+      <tr><td><code>/GM_web</code></td><td>E 運維</td><td>開啟綠建材檢索平台與 Set Manager 網頁</td><td>&#8212;</td></tr>
+      <tr><td><code>/GM_kanban</code></td><td>E 運維</td><td>開啟專案看板</td><td>&#8212;</td></tr>
       <tr><td><code>/core-reload-dev</code></td><td>F 進階</td><td>opt-in 熱重載開發迭代</td><td>core-reload-boundary</td></tr>
       <tr><td><code>/domain-diagram</code></td><td>F 進階</td><td>domain SOP 流程圖像化</td><td>domain-flow-visualization</td></tr>
       <tr><td><code>/dll-to-mcp-tool</code></td><td>F 進階</td><td>把 DLL/.cs 封裝為 MCP 工具</td><td>—</td></tr>
@@ -990,17 +1088,17 @@
 <!-- ============================================ -->
 <section data-collapse class="bim-section bim-anchor" id="why-not-merge">
   <div class="bim-section-eyebrow">RATIONALE · 為什麼不每個 Domain 都升級成 Skill</div>
-  <h2 class="bim-section-title">54 Skill vs 76 Domain — 為什麼數量不同？</h2>
+  <h2 class="bim-section-title">61 Skill vs 83 Domain — 為什麼數量不同？</h2>
 
   <div class="bim-grid bim-grid-2">
     <div class="bim-card bim-card-bad">
       <h4 style="color:var(--bad);">❌ 反例：把每個 Domain 都升 Skill</h4>
-      <p>40 Skill metadata 全部常駐 → AI context window 被吃掉一大塊 → 真正需要時反而找不到。</p>
+      <p>83 Skill metadata 全部常駐 → AI context window 被吃掉一大塊 → 真正需要時反而找不到。</p>
       <p style="font-size:13px;color:var(--text-muted);">且重複邏輯——防火 SOP 同時被消防、走廊、合規三個 Skill 引用，搬到各自 Skill body 內就重複三次。</p>
     </div>
     <div class="bim-card bim-card-ok">
       <h4 style="color:var(--ok);">✓ 本專案做法</h4>
-      <p>Skill = 編排（54 個 metadata 常駐）；Domain = 知識（76 markdown，被引用才載入）。</p>
+      <p>Skill = 編排（61 個 metadata 常駐）；Domain = 知識（83 markdown，被引用才載入）。</p>
       <p style="font-size:13px;color:var(--text-muted);">知識複用，編排薄層。一個防火 SOP 被三個 Skill 共享，原文只有一份。</p>
     </div>
   </div>
@@ -1028,7 +1126,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / skills-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-07-09 · 從 CLAUDE.md 抽取 50 個 Skill 與其觸發關鍵字、Domain 對應。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-07-09 · 從 CLAUDE.md 抽取 61 個 Skill 與其觸發關鍵字、Domain 對應。</p>
 </footer>
 
 <script src="../shared.js"></script>

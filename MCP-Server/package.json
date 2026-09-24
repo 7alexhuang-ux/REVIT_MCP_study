@@ -25,6 +25,7 @@
   "scripts": {
     "build": "tsc && node scripts/build-apps.mjs",
     "test": "npm run build && node --test build/tools/*.test.js",
+    "test:opening-candidate-contract": "node scripts/test-opening-candidate-contract.mjs",
     "start": "node build/index.js",
     "dev": "tsc && node build/index.js",
     "watch": "tsc --watch",
