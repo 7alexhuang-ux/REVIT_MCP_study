@@ -255,6 +255,27 @@ namespace RevitMCP.Core
                         result = GetCameraInfo(parameters);
                         break;
 
+                    // 相機管理（Camera Manager）MCP 測試工具，見 Commands/CommandExecutor.CameraManager.cs
+                    case "list_cameras":
+                        result = ListCameras(parameters);
+                        break;
+
+                    case "run_camera_keyplan":
+                        result = RunCameraKeyPlan(parameters);
+                        break;
+
+                    case "set_camera_pose":
+                        result = SetCameraPose(parameters);
+                        break;
+
+                    case "copy_camera_to_level":
+                        result = CopyCameraToLevel(parameters);
+                        break;
+
+                    case "get_view_extents":
+                        result = GetViewExtents(parameters);
+                        break;
+
                     case "get_material_graphics":
                         result = GetMaterialGraphics(parameters);
                         break;

@@ -298,6 +298,60 @@ namespace RevitMCP.Core
             /// <summary>true＝剖面位置/方向與上次程式產生時不同（使用者在 Revit 內手動調整過），
             /// 這次只補畫相機標記，CropBox 完全沒有被覆寫。</summary>
             public bool SectionPreserved;
+            /// <summary>2026-09-25（MCP 測試工具 run_camera_keyplan）：這次執行的關鍵判定，純資料（交易外算好的值）。
+            /// 面板不使用；只是把原本只寫進 log 的判定也放進回傳值，邏輯不變。</summary>
+            public KeyPlanDecisions Decisions = new KeyPlanDecisions();
+        }
+
+        /// <summary>一鍵 4 視圖的關鍵判定（feet／度），供 MCP 自動測試讀取；與 log 內容同源。</summary>
+        internal sealed class KeyPlanDecisions
+        {
+            public bool IsOutdoor;
+            public string ClassLog;
+            public long? RoomId;
+            public string RoomName;
+            public string RoomLog;
+            public double FarClipFeet;
+            public double FanRadiusFeet;
+            public string FanLog;
+            public double CenterYawDeg;
+            public double LeftDeg, RightDeg, DownDeg, UpDeg;
+            public double? HFovDeg, VFovDeg;
+            public double? RoomTopZ;
+            public double StoreyTopSlabBottomZ;
+            public double? StoreyTopBeamBottomZ;
+            public bool StoreyTopOutdoor;
+            public string StoreyTopLog;
+            public string IsoXYLog;
+            public CameraSectionOrientationMode SectionModeRequested;
+            public CameraSectionOrientationMode SectionModeUsed;
+            public string SectionSpecLog;
+            public CameraIsoExtentMode IsoExtentMode;
+            public bool FadedStyle;
+        }
+
+        /// <summary>
+        /// 2026-09-25（MCP 測試工具）：單次執行覆寫面板設定（剖面方向／等角範圍）。null＝沿用面板設定。
+        /// 只在 <see cref="CreateOrUpdateFourViews(UIApplication, Document, ElementId, bool, KeyPlanRunOptions)"/>
+        /// 執行期間生效（try/finally 還原），不寫回設定檔。
+        /// </summary>
+        internal sealed class KeyPlanRunOptions
+        {
+            public CameraSectionOrientationMode? SectionMode;
+            public CameraIsoExtentMode? IsoMode;
+        }
+
+        // Revit API 只在主執行緒執行，一次只會有一個一鍵 4 視圖在跑，靜態欄位即可。
+        private static KeyPlanRunOptions _runOptions;
+
+        /// <summary>帶單次覆寫選項的版本（MCP 工具用）；其餘邏輯與面板呼叫的版本完全相同。</summary>
+        internal static KeyPlanResult CreateOrUpdateFourViews(UIApplication uiApp, Document doc, ElementId cameraViewId,
+            bool forceResetSection, KeyPlanRunOptions options)
+        {
+            KeyPlanRunOptions previous = _runOptions;
+            _runOptions = options;
+            try { return CreateOrUpdateFourViews(uiApp, doc, cameraViewId, forceResetSection); }
+            finally { _runOptions = previous; }
         }
 
         /// <summary>
@@ -349,6 +403,32 @@ namespace RevitMCP.Core
             Logger.Info("相機 Key Plan：本層頂判定 " + storeyTop.Log);
             CameraSectionOrientationMode sectionMode = GetSectionOrientationMode();
 
+            // 2026-09-25：把判定也放進回傳值（MCP 測試工具用），數值與上面 log 同源。
+            KeyPlanDecisions dec = result.Decisions;
+            dec.IsOutdoor = cp.IsOutdoor;
+            dec.ClassLog = cp.ClassLog;
+            dec.RoomId = cp.Room?.Room != null ? (long?)cp.Room.Room.Id.GetIdValue() : null;
+            dec.RoomName = cp.Room?.Room?.Name;
+            dec.RoomLog = cp.Room?.Log;
+            dec.FarClipFeet = farClipFeet;
+            dec.FanRadiusFeet = fanRadiusFeet;
+            dec.FanLog = cp.FanLog;
+            dec.CenterYawDeg = cp.CenterYawDeg;
+            dec.LeftDeg = leftRad * 180.0 / Math.PI;
+            dec.RightDeg = rightRad * 180.0 / Math.PI;
+            dec.DownDeg = cp.DownRad * 180.0 / Math.PI;
+            dec.UpDeg = cp.UpRad * 180.0 / Math.PI;
+            dec.HFovDeg = cp.FovDeg;
+            dec.VFovDeg = cp.VFovDeg;
+            dec.RoomTopZ = storeyTop.RoomTopZ;
+            dec.StoreyTopSlabBottomZ = storeyTop.SlabBottomZ;
+            dec.StoreyTopBeamBottomZ = storeyTop.BeamBottomZ;
+            dec.StoreyTopOutdoor = storeyTop.Outdoor;
+            dec.StoreyTopLog = storeyTop.Log;
+            dec.IsoXYLog = isoXY.Log;
+            dec.SectionModeRequested = sectionMode;
+            dec.IsoExtentMode = GetIsoExtentMode();
+
             // ES Schema 註冊不需要交易；先在交易外建好，Schema 問題不會在交易中途才爆出來。
             // 剖面狀態只是附屬簿記：失敗只記 log，視圖照建（SaveSectionState 內部也會吞掉例外）。
             string schemaErr = SelfCheckSchemas();
@@ -362,6 +442,7 @@ namespace RevitMCP.Core
                     ViewPlan planView = GetOrCreatePlanView(doc, uiApp, geom.LevelBelow, planName, cid);
                     ConfigurePlanCropBox(planView, geom, forwardHoriz, leftRad, rightRad, fanRadiusFeet, isoXY, cp.IsOutdoor);
                     bool faded = IsKeyPlanFadedStyle();
+                    dec.FadedStyle = faded;
                     Logger.Info("相機 Key Plan：表現法＝" + (faded ? "淡化背景" : "原始"));
                     DrawMarkerSafely(doc, "ApplyKeyPlanStylePlan", () => ApplyKeyPlanStyle(planView, faded));
                     DrawMarkerSafely(doc, "DrawPlanMarker",
@@ -373,6 +454,8 @@ namespace RevitMCP.Core
                     try { planBasisX = planView.CropBox?.Transform?.BasisX; } catch { planBasisX = null; }
                     SectionSpec spec = ComputeSectionSpec(geom, cp, isoXY, storeyTop, sectionMode, planBasisX, cutPlaneZ);
                     Logger.Info("相機 Key Plan：剖面規格 " + spec.Log);
+                    dec.SectionModeUsed = spec.ModeUsed;
+                    dec.SectionSpecLog = spec.Log;
                     ViewSection sectionView = GetOrCreateSectionView(doc, sectionName, cid, geom, spec, forceResetSection, out bool preserved);
                     DrawMarkerSafely(doc, "ApplyKeyPlanStyleSection",
                         () => ApplyKeyPlanStyle(sectionView, faded, isSection: true, levelBelow: geom.LevelBelow, outdoor: cp.IsOutdoor, eye: geom.Eye, cid: cid));
@@ -972,8 +1055,54 @@ namespace RevitMCP.Core
 
         private static CameraSectionOrientationMode GetSectionOrientationMode()
         {
+            if (_runOptions?.SectionMode != null) return _runOptions.SectionMode.Value;
             try { return ConfigManager.Instance.Settings.CameraManager.SectionOrientationMode; }
             catch { return CameraSectionOrientationMode.AlongRoomLongAxis; }
+        }
+
+        /// <summary>等角範圍模式：單次覆寫（MCP 工具）優先，否則面板設定。</summary>
+        private static CameraIsoExtentMode GetIsoExtentMode()
+        {
+            if (_runOptions?.IsoMode != null) return _runOptions.IsoMode.Value;
+            try { return ConfigManager.Instance.Settings.CameraManager.IsoExtentMode; }
+            catch { return CameraIsoExtentMode.FullWithUpperBeams; }
+        }
+
+        /// <summary>面板目前設定的剖面方向（唯讀，list_cameras 用）。</summary>
+        internal static CameraSectionOrientationMode GetConfiguredSectionOrientationMode() => GetSectionOrientationMode();
+
+        /// <summary>這台相機以 ES 連結的 Key Plan 視圖（role＝Plan／Section／Iso）；沒有＝null。唯讀。</summary>
+        internal static View FindLinkedKeyPlanView(Document doc, string cameraUniqueId, string role)
+        {
+            if (doc == null || string.IsNullOrEmpty(cameraUniqueId) || Schema.Lookup(SchemaGuid) == null) return null;
+            return FindLinkedView(doc, cameraUniqueId, role);
+        }
+
+        /// <summary>剖面是否被使用者手動移過（與一鍵 4 視圖保留判定同一個比對；沒有 ES 狀態＝false）。唯讀。</summary>
+        internal static bool IsSectionManuallyMoved(ViewSection section)
+            => section != null && HasUserMovedSection(section, null, null);
+
+        /// <summary>視圖內貼了本相機 ES 標記的元素數，依 Role 分組（MarkerPlan／MarkerSection／LevelMark…）。唯讀。</summary>
+        internal static Dictionary<string, int> CountTaggedElementsByRole(Document doc, View view, string cameraUniqueId)
+        {
+            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+            if (doc == null || view == null || Schema.Lookup(SchemaGuid) == null) return counts;
+            foreach (Element e in new FilteredElementCollector(doc, view.Id).WhereElementIsNotElementType())
+            {
+                if (!TryReadLink(e, out string cid, out string role) || cid != cameraUniqueId || string.IsNullOrEmpty(role)) continue;
+                counts[role] = counts.TryGetValue(role, out int n) ? n + 1 : 1;
+            }
+            return counts;
+        }
+
+        /// <summary>眼睛所在房間（與一鍵 4 視圖同一個 FindEyeRoom）；找不到＝roomId null。唯讀，須在 API context。</summary>
+        internal static void DescribeEyeRoom(View3D camera, CameraMath.CameraGeometry geom, out long? roomId, out string roomName, out string log)
+        {
+            roomId = null; roomName = null; log = null;
+            if (camera == null || geom?.LevelBelow == null) { log = "no level below"; return; }
+            RoomCtx rc = FindEyeRoom(camera.Document, camera, geom);
+            log = rc?.Log;
+            if (rc?.Room != null) { roomId = rc.Room.Id.GetIdValue(); roomName = rc.Room.Name; }
         }
 
         /// <summary>
@@ -2400,7 +2529,7 @@ namespace RevitMCP.Core
             }
             Logger.Info($"相機 Key Plan：等角 Z 下限={CameraMath.FeetToMm(minZ):F0}mm levelZ={CameraMath.FeetToMm(levelZ):F0}mm 來源：{bottomSrc}");
 
-            CameraIsoExtentMode mode = ConfigManager.Instance.Settings.CameraManager.IsoExtentMode;
+            CameraIsoExtentMode mode = GetIsoExtentMode();
             double clearanceFeet = CameraMath.MmToFeet(IsoUpperSlabClearanceMm);
             double maxZ;
             if (storeyTop.RoomTopZ.HasValue)

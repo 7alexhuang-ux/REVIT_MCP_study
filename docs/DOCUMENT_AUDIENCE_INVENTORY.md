@@ -15,7 +15,7 @@ This inventory defines which project documents are for AI agents, human readers,
 
 | Item | Count | Source |
 |---|---:|---|
-| Runtime MCP tools | 212 | `registerRevitTools()` |
+| Runtime MCP tools | 217 | `registerRevitTools()` |
 | Domain SOP files | 83 | `domain/*.md` except README, plus `domain/references/*.md` |
 | Claude skills | 61 | `.claude/skills/*/SKILL.md` |
 
@@ -70,6 +70,8 @@ These must remain understandable by both sides.
 | `docs/mep-design-playbook-ch2.zh-TW.md` | junior MEP engineers continuing from Chapter 1 | Traditional Chinese; Chapter 2 turns the Chapter 1 numbers into something the model can check itself. Covers topology-before-values, why ventilation is modelled before HVAC, which field a value belongs in (supply vs exhaust, decided by the code's ventilation-method clause), two write-time traps (internal units, schedule-in-foreground), a step-by-step air-terminal placement walkthrough, and the supply/return/exhaust connector trap. |
 | `docs/mep-design-playbook-ch3.zh-TW.md` | junior MEP engineers continuing from Chapter 2 | Traditional Chinese; teaching companion to `domain/mep-space-demand-matrix.md` 4-1/4-2. Chapter 3 covers grouping air terminals and equipment into systems (traceable-vs-decided grouping basis, equipment identity by geometry vs by decision, type-vs-instance system labels), and the checks that only unlock once ductwork is drawn (system flow validity, the supply/exhaust-vs-endpoint-sum leak check, and three same-shape boolean-flag traps). Derived from the same course-model exercise as Chapters 1-2, not a client project; carries its own honesty-boundary section flagging which post-routing figures postdate the log. |
 | `docs/mep-design-playbook-ch1-model-guide.zh-TW.md` | learners opening the Chapter 1 closing model | Traditional Chinese; orientation for the Revit model that Chapter 1 ends at — what each schedule column teaches, the four opening-verification numbers, what the model has NOT done yet, and common misreadings. Paired with `mep-design-playbook-ch1.zh-TW.md`. |
+| `docs/camera-manager/spec.zh-TW.md`, `adr.zh-TW.md`, `changelog.zh-TW.md`, `roadmap.zh-TW.md` | Camera Manager users, the maintainer, and AI agents working on the pane | Traditional Chinese; the Revit camera-manager dockable pane and Key Plan feature. `spec` = current behaviour only; `adr` = decision records D-001+ (context → decision → rationale → consequences, append-only); `changelog` = dated changes, newest first; `roadmap` = phase status and the list of behaviours not yet verified in Revit. |
+| `docs/camera-manager-spec.zh-TW.md` | redirect | Former single-file spec, kept only so existing links do not rot; points to `docs/camera-manager/`. Do not add content. |
 | `docs/claude-code-cheatsheet.html`, `docs/karpathy-gist-zh-tw.html` | readers | Reference pages |
 | other `docs/*.md` topic guides | mixed | Per-topic guides (agent handoff, guard rails, architecture, slope analysis, docs structure); classify individually if promoted to canonical |
 | root-level Chinese notes (`HJPLUS *.md`, `[好學生筆記]*.md`) | community readers | Event notes and adoption guides |

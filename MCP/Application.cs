@@ -17,7 +17,7 @@ namespace RevitMCP
         private static UIApplication _uiApp;
         private static CameraManagerPanelControl _cameraManagerPanel;
 
-        // ── 相機管理面板：2026-09-24 崩潰修復（見 docs/camera-manager-spec.zh-TW.md §9）。
+        // ── 相機管理面板：2026-09-24 崩潰修復（見 docs/camera-manager/adr.zh-TW.md D-008、spec.zh-TW.md §3.1）。
         // DocumentChanged／ViewActivated 本身只負責「判斷這次變更跟相機管理有沒有關係」＋
         // 設一個 dirty flag，真正的刷新一律延後到下一次 Idling 才做（那時 Revit 保證已經完全
         // 閒置：文件開啟流程、Project Browser、UI chrome 都已經穩定下來），避免在文件開啟／
@@ -198,7 +198,7 @@ namespace RevitMCP
         /// <summary>
         /// 4.4：Revit 文件有任何變更（包含使用者自己改相機、改樓層…）都會觸發。⚠️ 是否包含
         /// 「純滑鼠環繞透視圖」尚未經 Revit 2024 實機驗證——面板上另外保留「從透視圖同步」手動
-        /// 按鈕當保險（見 docs/camera-manager-spec 4.4、本次交付報告）。
+        /// 按鈕當保險（見 docs/camera-manager/spec.zh-TW.md §9）。
         ///
         /// 2026-09-24 崩潰修復：這裡不再直接呼叫面板讀快照／刷新畫面——DocumentChanged 有可能
         /// 在文件開啟過程中被觸發（journal 證據：三次崩潰都發生在剛開檔、使用者完全沒有操作的

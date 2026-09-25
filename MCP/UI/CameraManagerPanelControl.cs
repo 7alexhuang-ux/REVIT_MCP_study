@@ -662,30 +662,9 @@ namespace RevitMCP.UI
 
         /// <summary>一鍵 4 視圖／並排用：關閉作用中文件裡「不是 keep 名單」的所有視圖視窗。
         /// 必須先把 keep 裡的某張設為作用視圖（Revit 不允許關閉作用中／最後一張視圖）。每張獨立 try/catch。</summary>
+        // 2026-09-25：實作搬到 CameraManagerService（MCP 工具 run_camera_keyplan 共用），這裡只轉呼叫。
         private static int CloseOtherViews(UIApplication uiApp, ICollection<ElementId> keep)
-        {
-            int closed = 0;
-            UIDocument uidoc = uiApp?.ActiveUIDocument;
-            if (uidoc == null) return 0;
-            IList<UIView> open;
-            try { open = uidoc.GetOpenUIViews(); }
-            catch (Exception ex) { Logger.Error("相機管理面板：GetOpenUIViews 失敗，略過關閉其他視圖", ex); return 0; }
-            foreach (UIView uv in open.ToList())
-            {
-                try
-                {
-                    if (keep.Contains(uv.ViewId)) continue;
-                    uv.Close();
-                    closed++;
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error($"相機管理面板：關閉視圖 {uv.ViewId?.GetIdValue()} 失敗（略過）", ex);
-                }
-            }
-            Logger.Info($"相機管理面板：已關閉 {closed} 張其他視圖。");
-            return closed;
-        }
+            => CameraManagerService.CloseOtherViews(uiApp, keep);
 
         private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
         {
@@ -1544,17 +1523,8 @@ namespace RevitMCP.UI
         private void OnGridFieldEditCommittedCore(CameraRow row, Action<CameraEditRequest> overrideField,
             Func<UIApplication, Document, string> afterApply, Action onDone)
         {
-            var req = new CameraEditRequest
-            {
-                ViewId = row.ViewId,
-                EyeXFeet = row.EyeXFeet,
-                EyeYFeet = row.EyeYFeet,
-                LevelId = row.LevelId,
-                HeightAboveLevelCm = row.HeightAboveLevelCm ?? 0,
-                HorizontalAngleDeg = row.HorizontalAngleDeg,
-                PitchDeg = row.PitchDeg,
-                FarClipCm = null
-            };
+            // 2026-09-25：組裝搬到 CameraManagerService.BuildEditRequestFromRow（set_camera_pose 共用）。
+            CameraEditRequest req = CameraManagerService.BuildEditRequestFromRow(row);
             overrideField(req);
 
             if (req.LevelId == null)
@@ -1709,46 +1679,9 @@ namespace RevitMCP.UI
 
         /// <summary>一鍵 4 視圖（含重設剖面位置）共用：依序啟動透視／平面／剖面／等角、關閉其他視圖、
         /// PostCommand 並排、排定並排後 ZoomToFit。須在 ExternalEvent（交易外）呼叫。回傳錯誤訊息或 null。</summary>
+        // 2026-09-25：實作搬到 CameraManagerService（MCP 工具 run_camera_keyplan 共用），這裡只轉呼叫。
         private static string OpenAndTileFourViews(UIApplication uiApp, Document doc, ElementId cameraViewId, CameraKeyPlanService.KeyPlanResult result)
-        {
-            try
-            {
-                View perspective = doc.GetElement(cameraViewId) as View;
-                View plan = doc.GetElement(result.PlanViewId) as View;
-                View section = doc.GetElement(result.SectionViewId) as View;
-                View iso = doc.GetElement(result.IsoViewId) as View;
-
-                // 規格：依序啟動 4 張視圖，最後一步才 PostCommand TileViews
-                // （PostCommand 排入佇列，等這次 Execute() 整段結束、控制權還給 Revit 訊息迴圈後才真的執行）。
-                if (perspective != null) uiApp.ActiveUIDocument.ActiveView = perspective;
-                if (plan != null) uiApp.ActiveUIDocument.ActiveView = plan;
-                if (section != null) uiApp.ActiveUIDocument.ActiveView = section;
-                if (iso != null) uiApp.ActiveUIDocument.ActiveView = iso;
-                // 2026-09-24：先關閉其他所有視圖視窗（作用中已是 4 張之一），只留這 4 張再並排。
-                var keep = new List<ElementId>();
-                foreach (View v in new[] { perspective, plan, section, iso }) if (v != null) keep.Add(v.Id);
-                CloseOtherViews(uiApp, keep);
-                if (iso != null)
-                {
-                    // 2026-09-24：等角視圖啟用 Section Box 後補一次 ZoomToFit（縮放基準＝目前裁切範圍）。
-                    try
-                    {
-                        UIView isoUiView = uiApp.ActiveUIDocument.GetOpenUIViews()?.FirstOrDefault(v => v.ViewId == iso.Id);
-                        isoUiView?.ZoomToFit();
-                    }
-                    catch { /* 縮放失敗不應該讓整個流程中斷，忽略即可 */ }
-                }
-
-                uiApp.PostCommand(RevitCommandId.LookupPostableCommandId(PostableCommand.TileViews));
-                // 並排會在本次 ExternalEvent 結束後才改變視窗大小 → 在之後的 Idling 才 ZoomToFit。
-                CameraViewZoomService.ScheduleZoomToFit(uiApp, keep, expectTile: true);
-                return null;
-            }
-            catch (Exception ex)
-            {
-                return "已建立/更新 Key Plan 視圖，但開啟/並排時發生錯誤：" + ex.Message;
-            }
-        }
+            => CameraManagerService.OpenAndTileFourViews(uiApp, doc, cameraViewId, result);
 
         /// <summary>
         /// 2026-09-25（使用者決策）：相機的樓層「不就地修改」。清單「樓層」欄選另一個樓層＝沿用「複製到其他樓層」

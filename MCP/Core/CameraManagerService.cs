@@ -247,8 +247,8 @@ namespace RevitMCP.Core
         /// 匯出平面視圖成底圖，並記下這張圖對應的模型範圍（CropBox，view 自身座標系＋
         /// 轉回模型座標的 Transform）。只會被叫在 CropBoxActive==true 的平面（ReadSnapshot
         /// 已過濾），修掉「底圖用了沒裁剪的平面 → CropBox 與實際匯出範圍不一致 → 相機全部
-        /// 判定在範圍外、底圖上一個標記都不畫」的根因（見 docs/camera-manager-spec 4.9 前的
-        /// 已知問題記錄／本次交付報告）。
+        /// 判定在範圍外、底圖上一個標記都不畫」的根因（見 docs/camera-manager/adr.zh-TW.md
+        /// D-017、spec.zh-TW.md §6.4）。
         /// </summary>
         /// <summary>
         /// 2026-09-24 對位改版（取代「推測匯出範圍」）：匯出一張「確定性」的暫存複本視圖——
@@ -738,6 +738,23 @@ namespace RevitMCP.Core
             }
         }
 
+        /// <summary>清單編輯（面板）與 set_camera_pose（MCP）共用：用這一列的既有值組一份完整的
+        /// <see cref="CameraEditRequest"/>，呼叫端只覆寫要改的欄位（遠裁剪預設 null＝不變）。</summary>
+        internal static CameraEditRequest BuildEditRequestFromRow(CameraRow row)
+        {
+            return new CameraEditRequest
+            {
+                ViewId = row.ViewId,
+                EyeXFeet = row.EyeXFeet,
+                EyeYFeet = row.EyeYFeet,
+                LevelId = row.LevelId,
+                HeightAboveLevelCm = row.HeightAboveLevelCm ?? 0,
+                HorizontalAngleDeg = row.HorizontalAngleDeg,
+                PitchDeg = row.PitchDeg,
+                FarClipCm = null
+            };
+        }
+
         /// <summary>4.3 細節編輯：一次寫入位置／樓層／高度／角度／遠裁剪，一個交易、一個中文復原名稱。</summary>
         internal static string ApplyDetailEdit(Document doc, CameraEditRequest req)
         {
@@ -1007,6 +1024,80 @@ namespace RevitMCP.Core
             if (open == null) return list;
             foreach (UIView uv in open) list.Add((uv.ViewId, uv));
             return list;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // 一鍵 4 視圖：開啟並並排（2026-09-25 由 CameraManagerPanelControl 搬來，面板與 MCP 共用；純 Revit API）
+        // ══════════════════════════════════════════════════════════
+
+        /// <summary>一鍵 4 視圖／並排用：關閉作用中文件裡「不是 keep 名單」的所有視圖視窗。
+        /// 必須先把 keep 裡的某張設為作用視圖（Revit 不允許關閉作用中／最後一張視圖）。每張獨立 try/catch。</summary>
+        internal static int CloseOtherViews(UIApplication uiApp, ICollection<ElementId> keep)
+        {
+            int closed = 0;
+            UIDocument uidoc = uiApp?.ActiveUIDocument;
+            if (uidoc == null) return 0;
+            IList<UIView> open;
+            try { open = uidoc.GetOpenUIViews(); }
+            catch (Exception ex) { Logger.Error("相機管理面板：GetOpenUIViews 失敗，略過關閉其他視圖", ex); return 0; }
+            foreach (UIView uv in open.ToList())
+            {
+                try
+                {
+                    if (keep.Contains(uv.ViewId)) continue;
+                    uv.Close();
+                    closed++;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error($"相機管理面板：關閉視圖 {uv.ViewId?.GetIdValue()} 失敗（略過）", ex);
+                }
+            }
+            Logger.Info($"相機管理面板：已關閉 {closed} 張其他視圖。");
+            return closed;
+        }
+
+        /// <summary>一鍵 4 視圖（含重設剖面位置）共用：依序啟動透視／平面／剖面／等角、關閉其他視圖、
+        /// PostCommand 並排、排定並排後 ZoomToFit。須在 ExternalEvent（交易外）呼叫。回傳錯誤訊息或 null。</summary>
+        internal static string OpenAndTileFourViews(UIApplication uiApp, Document doc, ElementId cameraViewId, CameraKeyPlanService.KeyPlanResult result)
+        {
+            try
+            {
+                View perspective = doc.GetElement(cameraViewId) as View;
+                View plan = doc.GetElement(result.PlanViewId) as View;
+                View section = doc.GetElement(result.SectionViewId) as View;
+                View iso = doc.GetElement(result.IsoViewId) as View;
+
+                // 規格：依序啟動 4 張視圖，最後一步才 PostCommand TileViews
+                // （PostCommand 排入佇列，等這次 Execute() 整段結束、控制權還給 Revit 訊息迴圈後才真的執行）。
+                if (perspective != null) uiApp.ActiveUIDocument.ActiveView = perspective;
+                if (plan != null) uiApp.ActiveUIDocument.ActiveView = plan;
+                if (section != null) uiApp.ActiveUIDocument.ActiveView = section;
+                if (iso != null) uiApp.ActiveUIDocument.ActiveView = iso;
+                // 2026-09-24：先關閉其他所有視圖視窗（作用中已是 4 張之一），只留這 4 張再並排。
+                var keep = new List<ElementId>();
+                foreach (View v in new[] { perspective, plan, section, iso }) if (v != null) keep.Add(v.Id);
+                CloseOtherViews(uiApp, keep);
+                if (iso != null)
+                {
+                    // 2026-09-24：等角視圖啟用 Section Box 後補一次 ZoomToFit（縮放基準＝目前裁切範圍）。
+                    try
+                    {
+                        UIView isoUiView = uiApp.ActiveUIDocument.GetOpenUIViews()?.FirstOrDefault(v => v.ViewId == iso.Id);
+                        isoUiView?.ZoomToFit();
+                    }
+                    catch { /* 縮放失敗不應該讓整個流程中斷，忽略即可 */ }
+                }
+
+                uiApp.PostCommand(RevitCommandId.LookupPostableCommandId(PostableCommand.TileViews));
+                // 並排會在本次 ExternalEvent 結束後才改變視窗大小 → 在之後的 Idling 才 ZoomToFit。
+                CameraViewZoomService.ScheduleZoomToFit(uiApp, keep, expectTile: true);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                return "已建立/更新 Key Plan 視圖，但開啟/並排時發生錯誤：" + ex.Message;
+            }
         }
     }
 }
