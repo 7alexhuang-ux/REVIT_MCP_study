@@ -50,7 +50,17 @@
 - MCP 工具數 218 → 220（`create_camera_sheet`、`camera_version`）。
 - 版面比例（左 60%、右欄三等分）與圖紙邊界 15 mm 是常數／本機設定，沒有 UI；實測後再決定要不要開放。
 
-### MCP 自測第三輪修正　✅ 已編譯、待 MCP 複測（2026-09-26 01:45）
+### MCP 自測第四輪修正　✅ 已編譯、待 MCP 複測（2026-09-26 01:54）
+
+第三輪實測：移動路徑方向／原點正確但深度偏差 2374 mm → 退到刪除重建 → `InvalidObjectException` 整筆回滾。第四輪 3 項已改、已編譯；**新 DLL 尚未部署**（Revit 執行中）。
+
+| # | 情境 | 複測方式 |
+|---|---|---|
+| a | 相機移 1 m＋轉 180°（移動路徑） | 用 `set_camera_pose` 把相機水平移 1 m、yaw 轉 180° → `run_camera_keyplan`：`Decisions.SectionApplyLog` 含「已旋轉／已移動／已沿深度移動」、**不含「移動路徑失敗」「刪除重建」**；`SectionExtentDeviationMm` ≤ 5（深度偏差 0）；剖面 Id 不變 |
+| b | 刪除重建路徑（不得加除錯旗標） | 觸發方式：讓移動路徑失敗且剖面不在圖紙上——在 Key Plan 平面選取該剖面標記按「釘選（Pin）」（被釘選的元素 Rotate/MoveElement 會失敗；此行為未實測，若沒失敗請記下 log 回報），再移動／旋轉相機並 `run_camera_keyplan`（**不要**用刪除剖面標記來觸發——那會把剖面視圖一起刪掉）：`SectionApplyLog` 含「已刪除舊剖面 … 並重建為 …」、**沒有 `InvalidObjectException`、沒有回滾**；`Result.SectionViewId`＝新 Id；新剖面有 ES 連結（再跑一次會走移動路徑而非新建第二張）、B 標記畫在新剖面上 |
+| c | 圖框線讀不到的圖紙 | `create_camera_sheet`（E1 30 x 42）：`DrawAreaSource` 含「未偵測到圖框線 → 四邊內縮改為 … ≈43 mm」；截圖透視圖不壓左側內框 |
+
+### MCP 自測第三輪修正　✅ 已編譯、第四輪修正中（2026-09-26 01:45）
 
 第二輪已由主線 MCP 驗證通過：最近房間 fallback、樣板層隱藏子類別、B 模式刪 A、不再誤判「手動移過」、圖紙不 Overflow、標題欄 20 % 退路、透視複本無標記、總覽裁剪讀回＝預期。第三輪 5 項已改、已編譯；**新 DLL 尚未部署**（Revit 執行中）。
 

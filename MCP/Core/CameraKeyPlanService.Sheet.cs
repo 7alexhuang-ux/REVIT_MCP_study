@@ -321,9 +321,24 @@ namespace RevitMCP.Core
                         x0 = bb.Min.X + marginFeet; y0 = bb.Min.Y + marginFeet;
                         x1 = bb.Max.X - marginFeet; y1 = bb.Max.Y - marginFeet;
                         res.DrawAreaSource = $"圖框外接框 {CameraMath.FeetToMm(bb.Max.X - bb.Min.X):F0}×{CameraMath.FeetToMm(bb.Max.Y - bb.Min.Y):F0} mm 內縮 {GetSheetMarginMm():0.#} mm";
-                        DetectTitleStrip(tb, sheet, bb, out double? stripLeftX, out double? stripTopY, out string stripLog);
-                        if (stripLeftX.HasValue) x1 = Math.Min(x1, stripLeftX.Value - marginFeet);
-                        if (stripTopY.HasValue) y0 = Math.Max(y0, stripTopY.Value + marginFeet);
+                        DetectTitleStrip(tb, sheet, bb, out double? stripLeftX, out double? stripTopY, out string stripLog, out bool stripDetected);
+                        double stripMargin = marginFeet;
+                        if (!stripDetected)
+                        {
+                            // 2026-09-26 第四輪（MCP 自測：E1 30 x 42 圖框幾何讀不到線，15 mm 邊界讓透視圖壓到左側內框
+                            // ——內框離紙邊約 38 mm）：偵測不到圖框線時，四邊改用 max(設定邊界, 4 % 圖紙寬) 內縮，
+                            // 另外仍保留右側標題欄帶。偵測得到線時維持原本的設定邊界。
+                            double fb = Math.Max(marginFeet, UndetectedFrameMarginFraction * (bb.Max.X - bb.Min.X));
+                            if (fb > marginFeet && bb.Max.X - bb.Min.X > 2 * fb && bb.Max.Y - bb.Min.Y > 2 * fb)
+                            {
+                                x0 = bb.Min.X + fb; y0 = bb.Min.Y + fb;
+                                x1 = bb.Max.X - fb; y1 = bb.Max.Y - fb;
+                                stripMargin = fb;
+                                res.DrawAreaSource += $"；未偵測到圖框線 → 四邊內縮改為 max({GetSheetMarginMm():0.#} mm, {UndetectedFrameMarginFraction * 100:0.#}% 圖紙寬)＝{CameraMath.FeetToMm(fb):F0} mm";
+                            }
+                        }
+                        if (stripLeftX.HasValue) x1 = Math.Min(x1, stripLeftX.Value - stripMargin);
+                        if (stripTopY.HasValue) y0 = Math.Max(y0, stripTopY.Value + stripMargin);
                         res.DrawAreaSource += "；" + stripLog;
                         Logger.Info("相機圖紙：標題欄判定 " + stripLog);
                     }
@@ -451,7 +466,8 @@ namespace RevitMCP.Core
         // ══════════════════════════════════════════════════════════
 
         private const double TitleStripFrameGapMm = 25.0;       // 離外框線 ≤ 25 mm 的長線視為圖框（內框），不是標題欄線
-        private const double SheetFillRatio = 0.90;             // 透視圖填滿格子的比例
+        private const double UndetectedFrameMarginFraction = 0.04; // 讀不到圖框線時四邊內縮＝max(設定邊界, 4 % 圖紙寬)
+        private const double SheetFillRatio = 0.90;            // 透視圖填滿格子的比例
         private const double SheetFitRatio = 0.95;              // Key Plan 視圖挑比例時的格子可用比例（留標題空間）
         private static readonly int[] KeyPlanStandardScales = { 20, 25, 50, 75, 100, 150, 200 };
         private static readonly int[] KeyPlanExtendedScales = { 250, 300, 400, 500, 750, 1000 };
@@ -469,9 +485,9 @@ namespace RevitMCP.Core
         ///   下方標題欄＝長度 ≥ 60% 圖框寬的水平線，位在圖框下方 35% 內、且離最下長橫線 &gt; 25 mm → 取最高者。
         /// 兩者都找不到、圖紙為橫式 → 保留右側 <see cref="CameraManagerSettings.SheetReservedStripFraction"/>（預設 20 %）。
         /// </summary>
-        private static void DetectTitleStrip(Element tb, ViewSheet sheet, BoundingBoxXYZ bb, out double? stripLeftX, out double? stripTopY, out string log)
+        private static void DetectTitleStrip(Element tb, ViewSheet sheet, BoundingBoxXYZ bb, out double? stripLeftX, out double? stripTopY, out string log, out bool detected)
         {
-            stripLeftX = null; stripTopY = null;
+            stripLeftX = null; stripTopY = null; detected = false;
             double W = bb.Max.X - bb.Min.X, H = bb.Max.Y - bb.Min.Y;
             var lines = new List<(XYZ a, XYZ b)>();
             // 2026-09-26 第三輪（MCP 自測：E1 30 x 42 讀到 0 條線）：依序試幾組 Options，取線最多的一組；
@@ -519,6 +535,7 @@ namespace RevitMCP.Core
             }
             if (stripLeftX.HasValue || stripTopY.HasValue)
             {
+                detected = true;
                 log = found + "；標題欄＝" +
                       (stripLeftX.HasValue ? $"右側（x≥{CameraMath.FeetToMm(stripLeftX.Value - bb.Min.X):F0}mm，寬 {CameraMath.FeetToMm(bb.Max.X - stripLeftX.Value):F0}mm）" : "") +
                       (stripTopY.HasValue ? $"下方（y≤{CameraMath.FeetToMm(stripTopY.Value - bb.Min.Y):F0}mm）" : "");

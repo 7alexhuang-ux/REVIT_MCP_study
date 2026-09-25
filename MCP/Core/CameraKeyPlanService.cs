@@ -998,15 +998,27 @@ namespace RevitMCP.Core
                 {
                     // 2026-09-26 第三輪（回歸）：既有剖面設 CropBox 時 Revit 不採用新 Transform（只把 Min/Max 套在舊座標系）
                     // → 先移動／旋轉剖面到新原點與方向，再在「讀回的實際座標系」算區域範圍；做不到且不在圖紙上才刪除重建。
+                    // 2026-09-26 第四輪：UpdateExistingSectionFrame 可能刪除重建——之後 existing 是已刪除物件，
+                    // 碰它任何屬性（含 .Id）都會 InvalidObjectException。先記下舊 Id，重建後一律只用回傳的新視圖。
+                    ElementId existingId = existing.Id;
                     ViewSection moved = UpdateExistingSectionFrame(doc, existing, box, sectionName, cid, out string applyLog);
                     _lastSectionApplyLog = applyLog;
                     if (moved == null)
                     {
                         preserved = false;
+                        if (!existing.IsValidObject)
+                            throw new InvalidOperationException("剖面已被刪除且重建失敗：" + applyLog);
                         TagLink(existing, cid, "Section");
                         return existing;
                     }
-                    if (moved.Id != existing.Id) { SaveSectionStateActual(doc, moved, box, forwardHoriz); return moved; }
+                    if (moved.Id != existingId)
+                    {
+                        // 新視圖：CreateSectionFromBox 已重掛 ES 連結（role Section）；舊視圖的標記隨視圖一起刪除，
+                        // 呼叫端後續（樣式、標記、隱藏他剖面、ES 狀態、Result.SectionViewId）全用這個新視圖。
+                        TagLink(moved, cid, "Section");
+                        SaveSectionStateActual(doc, moved, box, forwardHoriz);
+                        return moved;
+                    }
                     SaveSectionStateActual(doc, existing, box, forwardHoriz); // 2026-09-25 第二輪：存套用後讀回的實際狀態
                 }
                 TagLink(existing, cid, "Section");
@@ -1098,17 +1110,48 @@ namespace RevitMCP.Core
                 if (angErr > 0.05 || upErr > 0.05)
                     throw new InvalidOperationException($"移動/旋轉後方向仍不符（{angErr:F2}°/{upErr:F2}°）");
 
-                // 在實際座標系算區域範圍：意圖 8 角點（世界）→ 實際.Inverse
-                Transform inv = cur.Inverse;
-                double x0 = double.MaxValue, y0 = double.MaxValue, z0 = double.MaxValue, x1 = double.MinValue, y1 = double.MinValue, z1 = double.MinValue;
-                foreach (XYZ w in WorldCorners(intended))
+                // 2026-09-26 第四輪：深度。剖切面＝CropBox 區域 Max.Z（Revit 把剖切面正規化在 viewer 原點，
+                // 無法像新建時那樣把 Max.Z 設在原點前方）→ 意圖深度 [dMin,dMax] 的 dMax≠0 時，先把 viewer 沿視圖
+                // 深度軸再移 dMax，讓剖切面落在意圖前緣；之後在讀回座標系設 Min.Z＝dMin−dMax、Max.Z≈0。
+                // 位移量與正負號一律由「讀回的實際座標系」算（意圖角點經 cur.Inverse 的 Z 上界 − 目前剖切面 Max.Z），不假設方向。
+                double[] ext = LocalExtents(intended, cur);
+                double curCutZ = section.CropBox.Max.Z;
+                double depthShift = ext[5] - curCutZ; // 沿 cur.BasisZ（feet）
+                sb.Append($"深度：意圖區域Z[{CameraMath.FeetToMm(ext[4]):F0},{CameraMath.FeetToMm(ext[5]):F0}]mm 目前剖切面Z={CameraMath.FeetToMm(curCutZ):F0}mm → 沿深度軸移 {CameraMath.FeetToMm(depthShift):F0}mm；");
+                if (Math.Abs(depthShift) > CameraMath.MmToFeet(0.5))
                 {
-                    XYZ l = inv.OfPoint(w);
-                    x0 = Math.Min(x0, l.X); y0 = Math.Min(y0, l.Y); z0 = Math.Min(z0, l.Z);
-                    x1 = Math.Max(x1, l.X); y1 = Math.Max(y1, l.Y); z1 = Math.Max(z1, l.Z);
+                    ElementId viewerId = FindSectionViewerId(doc, section, out string how2);
+                    if (viewerId == null) throw new InvalidOperationException("找不到剖面的 viewer 元素（深度位移）");
+                    ElementTransformUtils.MoveElement(doc, viewerId, Horizontal(cur.BasisZ) * depthShift);
+                    doc.Regenerate();
+                    cur = section.CropBox.Transform;
+                    ext = LocalExtents(intended, cur);
+                    sb.Append($"已沿深度移動（{how2}）讀回 原點({Mm3(cur.Origin)}) 意圖區域Z[{CameraMath.FeetToMm(ext[4]):F0},{CameraMath.FeetToMm(ext[5]):F0}]mm 剖切面Z={CameraMath.FeetToMm(section.CropBox.Max.Z):F0}mm；");
                 }
-                section.CropBox = new BoundingBoxXYZ { Transform = cur, Min = new XYZ(x0, y0, z0), Max = new XYZ(x1, y1, z1) };
+
+                // 在實際座標系算區域範圍：意圖 8 角點（世界）→ 實際.Inverse
+                section.CropBox = new BoundingBoxXYZ { Transform = cur, Min = new XYZ(ext[0], ext[2], ext[4]), Max = new XYZ(ext[1], ext[3], ext[5]) };
+                SetSectionFarClip(section, ext[5] - ext[4], sb);
                 sb.Append(DescribeSectionExtentCheck(doc, section, intended, out double dev));
+                if (dev > SectionExtentToleranceMm)
+                {
+                    // 讀回校正一次：比較意圖與實際在「意圖座標系」的深度上界，差多少就沿意圖深度軸再移多少（正負號來自讀回值）
+                    double[] a = LocalExtents(intended, intended.Transform), r = LocalExtents(section.CropBox, intended.Transform);
+                    double fix = a[5] - r[5];
+                    sb.Append($"深度校正：意圖Z上界−實際={CameraMath.FeetToMm(fix):F1}mm；");
+                    if (Math.Abs(fix) > CameraMath.MmToFeet(0.5))
+                    {
+                        ElementId viewerId = FindSectionViewerId(doc, section, out _);
+                        if (viewerId == null) throw new InvalidOperationException("找不到剖面的 viewer 元素（深度校正）");
+                        ElementTransformUtils.MoveElement(doc, viewerId, Horizontal(intended.Transform.BasisZ) * fix);
+                        doc.Regenerate();
+                        cur = section.CropBox.Transform;
+                        ext = LocalExtents(intended, cur);
+                        section.CropBox = new BoundingBoxXYZ { Transform = cur, Min = new XYZ(ext[0], ext[2], ext[4]), Max = new XYZ(ext[1], ext[3], ext[5]) };
+                        SetSectionFarClip(section, ext[5] - ext[4], sb);
+                        sb.Append(DescribeSectionExtentCheck(doc, section, intended, out dev));
+                    }
+                }
                 if (dev > SectionExtentToleranceMm)
                     throw new InvalidOperationException($"世界範圍偏差 {dev:F1}mm > {SectionExtentToleranceMm}mm");
                 log = sb.ToString();
@@ -1192,6 +1235,35 @@ namespace RevitMCP.Core
         }
 
         private static XYZ Horizontal(XYZ v) => new XYZ(v.X, v.Y, 0);
+
+        /// <summary>框 b 的 8 個世界角點投到座標系 frame 的區域範圍：[minX,maxX,minY,maxY,minZ,maxZ]（feet）。</summary>
+        private static double[] LocalExtents(BoundingBoxXYZ b, Transform frame)
+        {
+            Transform inv = frame.Inverse;
+            double[] r = { double.MaxValue, double.MinValue, double.MaxValue, double.MinValue, double.MaxValue, double.MinValue };
+            foreach (XYZ w in WorldCorners(b))
+            {
+                XYZ l = inv.OfPoint(w);
+                r[0] = Math.Min(r[0], l.X); r[1] = Math.Max(r[1], l.X);
+                r[2] = Math.Min(r[2], l.Y); r[3] = Math.Max(r[3], l.Y);
+                r[4] = Math.Min(r[4], l.Z); r[5] = Math.Max(r[5], l.Z);
+            }
+            return r;
+        }
+
+        /// <summary>2026-09-26 第四輪：移動路徑的遠裁剪偏移＝意圖深度（dMax−dMin）；參數唯讀／被樣板鎖住只記 log。</summary>
+        private static void SetSectionFarClip(ViewSection section, double depthFeet, System.Text.StringBuilder sb)
+        {
+            try
+            {
+                if (!(depthFeet > 1e-6)) return;
+                Parameter p = section.get_Parameter(BuiltInParameter.VIEWER_BOUND_OFFSET_FAR);
+                if (p == null || p.IsReadOnly) { sb.Append("遠裁剪偏移不可寫；"); return; }
+                if (Math.Abs(p.AsDouble() - depthFeet) > CameraMath.MmToFeet(0.5)) p.Set(depthFeet);
+                sb.Append($"遠裁剪偏移={CameraMath.FeetToMm(p.AsDouble()):F0}mm；");
+            }
+            catch (Exception ex) { sb.Append($"遠裁剪偏移設定失敗：{ex.Message}；"); }
+        }
 
         private static string Mm3(XYZ p) => $"{CameraMath.FeetToMm(p.X):F0},{CameraMath.FeetToMm(p.Y):F0},{CameraMath.FeetToMm(p.Z):F0}";
 

@@ -6,6 +6,11 @@
 
 ## 2026-09-26
 
+### 01:54｜MCP 自測第四輪修正（3 項，已編譯、待 MCP 複測；Revit 執行中未部署）
+- **移動路徑的剖面深度偏差（實測 2374 mm）**：剖切面＝CropBox 區域 Max.Z，無法像新建時設在 viewer 原點前方 → 旋轉／移動後，再沿深度軸把 viewer 移到意圖前緣（位移量與正負號由讀回座標系算：意圖角點 Z 上界 − 目前剖切面 Max.Z），區域 Min.Z＝dMin−dMax、Max.Z≈0，遠裁剪偏移＝深度；後檢仍超過 5 mm 時再依讀回值校正一次。
+- **刪除重建後 `InvalidObjectException`，整筆交易回滾**：`GetOrCreateSectionView` 在重建後仍讀已刪除舊剖面的 `.Id`；改為先記下舊 Id、重建後只用新視圖（重掛 ES 連結 role Section、存 ES 狀態，後續樣式／標記／隱藏他剖面／`Result.SectionViewId` 全用新視圖；舊視圖的標記隨視圖刪除）。重建失敗時明確丟錯回滾，不再回傳已刪除物件。重建仍只在剖面不在圖紙上時發生。
+- **圖紙：讀不到圖框線時透視圖壓到左側內框**：圖框幾何偵測不到標題欄線時，四邊內縮改為 max(設定邊界 15 mm, 4 % 圖紙寬)（E1 30×42 約 43 mm），右側標題欄保留帶照舊；偵測得到線時不變。
+
 ### 01:45｜MCP 自測第三輪修正（5 項，已編譯、待 MCP 複測；Revit 執行中未部署）
 - **（回歸）更新既有 Key Plan 剖面時內容跑位**：既有剖面設 CropBox 時 Revit 不採用新 Transform；改為先旋轉／移動剖面 viewer 到新原點與方向，在讀回座標系算範圍，後檢世界範圍（> 5 mm 警告，`Decisions.SectionApplyLog`／`SectionExtentDeviationMm`）；做不到且不在圖紙上才刪除重建（D-037）。
 - **圖框幾何讀到 0 條線**：試三組 Options 取線最多者，GeometryInstance 空時改讀 SymbolGeometry、收實體直線邊，幾何類型統計寫進 `DrawAreaSource`；保留 20 % 退路。
