@@ -22,9 +22,11 @@ namespace RevitMCP.Core
     /// 規則：
     ///   1. 圖框類型：呼叫端指定 → 面板設定（<see cref="CameraManagerSettings.SheetTitleBlockTypeId"/>）→ 專案內最常用 → 第一個圖框類型 → 無圖框。
     ///   2. 可繪區＝圖框實例在圖紙上的外接框向內縮 <see cref="CameraManagerSettings.SheetMarginMm"/>；沒有圖框＝A3 橫式 420×297 mm。
-    ///   3. 只調整視埠「位置」（置中於格子），不改任何視圖比例；透視圖本來就沒有比例，原樣放置。放不進格子只回報 Overflow。
+    ///   3. 2026-09-25 第二輪：可繪區再扣掉圖框標題欄（分析圖框幾何的長直／長橫線；偵測不到＝橫式保留右側 20 %）。
+    ///      透視圖左 55 %；右欄三列高度依內容長寬比分配。本工具的 Key Plan 平面／剖面／等角改為「放得進格子的最細標準比例」
+    ///      （1:20/25/50/75/100/150/200，都放不進再往 1:250… 延伸）；出圖用透視複本等比放大裁剪框填滿格子約 90 %（FOV 不變，讀回驗證）。
     ///   4. 視埠類型：沿用專案既有、會顯示標題的視埠類型（最常用者），不新建。
-    ///   5. 一張視圖只能在一張圖紙上：已在「本相機的圖紙」（ES Role＝Sheet）上的視埠保留原位；在別張圖紙上的回報並略過。
+    ///   5. 一張視圖只能在一張圖紙上：已在「本相機的圖紙」（ES Role＝Sheet）上的視埠重新排版；在別張圖紙上的回報並略過。
     ///      例外（2026-09-25）：透視圖已在別張圖紙上 → 改放出圖用透視複本（見 CameraKeyPlanService.ViewHygiene.cs）。
     ///   6. 相機還沒有 Key Plan 視圖時，先跑一鍵 4 視圖（不並排）。
     /// 單一交易「建立相機圖紙」；呼叫端須在 API context、交易外。
@@ -35,7 +37,7 @@ namespace RevitMCP.Core
         internal const string SheetTransactionName = "建立相機圖紙";
         private const double SheetDefaultWidthMm = 420.0;   // 沒有圖框時的預設可繪區（A3 橫式）
         private const double SheetDefaultHeightMm = 297.0;
-        private const double SheetPerspectiveFraction = 0.6; // 透視圖佔可繪區寬度的比例
+        private const double SheetPerspectiveFraction = 0.55; // 透視圖佔可繪區寬度的比例（2026-09-25 第二輪 0.6→0.55）
         private const double SheetCellGapMm = 6.0;           // 格子之間的間距（留給視埠標題）
 
         internal sealed class SheetViewportInfo
@@ -44,7 +46,7 @@ namespace RevitMCP.Core
             public ElementId ViewId;
             public string ViewName;
             public ElementId ViewportId;
-            public string Status;          // 新放置／保留原位／略過
+            public string Status;          // 新放置／重新排版／略過
             public string Note;
             public double CenterXFeet, CenterYFeet, WidthFeet, HeightFeet;
             public double CellMinX, CellMinY, CellMaxX, CellMaxY;
@@ -309,7 +311,7 @@ namespace RevitMCP.Core
                     }
                     doc.Regenerate();
 
-                    // 3) 可繪區
+                    // 3) 可繪區：圖框外接框內縮邊界，再扣掉圖框的標題欄（2026-09-25 第二輪：右欄壓到標題欄）
                     Element tb = FirstTitleBlockOn(doc, sheet);
                     BoundingBoxXYZ bb = null;
                     try { bb = tb?.get_BoundingBox(sheet); } catch { bb = null; }
@@ -319,6 +321,11 @@ namespace RevitMCP.Core
                         x0 = bb.Min.X + marginFeet; y0 = bb.Min.Y + marginFeet;
                         x1 = bb.Max.X - marginFeet; y1 = bb.Max.Y - marginFeet;
                         res.DrawAreaSource = $"圖框外接框 {CameraMath.FeetToMm(bb.Max.X - bb.Min.X):F0}×{CameraMath.FeetToMm(bb.Max.Y - bb.Min.Y):F0} mm 內縮 {GetSheetMarginMm():0.#} mm";
+                        DetectTitleStrip(tb, sheet, bb, out double? stripLeftX, out double? stripTopY, out string stripLog);
+                        if (stripLeftX.HasValue) x1 = Math.Min(x1, stripLeftX.Value - marginFeet);
+                        if (stripTopY.HasValue) y0 = Math.Max(y0, stripTopY.Value + marginFeet);
+                        res.DrawAreaSource += "；" + stripLog;
+                        Logger.Info("相機圖紙：標題欄判定 " + stripLog);
                     }
                     else
                     {
@@ -338,28 +345,24 @@ namespace RevitMCP.Core
                             ? $"原相機已在圖紙「{camOtherSheetText}」上，改放「{copy.Name}」（方向／裁剪／遠裁剪與原相機同步）"
                             : $"沿用既有出圖複本「{copy.Name}」（已與原相機同步）";
                         res.Warnings.Add(res.PerspectiveNote);
+                        // 2026-09-25 第二輪：複本也要隱藏 A 型標記子類別（樣板控制 V/G 時改在樣板隱藏）。
+                        Category markerSub = FindProjectMarkerSubcategory(doc);
+                        if (markerSub != null)
+                        {
+                            HideAMarkersInPerspectiveViews(doc, markerSub, out int hf, out string hl);
+                            if (hf > 0) res.Warnings.Add("透視圖隱藏相機標記子類別失敗 " + hf + " 張" + hl);
+                        }
                     }
                     else res.PerspectivePlaced = "原相機";
                     res.PerspectiveViewId = items[0].view?.Id;
 
-                    // 4) 格子：左 60% 透視；右欄三等分（上→下：平面、剖面、等角）
-                    double gap = CameraMath.MmToFeet(SheetCellGapMm);
-                    double splitX = x0 + (x1 - x0) * SheetPerspectiveFraction;
-                    double rowH = (y1 - y0) / 3.0;
-                    var cells = new Dictionary<string, double[]>
-                    {
-                        ["Perspective"] = new[] { x0, y0, splitX - gap / 2, y1 },
-                        ["Plan"] = new[] { splitX + gap / 2, y1 - rowH + gap / 2, x1, y1 },
-                        ["Section"] = new[] { splitX + gap / 2, y1 - 2 * rowH + gap / 2, x1, y1 - rowH - gap / 2 },
-                        ["Iso"] = new[] { splitX + gap / 2, y0, x1, y1 - 2 * rowH - gap / 2 }
-                    };
-
+                    // 4) 先確保四個視埠都在圖紙上（新放置者暫放可繪區中心），再依內容大小排版。
                     bool retriedVpType = false;
+                    var placedVps = new Dictionary<string, Viewport>();
+                    XYZ tmpCenter = new XYZ((x0 + x1) / 2, (y0 + y1) / 2, 0);
                     foreach (var (role, view) in items)
                     {
                         var info = new SheetViewportInfo { Role = role, ViewId = view?.Id, ViewName = view?.Name };
-                        double[] c = cells[role];
-                        info.CellMinX = c[0]; info.CellMinY = c[1]; info.CellMaxX = c[2]; info.CellMaxY = c[3];
                         res.Viewports.Add(info);
                         if (view == null) { info.Status = "略過"; info.Note = "找不到視圖"; continue; }
 
@@ -367,9 +370,9 @@ namespace RevitMCP.Core
                         {
                             if (existing.SheetId == sheet.Id)
                             {
-                                info.Status = "保留原位";
+                                info.Status = "重新排版";
                                 info.ViewportId = existing.Id;
-                                FillViewportGeometry(doc, existing, info);
+                                placedVps[role] = existing;
                                 continue;
                             }
                             ViewSheet other = doc.GetElement(existing.SheetId) as ViewSheet;
@@ -386,8 +389,7 @@ namespace RevitMCP.Core
                             continue;
                         }
 
-                        XYZ center = new XYZ((c[0] + c[2]) / 2, (c[1] + c[3]) / 2, 0);
-                        Viewport vp = Viewport.Create(doc, sheet.Id, view.Id, center);
+                        Viewport vp = Viewport.Create(doc, sheet.Id, view.Id, tmpCenter);
                         if (vpType == ElementId.InvalidElementId && !retriedVpType)
                         {
                             // 事前找不到顯示標題的類型 → 用這個新視埠的 GetValidTypes 再挑一次（只試一次）。
@@ -407,12 +409,18 @@ namespace RevitMCP.Core
                             }
                             catch (Exception ex) { Logger.Error("相機圖紙：套用視埠類型失敗", ex); }
                         }
-                        doc.Regenerate();
-                        try { vp.SetBoxCenter(center); } catch (Exception ex) { Logger.Error("相機圖紙：視埠置中失敗", ex); }
                         info.Status = "新放置";
                         info.ViewportId = vp.Id;
-                        FillViewportGeometry(doc, vp, info);
+                        placedVps[role] = vp;
                     }
+                    doc.Regenerate();
+
+                    // 5) 排版（2026-09-25 第二輪）：透視圖左 55%；右欄三列高度依內容長寬比分配；
+                    //    Key Plan 平面／剖面／等角挑「放得進格子的最細標準比例」；透視複本等比放大裁剪框填滿格子約 90%。
+                    LayoutSheetViewports(doc, items, placedVps, res, x0, y0, x1, y1);
+
+                    foreach (SheetViewportInfo info in res.Viewports)
+                        if (info.ViewportId != null && doc.GetElement(info.ViewportId) is Viewport vpx) FillViewportGeometry(doc, vpx, info);
 
                     t.Commit();
                 }
@@ -432,10 +440,238 @@ namespace RevitMCP.Core
             res.SheetNumber = sheet.SheetNumber;
             res.SheetName = sheet.Name;
             foreach (SheetViewportInfo v in res.Viewports.Where(v => v.Overflow))
-                res.Warnings.Add($"{v.ViewName}：視埠 {CameraMath.FeetToMm(v.WidthFeet):F0}×{CameraMath.FeetToMm(v.HeightFeet):F0} mm 超出格子 {CameraMath.FeetToMm(v.CellMaxX - v.CellMinX):F0}×{CameraMath.FeetToMm(v.CellMaxY - v.CellMinY):F0} mm（比例未變更，請手動調整）");
+                res.Warnings.Add($"{v.ViewName}：視埠 {CameraMath.FeetToMm(v.WidthFeet):F0}×{CameraMath.FeetToMm(v.HeightFeet):F0} mm 超出格子 {CameraMath.FeetToMm(v.CellMaxX - v.CellMinX):F0}×{CameraMath.FeetToMm(v.CellMaxY - v.CellMinY):F0} mm（已自動挑比例／縮放後仍超出，請手動調整）");
             Logger.Info($"相機圖紙：「{camName}」→ {res.SheetNumber} {res.SheetName}（{(res.Created ? "新建" : "更新")}；圖框 {res.TitleBlockName ?? "無"}［{res.TitleBlockSource}］；{res.DrawAreaSource}）；" +
                         string.Join("；", res.Viewports.Select(v => $"{v.Role}={v.Status}{(v.Overflow ? "(超出)" : "")}{(v.Note != null ? "：" + v.Note : "")}")));
             return res;
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // 2026-09-25 第二輪（MCP 自測圖紙）：標題欄判定＋依內容排版
+        // ══════════════════════════════════════════════════════════
+
+        private const double TitleStripFrameGapMm = 25.0;       // 離外框線 ≤ 25 mm 的長線視為圖框（內框），不是標題欄線
+        private const double SheetFillRatio = 0.90;             // 透視圖填滿格子的比例
+        private const double SheetFitRatio = 0.95;              // Key Plan 視圖挑比例時的格子可用比例（留標題空間）
+        private static readonly int[] KeyPlanStandardScales = { 20, 25, 50, 75, 100, 150, 200 };
+        private static readonly int[] KeyPlanExtendedScales = { 250, 300, 400, 500, 750, 1000 };
+
+        private static double GetSheetReservedStripFraction()
+        {
+            double f = 0.20;
+            try { f = ConfigManager.Instance.Settings.CameraManager.SheetReservedStripFraction; } catch { }
+            return (double.IsNaN(f) || f < 0 || f > 0.5) ? 0.20 : f;
+        }
+
+        /// <summary>
+        /// 分析圖框實例在圖紙視圖中的幾何找標題欄：
+        ///   右側標題欄＝長度 ≥ 60% 圖框高的垂直線，位在圖框右側 40% 內、且不是最右側的外框／內框線（離最右長直線 &gt; 25 mm）→ 取最左者；
+        ///   下方標題欄＝長度 ≥ 60% 圖框寬的水平線，位在圖框下方 35% 內、且離最下長橫線 &gt; 25 mm → 取最高者。
+        /// 兩者都找不到、圖紙為橫式 → 保留右側 <see cref="CameraManagerSettings.SheetReservedStripFraction"/>（預設 20 %）。
+        /// </summary>
+        private static void DetectTitleStrip(Element tb, ViewSheet sheet, BoundingBoxXYZ bb, out double? stripLeftX, out double? stripTopY, out string log)
+        {
+            stripLeftX = null; stripTopY = null;
+            double W = bb.Max.X - bb.Min.X, H = bb.Max.Y - bb.Min.Y;
+            var lines = new List<(XYZ a, XYZ b)>();
+            try
+            {
+                GeometryElement ge = tb.get_Geometry(new Options { View = sheet });
+                CollectSheetLines(ge, lines, 0);
+            }
+            catch (Exception ex) { Logger.Error("相機圖紙：讀取圖框幾何失敗（改用保留比例）", ex); }
+
+            double tolDir = 1e-3, frameGap = CameraMath.MmToFeet(TitleStripFrameGapMm);
+            var vert = lines.Where(l => Math.Abs(l.a.X - l.b.X) < tolDir && Math.Abs(l.a.Y - l.b.Y) >= 0.6 * H).Select(l => (l.a.X + l.b.X) / 2).ToList();
+            var horz = lines.Where(l => Math.Abs(l.a.Y - l.b.Y) < tolDir && Math.Abs(l.a.X - l.b.X) >= 0.6 * W).Select(l => (l.a.Y + l.b.Y) / 2).ToList();
+            string found = $"圖框幾何線 {lines.Count} 條（長直 {vert.Count}、長橫 {horz.Count}）";
+            if (vert.Count > 0)
+            {
+                double rightFrame = vert.Max();
+                var cand = vert.Where(x => x < rightFrame - frameGap && x >= bb.Min.X + 0.6 * W).ToList();
+                if (cand.Count > 0) stripLeftX = cand.Min();
+            }
+            if (horz.Count > 0)
+            {
+                double bottomFrame = horz.Min();
+                var cand = horz.Where(y => y > bottomFrame + frameGap && y <= bb.Min.Y + 0.35 * H).ToList();
+                if (cand.Count > 0) stripTopY = cand.Max();
+            }
+            if (stripLeftX.HasValue || stripTopY.HasValue)
+            {
+                log = found + "；標題欄＝" +
+                      (stripLeftX.HasValue ? $"右側（x≥{CameraMath.FeetToMm(stripLeftX.Value - bb.Min.X):F0}mm，寬 {CameraMath.FeetToMm(bb.Max.X - stripLeftX.Value):F0}mm）" : "") +
+                      (stripTopY.HasValue ? $"下方（y≤{CameraMath.FeetToMm(stripTopY.Value - bb.Min.Y):F0}mm）" : "");
+                return;
+            }
+            if (W > H)
+            {
+                double f = GetSheetReservedStripFraction();
+                stripLeftX = bb.Max.X - f * W;
+                log = found + $"；未偵測到標題欄線 → 橫式圖紙保留右側 {f * 100:F0}%（{CameraMath.FeetToMm(f * W):F0}mm，可在設定 SheetReservedStripFraction 調整）";
+                return;
+            }
+            log = found + "；未偵測到標題欄線（直式圖紙不保留）";
+        }
+
+        private static void CollectSheetLines(GeometryElement ge, List<(XYZ a, XYZ b)> lines, int depth)
+        {
+            if (ge == null || depth > 4) return;
+            foreach (GeometryObject go in ge)
+            {
+                if (go is Line ln && ln.IsBound) lines.Add((ln.GetEndPoint(0), ln.GetEndPoint(1)));
+                else if (go is PolyLine pl)
+                {
+                    IList<XYZ> pts = pl.GetCoordinates();
+                    for (int i = 0; i + 1 < pts.Count; i++) lines.Add((pts[i], pts[i + 1]));
+                }
+                else if (go is GeometryInstance gi) CollectSheetLines(gi.GetInstanceGeometry(), lines, depth + 1);
+            }
+        }
+
+        private static (double w, double h) ViewportSize(Viewport vp)
+        {
+            Outline o = vp.GetBoxOutline();
+            return (o.MaximumPoint.X - o.MinimumPoint.X, o.MaximumPoint.Y - o.MinimumPoint.Y);
+        }
+
+        /// <summary>依內容排版（須在交易內，viewport 已建立且 Regenerate 過）。</summary>
+        private static void LayoutSheetViewports(Document doc, List<(string role, View view)> items, Dictionary<string, Viewport> vps,
+            SheetResult res, double x0, double y0, double x1, double y1)
+        {
+            double gap = CameraMath.MmToFeet(SheetCellGapMm);
+            var rightRoles = new[] { "Plan", "Section", "Iso" }.Where(r => vps.ContainsKey(r)).ToList();
+            bool hasPersp = vps.ContainsKey("Perspective");
+            double splitX = hasPersp && rightRoles.Count > 0 ? x0 + (x1 - x0) * SheetPerspectiveFraction
+                          : hasPersp ? x1 + gap / 2 : x0 - gap / 2;
+            var cells = new Dictionary<string, double[]>();
+            if (hasPersp) cells["Perspective"] = new[] { x0, y0, splitX - gap / 2, y1 };
+
+            // 右欄：各視圖「模型內容」長寬比（比例無關：外框尺寸 × 目前比例），列高依長寬比分配。
+            double rx0 = splitX + gap / 2, rw = x1 - rx0;
+            var model = new Dictionary<string, (double w, double h, int scale)>();
+            foreach (string r in rightRoles)
+            {
+                View v = doc.GetElement(vps[r].ViewId) as View;
+                int sc = 1;
+                try { sc = Math.Max(1, v.Scale); } catch { }
+                var (w, h) = ViewportSize(vps[r]);
+                model[r] = (w * sc, h * sc, sc);
+            }
+            if (rightRoles.Count > 0)
+            {
+                double avail = (y1 - y0) - gap * (rightRoles.Count - 1);
+                var weight = rightRoles.ToDictionary(r => r, r =>
+                {
+                    var m = model[r];
+                    double a = m.w > 1e-9 ? m.h / m.w : 1.0;
+                    return Math.Max(0.25, Math.Min(4.0, a));
+                });
+                double sum = weight.Values.Sum();
+                double top = y1;
+                foreach (string r in rightRoles)
+                {
+                    double hRow = avail * weight[r] / sum;
+                    cells[r] = new[] { rx0, top - hRow, x1, top };
+                    top -= hRow + gap;
+                }
+            }
+
+            foreach (var (role, view) in items)
+            {
+                SheetViewportInfo info = res.Viewports.FirstOrDefault(i => i.Role == role);
+                if (info == null || !vps.TryGetValue(role, out Viewport vp) || !cells.TryGetValue(role, out double[] c)) continue;
+                info.CellMinX = c[0]; info.CellMinY = c[1]; info.CellMaxX = c[2]; info.CellMaxY = c[3];
+                double cw = c[2] - c[0], ch = c[3] - c[1];
+                try
+                {
+                    if (role == "Perspective")
+                    {
+                        if (view is View3D p3 && IsSheetPerspectiveCopy(p3))
+                        {
+                            var (w, h) = ViewportSize(vp);
+                            if (w > 1e-9 && h > 1e-9)
+                            {
+                                double k = SheetFillRatio * Math.Min(cw / w, ch / h);
+                                info.Note = EnlargePerspectiveCrop(doc, p3, k);
+                            }
+                        }
+                        else info.Note = "原相機（不是出圖複本）：不改裁剪框大小";
+                    }
+                    else
+                    {
+                        var m = model[role];
+                        int pick = 0;
+                        foreach (int s in KeyPlanStandardScales.Concat(KeyPlanExtendedScales))
+                            if (m.w / s <= cw * SheetFitRatio && m.h / s <= ch * SheetFitRatio) { pick = s; break; }
+                        if (pick == 0) pick = KeyPlanExtendedScales.Last();
+                        if (pick != m.scale)
+                        {
+                            try { view.Scale = pick; info.Note = $"比例 1:{m.scale} → 1:{pick}"; }
+                            catch (Exception ex) { info.Note = $"改比例 1:{pick} 失敗（{ex.Message}；可能是視圖樣板控制比例）"; res.Warnings.Add($"{view.Name}：{info.Note}"); }
+                        }
+                        else info.Note = $"比例 1:{pick}（不變）";
+                        if (pick > KeyPlanStandardScales.Last()) res.Warnings.Add($"{view.Name}：標準比例 1:20–1:200 都放不進格子，改用 1:{pick}");
+                    }
+                }
+                catch (Exception ex) { Logger.Error($"相機圖紙：{role} 尺寸調整失敗（照原尺寸放置）", ex); }
+            }
+            doc.Regenerate();
+            foreach (var kv in vps)
+            {
+                if (!cells.TryGetValue(kv.Key, out double[] c)) continue;
+                try { kv.Value.SetBoxCenter(new XYZ((c[0] + c[2]) / 2, (c[1] + c[3]) / 2, 0)); }
+                catch (Exception ex) { Logger.Error("相機圖紙：視埠置中失敗", ex); }
+            }
+            doc.Regenerate();
+        }
+
+        /// <summary>
+        /// 出圖用透視複本：裁剪框等比放大 k 倍讓視埠變大，視野角不變。依序嘗試：
+        ///   ① X/Y/Z 一起乘 k（以裁剪框座標原點＝眼睛為中心；角錐相似 → 角度不變）；② 只乘 X/Y。
+        /// 每次套用後 Regenerate、以 ComputePerspectiveFov 讀回比對水平／垂直 FOV 與四個邊界角（容許 0.2°），
+        /// 都不符 → 還原原裁剪框並回報。回傳說明文字。須在交易內。
+        /// </summary>
+        private static string EnlargePerspectiveCrop(Document doc, View3D view, double k)
+        {
+            if (!(k > 0) || Math.Abs(k - 1.0) < 0.01) return $"透視複本裁剪框不需縮放（k={k:F3}）";
+            CameraMath.PerspectiveFov f0 = CameraMath.ComputePerspectiveFov(view);
+            BoundingBoxXYZ orig = view.CropBox;
+            string Fov(CameraMath.PerspectiveFov f) => $"h={f.HFovDeg:F2}° v={f.VFovDeg:F2}° L={f.LeftDeg:F2} R={f.RightDeg:F2} D={f.DownDeg:F2} U={f.UpDeg:F2}";
+            bool Same(CameraMath.PerspectiveFov a, CameraMath.PerspectiveFov b)
+            {
+                bool Eq(double? x, double? y) => x.HasValue && y.HasValue && Math.Abs(x.Value - y.Value) <= 0.2;
+                return Eq(a.HFovDeg, b.HFovDeg) && Eq(a.VFovDeg, b.VFovDeg) && Eq(a.LeftDeg, b.LeftDeg) && Eq(a.RightDeg, b.RightDeg)
+                       && Eq(a.DownDeg, b.DownDeg) && Eq(a.UpDeg, b.UpDeg);
+            }
+            if (!f0.HFovDeg.HasValue) return "讀不到透視複本 FOV，不縮放裁剪框";
+            var variants = new List<(string name, BoundingBoxXYZ box)>
+            {
+                ("XYZ×k", new BoundingBoxXYZ { Transform = orig.Transform, Min = orig.Min * k, Max = orig.Max * k }),
+                ("XY×k", new BoundingBoxXYZ { Transform = orig.Transform, Min = new XYZ(orig.Min.X * k, orig.Min.Y * k, orig.Min.Z), Max = new XYZ(orig.Max.X * k, orig.Max.Y * k, orig.Max.Z) })
+            };
+            var tried = new List<string>();
+            foreach (var (name, box) in variants)
+            {
+                try
+                {
+                    view.CropBox = box;
+                    doc.Regenerate();
+                    CameraMath.PerspectiveFov f1 = CameraMath.ComputePerspectiveFov(view);
+                    if (Same(f0, f1))
+                    {
+                        string msg = $"透視複本裁剪框 {name} k={k:F3}，FOV 不變（{Fov(f1)}）";
+                        Logger.Info("相機圖紙：" + msg);
+                        return msg;
+                    }
+                    tried.Add($"{name} → {Fov(f1)}");
+                }
+                catch (Exception ex) { tried.Add($"{name} 失敗：{ex.Message}"); }
+            }
+            try { view.CropBox = orig; doc.Regenerate(); } catch (Exception ex) { Logger.Error("相機圖紙：還原透視複本裁剪框失敗", ex); }
+            string fail = $"透視複本放大裁剪框後 FOV 會改變，已還原（原 {Fov(f0)}；試過 {string.Join("；", tried)}）";
+            Logger.Error("相機圖紙：" + fail);
+            return fail;
         }
 
         private static double GetSheetMarginMm()

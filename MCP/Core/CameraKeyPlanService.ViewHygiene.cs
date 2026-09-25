@@ -365,6 +365,15 @@ namespace RevitMCP.Core
         {
             if (camera == null || copy == null) return null;
             var notes = new List<string>();
+            // 2026-09-25 第二輪：複本在圖紙上時，裁剪框曾被等比放大填滿格子 → 同步前記下視埠大小，同步後等比縮放回相同外框（FOV 不變）。
+            Viewport copyVp = null;
+            double vw0 = 0, vh0 = 0;
+            try
+            {
+                copyVp = new FilteredElementCollector(copy.Document).OfClass(typeof(Viewport)).Cast<Viewport>().FirstOrDefault(v => v.ViewId == copy.Id);
+                if (copyVp != null) (vw0, vh0) = ViewportSize(copyVp);
+            }
+            catch { copyVp = null; }
             try { copy.SetOrientation(camera.GetOrientation()); notes.Add("方向"); }
             catch (Exception ex) { Logger.Error($"相機圖紙：透視複本「{copy.Name}」同步方向失敗", ex); }
             try
@@ -387,6 +396,20 @@ namespace RevitMCP.Core
                 notes.Add("遠裁剪");
             }
             catch (Exception ex) { Logger.Error($"相機圖紙：透視複本「{copy.Name}」同步遠裁剪失敗", ex); }
+            if (copyVp != null && vw0 > 1e-9 && vh0 > 1e-9)
+            {
+                try
+                {
+                    copy.Document.Regenerate();
+                    var (vw1, vh1) = ViewportSize(copyVp);
+                    if (vw1 > 1e-9 && vh1 > 1e-9)
+                    {
+                        double k = Math.Min(vw0 / vw1, vh0 / vh1);
+                        if (Math.Abs(k - 1.0) > 0.01) notes.Add("圖紙大小（" + EnlargePerspectiveCrop(copy.Document, copy, k) + "）");
+                    }
+                }
+                catch (Exception ex) { Logger.Error($"相機圖紙：透視複本「{copy.Name}」維持圖紙上大小失敗", ex); }
+            }
             return string.Join("／", notes);
         }
     }

@@ -137,6 +137,70 @@ namespace RevitMCP.Core
             public double BaseZ, TopZ;
             public List<List<XYZ>> Loops;
             public double Dist; // 眼睛到 [底, 頂] 的垂直距離（在範圍內＝0）
+            public double HorizDist; // 最近房間 fallback：眼睛 XY 到房間邊界的水平距離
+        }
+
+        private const double EyeRoomNearestXYToleranceMm = 1500.0;
+
+        private static double DistPointToLoops(List<List<XYZ>> loops, double x, double y)
+        {
+            double best = double.MaxValue;
+            foreach (List<XYZ> pts in loops)
+            {
+                int n = pts.Count;
+                for (int i = 0; i < n; i++)
+                {
+                    XYZ a = pts[i], b = pts[(i + 1) % n];
+                    double dx = b.X - a.X, dy = b.Y - a.Y, len2 = dx * dx + dy * dy;
+                    double t = len2 > 1e-12 ? ((x - a.X) * dx + (y - a.Y) * dy) / len2 : 0.0;
+                    t = Math.Max(0.0, Math.Min(1.0, t));
+                    double px = a.X + t * dx - x, py = a.Y + t * dy - y;
+                    double d = Math.Sqrt(px * px + py * py);
+                    if (d < best) best = d;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>眼睛 XY 不在任何房間內時：水平距離 ≤ 1.5 m、垂直範圍含眼睛（或差 ≤ tolZ）的最近房間。</summary>
+        private static EyeRoomCandidate FindNearestEyeRoom(Document doc, XYZ eye, ElementId phaseId, double tolZ, out string log)
+        {
+            log = "";
+            double tolXY = CameraMath.MmToFeet(EyeRoomNearestXYToleranceMm);
+            EyeRoomCandidate best = null;
+            int scanned = 0;
+            foreach (Room r in new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_Rooms).WhereElementIsNotElementType().OfType<Room>())
+            {
+                try
+                {
+                    if (r.Location == null || !(r.Area > 1e-9)) continue;
+                    if (phaseId != null)
+                    {
+                        ElementId rp = GetRoomPhaseId(r);
+                        if (rp != null && rp != phaseId) continue;
+                    }
+                    BoundingBoxXYZ bb = r.get_BoundingBox(null);
+                    if (bb == null) continue;
+                    if (eye.X < bb.Min.X - tolXY || eye.X > bb.Max.X + tolXY || eye.Y < bb.Min.Y - tolXY || eye.Y > bb.Max.Y + tolXY) continue;
+                    double baseZ = (r.Level?.ProjectElevation ?? bb.Min.Z) + r.BaseOffset;
+                    double topZ = baseZ + r.UnboundedHeight;
+                    if (!(topZ > baseZ + 1e-6)) topZ = bb.Max.Z;
+                    double dz = eye.Z < baseZ ? baseZ - eye.Z : (eye.Z > topZ ? eye.Z - topZ : 0.0);
+                    if (dz > tolZ) continue;
+                    List<List<XYZ>> loops = GetRoomLoopsXY(r);
+                    if (loops.Count == 0) continue;
+                    scanned++;
+                    double dxy = DistPointToLoops(loops, eye.X, eye.Y);
+                    if (dxy > tolXY) continue;
+                    // 同距離時優先垂直範圍含眼睛者
+                    if (best == null || dxy + dz * 0.001 < best.HorizDist + best.Dist * 0.001)
+                        best = new EyeRoomCandidate { Room = r, BaseZ = baseZ, TopZ = topZ, Loops = loops, Dist = dz, HorizDist = dxy };
+                }
+                catch (Exception ex) { Logger.Error($"相機管理：房間 {r?.Id.GetIdValue()} 最近距離判定失敗（略過）", ex); }
+            }
+            log = best == null ? $"水平 {EyeRoomNearestXYToleranceMm:F0}mm 內無符合垂直條件的房間（掃描 {scanned} 間）"
+                               : $"{best.Room.Id.GetIdValue()} d={CameraMath.FeetToMm(best.HorizDist):F0}mm";
+            return best;
         }
 
         private static List<EyeRoomCandidate> CollectEyeRoomCandidates(Document doc, XYZ eye, ElementId phaseId, out int bboxHits)
@@ -204,6 +268,19 @@ namespace RevitMCP.Core
             }
             if (pick == null)
             {
+                // 2026-09-25 第二輪：眼睛 XY 不在任何房間內（相機在未放房間的樓梯間／挑空，或剛好在邊界外）→
+                // 取水平距離（眼睛到房間邊界）≤ 1.5 m、且垂直範圍含眼睛（或差 ≤ 2 m）的最近房間，當室內。
+                EyeRoomCandidate near = FindNearestEyeRoom(doc, eye, phase?.Id, tolFeet, out string nearLog);
+                if (near == null && phase != null) near = FindNearestEyeRoom(doc, eye, null, tolFeet, out nearLog);
+                if (near != null)
+                {
+                    pick = near;
+                    how = $"最近房間 d={CameraMath.FeetToMm(near.HorizDist):F0}mm（水平 ≤ {EyeRoomNearestXYToleranceMm:F0}mm，垂直 d={CameraMath.FeetToMm(near.Dist):F0}mm）";
+                }
+                else if (!string.IsNullOrEmpty(nearLog)) phaseNote += "；最近房間：" + nearLog;
+            }
+            if (pick == null)
+            {
                 rc.Log = $"none ({phaseNote}, eyeZ={CameraMath.FeetToMm(eye.Z):F0}mm, bboxHits={bboxHits}, xyHits={cands.Count}" +
                          (cands.Count > 0 ? $"：{candText}，垂直距離都 > {EyeRoomVerticalToleranceMm:F0}mm" : "") + ")";
                 return rc;
@@ -236,6 +313,12 @@ namespace RevitMCP.Core
                 rc.MinY = rc.Pts.Min(q => q.Y); rc.MaxY = rc.Pts.Max(q => q.Y);
             }
             if (hasBounds) rc.TopZ = bz1;
+            if (pick.HorizDist > 1e-9 && rc.Pts.Count > 0)
+            {
+                // 最近房間 fallback：眼睛在房間外 → Key Plan 範圍需同時含眼睛
+                rc.MinX = Math.Min(rc.MinX, eye.X); rc.MaxX = Math.Max(rc.MaxX, eye.X);
+                rc.MinY = Math.Min(rc.MinY, eye.Y); rc.MaxY = Math.Max(rc.MaxY, eye.Y);
+            }
 
             rc.Log = $"id={room.Id.GetIdValue()} 「{SafeRoomLabel(room)}」 foundBy={how} {phaseNote} footprint={footSrc}[{rc.Pts.Count} pts] " +
                      $"X[{CameraMath.FeetToMm(rc.MinX):F0},{CameraMath.FeetToMm(rc.MaxX):F0}] Y[{CameraMath.FeetToMm(rc.MinY):F0},{CameraMath.FeetToMm(rc.MaxY):F0}]mm " +

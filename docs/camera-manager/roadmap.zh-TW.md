@@ -50,7 +50,20 @@
 - MCP 工具數 218 → 220（`create_camera_sheet`、`camera_version`）。
 - 版面比例（左 60%、右欄三等分）與圖紙邊界 15 mm 是常數／本機設定，沒有 UI；實測後再決定要不要開放。
 
-### MCP 自測第一輪修正　✅ 已編譯、待 MCP 複測（2026-09-25 22:20）
+### MCP 自測第二輪修正　✅ 已編譯、待 MCP 複測（2026-09-25 22:50）
+
+第一輪已由主線 MCP 驗證通過：Scope Box 解除、房間 Level 當樓層、圖紙透視複本、視埠類型挑選。第二輪 6 項全部已改、已編譯；**新 DLL 尚未部署**（Revit 執行中）。
+
+| # | 問題 | 修正 | 複測方式 |
+|---|---|---|---|
+| 1 | 相機在未放房間的區域（Loft Unit 旁），`Room.Log`＝`none (bboxHits=0, xyHits=0)` | 最近房間 fallback：水平 ≤ 1.5 m、垂直含眼睛或 ≤ 2 m（spec §10.2 步驟 3a） | `list_cameras`：該相機 `IndoorOutdoor`＝室內、`Room.Log` 含「最近房間 d=」且 d ≤ 1500 mm |
+| 2 | 16 張透視圖因樣板控制 V/G 無法隱藏「相機標記」 | 改在樣板隱藏子類別（D-033） | `run_camera_keyplan(markerMode="A")` 的 `AMarkerLog` 含「改在視圖樣板隱藏：「…」」、失敗 0；`capture_view_image`（該透視圖與 `…-Key Plan 圖紙`）看不到相機體與扇形 |
+| 3 | 圖紙透視複本看得到扇形 | GraphicsStyle 取得＋讀回驗證 | `AMarkerLog`「子類別樣式 gs=<正數>，不符 0」；複本截圖無紅色扇形 |
+| 4 | `markerMode=B` 留著 A 實例／扇形 | 一鍵 4 視圖刪除本相機 A 標記 | 先 `markerMode="A"` 再 `markerMode="B"`：`AMarkerLog`「已刪除本相機 A 實例／扇形 2 個」、三張視圖 `TaggedElements` 無 `MarkerA`／`MarkerAFan` |
+| 5 | 第二次跑同一相機 `SectionPreserved=true` | ES 存讀回值、容許 5 mm／0.5° | 同一相機連跑兩次 `run_camera_keyplan`：都 `SectionPreserved=false`；手動移剖面後再跑＝true 且 log 有兩組值 |
+| 6 | 圖紙壓標題欄、透視圖太小、平面超出 | 扣標題欄、55 % 版面、列高依內容、Key Plan 自動比例、透視複本等比放大（D-034） | `create_camera_sheet`（G002 那台）：`DrawAreaSource` 有標題欄判定、右緣在標題欄線左側；透視視埠約佔格子 90 %、`Note` 寫「FOV 不變」；平面 `Note` 有比例變更；四個視埠 `Overflow=false`；截圖檢查 |
+
+### MCP 自測第一輪修正　✅ 已由 MCP 複測（2026-09-25 22:20）
 
 主線以 MCP 在 Revit 2024（公開範例 Snowdon Towers）自測後回報 6 項，全部已改、已編譯；**新 DLL 尚未部署**（Revit 執行中），以下皆「待 MCP 複測」。
 
@@ -164,6 +177,18 @@
 | 出圖用透視複本的同步（方向／裁剪框／遠裁剪）與平面上多出的相機圖示 | 待複測 |
 | 視埠類型候選聯集後是否挑到有標題的類型 | 看 `ViewportTypeLog` 的「實際使用」 |
 | 大模型（數百房間）下每次幾何計算都跑房間搜尋的效能 | 未實測 |
+
+### 2026-09-25 22:50 MCP 自測第二輪修正（待 MCP 複測）
+
+| 項目 | 備註 |
+|---|---|
+| 最近房間 fallback 會不會把真正在室外（陽台外 1 m）的相機判成室內 | 1.5 m 水平容差是假設值；待實例驗證 |
+| 在視圖樣板上隱藏子類別是否被 Revit 接受（`CanCategoryBeHidden` 對樣板的回傳） | log 會列「樣板也不可隱藏」 |
+| DirectShape 幾何的 `GraphicsStyleId` 讀回是否等於子類別樣式 | `AMarkerLog` 會列不符數 |
+| 剖面 CropBox 套用後 Revit 實際調整了多少（原點位移） | log「套用後原點被 Revit 調整 N mm」 |
+| 標題欄偵測（長直線啟發式）對 Snowdon 以外圖框的準確度 | 見 `DrawAreaSource` |
+| 透視複本裁剪框放大：「X/Y/Z×k」或「X/Y×k」哪個能維持 FOV | 見透視視埠 `Note`；兩者都不行會還原並警告 |
+| 改 Key Plan 視圖比例時是否被樣板擋住 | 列警告 |
 
 ## 已知限制（非本功能缺陷）
 

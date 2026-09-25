@@ -1114,9 +1114,9 @@ namespace RevitMCP.UI
                         else
                         {
                             int placed = r.Viewports.Count(v => v.Status == "新放置");
-                            int kept = r.Viewports.Count(v => v.Status == "保留原位");
+                            int kept = r.Viewports.Count(v => v.Status == "重新排版");
                             int skipped = r.Viewports.Count(v => v.Status == "略過");
-                            msg = $"{(r.Created ? "已建立" : "已更新")}圖紙 {r.SheetNumber} {r.SheetName}（圖框：{r.TitleBlockName ?? "無"}；新放置 {placed}、保留 {kept}" +
+                            msg = $"{(r.Created ? "已建立" : "已更新")}圖紙 {r.SheetNumber} {r.SheetName}（圖框：{r.TitleBlockName ?? "無"}；新放置 {placed}、重新排版 {kept}" +
                                   (skipped > 0 ? $"、略過 {skipped}" : "") + "）" + (r.RanFourViews ? "；已先建立 Key Plan" : "") +
                                   (r.Warnings.Count > 0 ? "。注意：" + string.Join("；", r.Warnings) : "。");
                             try { uiApp.ActiveUIDocument.RequestViewChange(doc.GetElement(r.SheetId) as View); }

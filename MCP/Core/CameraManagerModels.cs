@@ -564,5 +564,7 @@ namespace RevitMCP.Core
         public long SheetTitleBlockTypeId { get; set; } = 0;
         /// <summary>2026-09-25 Wave 3：一鍵出圖紙時，圖框外接框向內留的邊界（mm）。</summary>
         public double SheetMarginMm { get; set; } = 15.0;
+        /// <summary>2026-09-25 第二輪：一鍵出圖紙偵測不到圖框標題欄線時，橫式圖紙右側保留給標題欄的寬度比例（0–0.5，預設 0.20）。</summary>
+        public double SheetReservedStripFraction { get; set; } = 0.20;
     }
 }

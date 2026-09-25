@@ -353,8 +353,7 @@ namespace RevitMCP.Core
             if (sym == null) return "族群未載入，略過";
             if (!sym.IsActive) { sym.Activate(); doc.Regenerate(); }
             Category sub = GetOrCreateProjectMarkerSubcategory(doc);
-            ElementId gsId = ElementId.InvalidElementId;
-            try { gsId = sub?.GetGraphicsStyle(GraphicsStyleType.Projection)?.Id ?? ElementId.InvalidElementId; } catch { }
+            ElementId gsId = ResolveMarkerGraphicsStyleId(doc, sub);
             ElementId matId = GetOrCreateMarkerMaterial(doc);
 
             var instByCam = new Dictionary<string, List<FamilyInstance>>(StringComparer.Ordinal);
@@ -374,7 +373,8 @@ namespace RevitMCP.Core
                 }
             }
 
-            int placed = 0, moved = 0, same = 0, dupDeleted = 0, fans = 0, failed = 0;
+            int placed = 0, moved = 0, same = 0, dupDeleted = 0, fans = 0, failed = 0, fanStyleBad = 0;
+            string fanStyleSample = null;
             foreach (var (cam, cp) in cams)
             {
                 string cid = cam.UniqueId;
@@ -427,6 +427,8 @@ namespace RevitMCP.Core
                         fan.SetShape(new List<GeometryObject> { solid });
                         try { fan.Pinned = true; } catch { }
                         fans++;
+                        if (!VerifyFanGraphicsStyle(fan, gsId, out string fanStyleLog)) fanStyleBad++;
+                        if (fanStyleLog != null && fanStyleSample == null) fanStyleSample = fanStyleLog;
                     }
                 }
                 catch (Exception ex)
@@ -436,8 +438,9 @@ namespace RevitMCP.Core
                 }
             }
 
-            int hidden = HideAMarkersInPerspectiveViews(doc, sub, out int hideFail);
-            return $"A 標記 放置 {placed}、移動/旋轉 {moved}、不變 {same}、扇形 {fans}、刪除重複 {dupDeleted}、失敗 {failed}；透視圖隱藏子類別 新增 {hidden} 張（失敗 {hideFail}）";
+            int hidden = HideAMarkersInPerspectiveViews(doc, sub, out int hideFail, out string hideLog);
+            return $"A 標記 放置 {placed}、移動/旋轉 {moved}、不變 {same}、扇形 {fans}（子類別樣式 gs={gsId.GetIdValue()}，不符 {fanStyleBad}{(fanStyleSample != null ? "：" + fanStyleSample : "")}）、刪除重複 {dupDeleted}、失敗 {failed}；" +
+                   $"透視圖隱藏子類別 新增 {hidden} 張（失敗 {hideFail}）{hideLog}";
         }
 
         private static void SetParamSafe(Element e, string name, double v)
@@ -505,26 +508,100 @@ namespace RevitMCP.Core
             }
         }
 
-        /// <summary>所有透視圖隱藏一般模型子類別「相機標記」（相機永遠看不到標記）。已隱藏者不動；視圖樣板控制 V/G 等失敗只記 log。</summary>
-        private static int HideAMarkersInPerspectiveViews(Document doc, Category sub, out int failed)
+        /// <summary>
+        /// 所有透視圖（含出圖用透視複本）隱藏一般模型子類別「相機標記」（相機永遠看不到標記）。已隱藏者不動。
+        /// 2026-09-25 第二輪（MCP 自測：16 張透視圖「不可隱藏」＝視圖樣板控制 V/G）：透視圖套了樣板、且視圖本身
+        /// 不能隱藏時，改在「那個樣板」上隱藏這個子類別（只動本工具的「相機標記」子類別；套同一樣板的其他 3D 視圖
+        /// 也會一併隱藏它，正是想要的）。樣板名稱記 log。須在交易內。
+        /// </summary>
+        internal static int HideAMarkersInPerspectiveViews(Document doc, Category sub, out int failed, out string log)
         {
             failed = 0;
+            log = "";
             if (sub == null) return 0;
             int n = 0;
             var failNames = new List<string>();
+            var templatesHidden = new List<string>();
+            var templatesDone = new HashSet<long>();
             foreach (View3D v in new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>().Where(v => !v.IsTemplate && v.IsPerspective))
             {
                 try
                 {
-                    if (!v.CanCategoryBeHidden(sub.Id)) { failed++; failNames.Add(v.Name + "(不可隱藏)"); continue; }
+                    View tpl = null;
+                    try { tpl = v.ViewTemplateId != null && v.ViewTemplateId != ElementId.InvalidElementId ? doc.GetElement(v.ViewTemplateId) as View : null; } catch { tpl = null; }
+                    bool viewCan = false;
+                    try { viewCan = v.CanCategoryBeHidden(sub.Id); } catch { viewCan = false; }
+                    if (!viewCan && tpl != null)
+                    {
+                        long tid = tpl.Id.GetIdValue();
+                        if (templatesDone.Contains(tid)) continue;
+                        if (!tpl.CanCategoryBeHidden(sub.Id)) { failed++; failNames.Add($"{v.Name}(樣板「{tpl.Name}」也不可隱藏)"); continue; }
+                        templatesDone.Add(tid);
+                        if (tpl.GetCategoryHidden(sub.Id)) continue;
+                        tpl.SetCategoryHidden(sub.Id, true);
+                        templatesHidden.Add(tpl.Name);
+                        n++;
+                        continue;
+                    }
+                    if (!viewCan) { failed++; failNames.Add(v.Name + "(不可隱藏，無樣板)"); continue; }
                     if (v.GetCategoryHidden(sub.Id)) continue;
                     v.SetCategoryHidden(sub.Id, true);
                     n++;
                 }
                 catch (Exception ex) { failed++; failNames.Add(v.Name + "(" + ex.Message + ")"); }
             }
-            if (failNames.Count > 0) Logger.Error("相機 A 型標記：以下透視圖無法隱藏「相機標記」子類別（可能是視圖樣板控制 V/G）：" + string.Join("、", failNames.Take(10)));
+            if (templatesHidden.Count > 0)
+            {
+                log += "；改在視圖樣板隱藏：" + string.Join("、", templatesHidden.Select(x => "「" + x + "」"));
+                Logger.Info("相機 A 型標記：透視圖由視圖樣板控制 V/G → 在樣板隱藏「相機標記」子類別：" + string.Join("、", templatesHidden));
+            }
+            if (failNames.Count > 0)
+            {
+                log += "；無法隱藏：" + string.Join("、", failNames.Take(10));
+                Logger.Error("相機 A 型標記：以下透視圖無法隱藏「相機標記」子類別：" + string.Join("、", failNames.Take(10)));
+            }
             return n;
+        }
+
+        /// <summary>專案內已有「相機標記」子類別時回傳它（不建立、不需交易）。</summary>
+        internal static Category FindProjectMarkerSubcategory(Document doc)
+        {
+            Category gm = doc == null ? null : Category.GetCategory(doc, BuiltInCategory.OST_GenericModel);
+            if (gm == null) return null;
+            foreach (Category c in gm.SubCategories) if (c.Name == AMarkerSubcategoryName) return c;
+            return null;
+        }
+
+        /// <summary>子類別的投影 GraphicsStyle Id；剛建立的子類別可能要 Regenerate 後才取得到。須在交易內。</summary>
+        private static ElementId ResolveMarkerGraphicsStyleId(Document doc, Category sub)
+        {
+            if (sub == null) return ElementId.InvalidElementId;
+            ElementId id = ElementId.InvalidElementId;
+            try { id = sub.GetGraphicsStyle(GraphicsStyleType.Projection)?.Id ?? ElementId.InvalidElementId; } catch { }
+            if (id == ElementId.InvalidElementId)
+            {
+                try { doc.Regenerate(); id = sub.GetGraphicsStyle(GraphicsStyleType.Projection)?.Id ?? ElementId.InvalidElementId; } catch { }
+                if (id == ElementId.InvalidElementId) Logger.Error("相機 A 型標記：取不到「相機標記」子類別的 GraphicsStyle → 扇形無法歸入子類別（隱藏子類別時扇形仍可見）");
+            }
+            return id;
+        }
+
+        /// <summary>讀回扇形 DirectShape 的幾何，確認每個實體的 GraphicsStyleId＝子類別樣式（隱藏子類別才會一起隱藏）。</summary>
+        private static bool VerifyFanGraphicsStyle(DirectShape fan, ElementId gsId, out string log)
+        {
+            log = null;
+            try
+            {
+                GeometryElement ge = fan.get_Geometry(new Options());
+                if (ge == null) { log = "讀不到扇形幾何"; return false; }
+                var ids = new List<long>();
+                foreach (GeometryObject go in ge)
+                    if (go is Solid so && so.Volume > 0) ids.Add(go.GraphicsStyleId != null ? (long)go.GraphicsStyleId.GetIdValue() : -1L);
+                bool ok = ids.Count > 0 && gsId != ElementId.InvalidElementId && ids.All(x => x == (long)gsId.GetIdValue());
+                if (!ok) log = $"扇形讀回 GraphicsStyleId=[{string.Join(",", ids)}]，預期 {gsId.GetIdValue()}";
+                return ok;
+            }
+            catch (Exception ex) { log = "驗證扇形樣式失敗：" + ex.Message; return false; }
         }
 
         /// <summary>刪除「相機已不存在」的標記（A 實例、A 扇形、總覽／Key Plan 的 B 標記與名稱）。須在交易內。回傳刪除數。</summary>
@@ -561,6 +638,38 @@ namespace RevitMCP.Core
             finally { IsUpdatingMarkers = false; }
             if (n > 0) Logger.Info($"相機標記：清除相機已刪除的標記 {n} 個");
             return n;
+        }
+
+        /// <summary>2026-09-25 第二輪（MCP 自測：markerMode=B 仍留著 A 實例＋扇形）：刪除「這台相機」的 A 實例與扇形。
+        /// 自帶交易（交易名稱同 A 標記更新）；交易外呼叫。回傳刪除數。</summary>
+        internal static int RemoveAMarkersForCamera(Document doc, string cameraUniqueId)
+        {
+            if (doc == null || string.IsNullOrEmpty(cameraUniqueId) || Schema.Lookup(SchemaGuid) == null) return 0;
+            var ids = new List<ElementId>();
+            foreach (Element e in CollectTagged(doc))
+            {
+                if (!TryReadLink(e, out string cid, out string role) || cid != cameraUniqueId || (role != AMarkerRole && role != AFanRole)) continue;
+                ids.Add(e.Id);
+            }
+            if (ids.Count == 0) return 0;
+            IsUpdatingMarkers = true;
+            try
+            {
+                using (Transaction t = TransactionHelper.Begin(doc, AMarkerTransactionName))
+                {
+                    t.Start();
+                    try
+                    {
+                        foreach (DirectShape e in ids.Select(i => doc.GetElement(i)).OfType<DirectShape>()) { try { if (e.Pinned) e.Pinned = false; } catch { } }
+                        doc.Delete(ids);
+                        t.Commit();
+                    }
+                    catch { try { if (t.HasStarted() && !t.HasEnded()) t.RollBack(); } catch { } throw; }
+                }
+            }
+            finally { IsUpdatingMarkers = false; }
+            Logger.Info($"相機 A 型標記：標記型式不含 A → 刪除相機 {cameraUniqueId} 的 A 實例／扇形 {ids.Count} 個");
+            return ids.Count;
         }
 
         /// <summary>⋯ 相機標記改為「B 詳圖」時：刪除所有 A 實例與扇形（族群保留在專案內）。自帶交易。回傳刪除數。</summary>

@@ -155,7 +155,7 @@ namespace RevitMCP.Core
         private const string FieldForwardX = "ForwardX";
         private const string FieldForwardY = "ForwardY";
         private const double SectionMovedOriginToleranceMm = 5.0;
-        private const double SectionMovedAngleToleranceDeg = 2.0;
+        private const double SectionMovedAngleToleranceDeg = 0.5; // 2026-09-25 第二輪：2°→0.5°（狀態改存「套用後讀回」的實際值，不再有系統性誤差）
 
         private static Schema GetOrCreateSectionStateSchema()
         {
@@ -222,6 +222,27 @@ namespace RevitMCP.Core
             }
         }
 
+        /// <summary>2026-09-25 第二輪（誤判「剖面被手動移過」）：CropBox 套用後 Regenerate，讀回 Revit 實際的
+        /// CropBox.Transform（Revit 會正規化剖切面位置；深度範圍外擴也會平移原點）再存 ES——之後的比對兩邊都是讀回值。</summary>
+        private static void SaveSectionStateActual(Document doc, ViewSection section, BoundingBoxXYZ requested, XYZ requestedAxis)
+        {
+            XYZ origin = requested.Transform.Origin, axis = requestedAxis;
+            try
+            {
+                doc.Regenerate();
+                Transform tf = section.CropBox.Transform;
+                XYZ bx = new XYZ(tf.BasisX.X, tf.BasisX.Y, 0);
+                if (bx.GetLength() > 1e-6)
+                {
+                    double dMm = CameraMath.FeetToMm(tf.Origin.DistanceTo(origin));
+                    if (dMm > 0.5) Logger.Info($"相機 Key Plan：剖面「{section.Name}」套用後原點被 Revit 調整 {dMm:F1}mm（存讀回值）");
+                    origin = tf.Origin; axis = bx.Normalize();
+                }
+            }
+            catch (Exception ex) { Logger.Error("相機 Key Plan：讀回剖面 CropBox 失敗，改存要求值", ex); }
+            SaveSectionState(section, origin, axis);
+        }
+
         private static bool TryReadSectionState(Element sectionView, out XYZ origin, out XYZ forwardHoriz)
         {
             origin = null;
@@ -264,9 +285,21 @@ namespace RevitMCP.Core
                 if (curForwardRaw.GetLength() < 1e-6) return false; // 退化情形，無法判斷，當作沒動過
                 XYZ curForward = curForwardRaw.Normalize();
 
-                bool originMoved = curOrigin.DistanceTo(savedOrigin) > CameraMath.MmToFeet(SectionMovedOriginToleranceMm);
-                bool directionMoved = savedForward.GetLength() > 1e-6 &&
-                    curForward.AngleTo(savedForward) > (SectionMovedAngleToleranceDeg * Math.PI / 180.0);
+                // 2026-09-25 第二輪：同一座標框架（模型座標，皆為 CropBox.Transform 讀回值）比對；
+                // 狀態在「CropBox 套用＋Regenerate 之後」讀回再存（Revit 會把剖切面正規化、深度外擴會平移原點），
+                // 所以沒人動過時兩者應完全一致。不一致時兩組值都記 log。
+                double dMm = CameraMath.FeetToMm(curOrigin.DistanceTo(savedOrigin));
+                double angDeg = savedForward.GetLength() > 1e-6 ? curForward.AngleTo(savedForward.Normalize()) * 180.0 / Math.PI : 0.0;
+                bool originMoved = dMm > SectionMovedOriginToleranceMm;
+                bool directionMoved = angDeg > SectionMovedAngleToleranceDeg;
+                if (originMoved || directionMoved)
+                {
+                    XYZ n = tf.BasisZ;
+                    double normalMm = n != null && n.GetLength() > 1e-6 ? CameraMath.FeetToMm((curOrigin - savedOrigin).DotProduct(n.Normalize())) : double.NaN;
+                    Logger.Info($"相機 Key Plan：剖面「{section.Name}」判定為手動移過 — 存檔原點({CameraMath.FeetToMm(savedOrigin.X):F1},{CameraMath.FeetToMm(savedOrigin.Y):F1},{CameraMath.FeetToMm(savedOrigin.Z):F1})mm " +
+                                $"方向({savedForward.X:F4},{savedForward.Y:F4}) vs 目前原點({CameraMath.FeetToMm(curOrigin.X):F1},{CameraMath.FeetToMm(curOrigin.Y):F1},{CameraMath.FeetToMm(curOrigin.Z):F1})mm " +
+                                $"方向({curForward.X:F4},{curForward.Y:F4})；Δ原點={dMm:F1}mm（法向 {normalMm:F1}mm，容許 {SectionMovedOriginToleranceMm}mm）Δ角={angDeg:F2}°（容許 {SectionMovedAngleToleranceDeg}°）");
+                }
                 return originMoved || directionMoved;
             }
             catch
@@ -512,6 +545,20 @@ namespace RevitMCP.Core
                     {
                         result.AMarkerLog = "A 型標記同步失敗：" + ex.Message;
                         Logger.Error("一鍵 4 視圖：A 型標記同步失敗（4 視圖不受影響）", ex);
+                    }
+                }
+                else
+                {
+                    // 2026-09-25 第二輪：標記型式＝B → 這台相機既有的 A 實例＋扇形要刪掉（B 標記在 A 模式時已由 DeleteOldMarkers 刪除）。
+                    try
+                    {
+                        int removed = RemoveAMarkersForCamera(doc, cid);
+                        result.AMarkerLog = removed > 0 ? $"標記型式＝B：已刪除本相機 A 實例／扇形 {removed} 個" : "標記型式＝B：本相機沒有 A 標記";
+                    }
+                    catch (Exception ex)
+                    {
+                        result.AMarkerLog = "刪除 A 型標記失敗：" + ex.Message;
+                        Logger.Error("一鍵 4 視圖：刪除 A 型標記失敗（4 視圖不受影響）", ex);
                     }
                 }
             }
@@ -943,7 +990,7 @@ namespace RevitMCP.Core
                 else
                 {
                     existing.CropBox = box;
-                    SaveSectionState(existing, box.Transform.Origin, forwardHoriz); // 2026-09-25：原點可能不是眼睛（見 SectionSpec.Origin）
+                    SaveSectionStateActual(doc, existing, box, forwardHoriz); // 2026-09-25 第二輪：存套用後讀回的實際狀態
                 }
                 TagLink(existing, cid, "Section");
                 return existing;
@@ -956,7 +1003,7 @@ namespace RevitMCP.Core
             ViewSection created = ViewSection.CreateSection(doc, sectionVft.Id, box);
             created.Name = MakeUniqueName(doc, sectionName, created.Id);
             TagLink(created, cid, "Section");
-            SaveSectionState(created, box.Transform.Origin, forwardHoriz);
+            SaveSectionStateActual(doc, created, box, forwardHoriz);
             return created;
         }
 
