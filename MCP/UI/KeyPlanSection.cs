@@ -60,6 +60,11 @@ namespace RevitMCP.UI
         /// <summary>2026-09-25：底圖清單原始資料（全部已裁剪平面）與每樓層相機數；精簡清單由這兩者算出。</summary>
         private List<PlanViewOption> _allPlans = new List<PlanViewOption>();
         private Dictionary<ElementId, int> _cameraCountByLevel = new Dictionary<ElementId, int>();
+        /// <summary>2026-09-25（§4.8 第二版）：建築樓層（由低到高）與相機列，供 BaseMapPlanChooser.Choose 用。</summary>
+        private IList<LevelOption> _levels = new List<LevelOption>();
+        private List<CameraRow> _planRows = new List<CameraRow>();
+        /// <summary>「相機不在這張底圖範圍內」浮動提示（固定在地圖區左下，不隨平移縮放）。</summary>
+        private readonly Border _offImageNotice;
         private readonly Border _viewport;
         private readonly Canvas _mapLayer;
         private readonly MatrixTransform _mapTransform = new MatrixTransform(Matrix.Identity);
@@ -220,16 +225,55 @@ namespace RevitMCP.UI
             WpfGrid.SetRow(overlay, 0);
             root.Children.Add(overlay);
 
+            // 2026-09-25（§4.8）：相機標記落在底圖外時的提示，避免看起來「一片空白」。
+            _offImageNotice = new Border
+            {
+                Background = new SolidColorBrush(WpfColor.FromArgb(0xE6, 0xFF, 0xF4, 0xD6)),
+                BorderBrush = CameraManagerTheme.BorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(6, 2, 6, 2),
+                Margin = new Thickness(6, 0, 0, 6),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                IsHitTestVisible = false,
+                Visibility = System.Windows.Visibility.Collapsed,
+                Child = new TextBlock
+                {
+                    Text = "相機不在這張底圖範圍內",
+                    FontSize = CameraManagerTheme.SecondaryFontSize,
+                    FontFamily = CameraManagerTheme.UiFont,
+                    Foreground = CameraManagerTheme.Text
+                }
+            };
+            WpfGrid.SetRow(_offImageNotice, 0);
+            root.Children.Add(_offImageNotice);
+
             Content = root;
             MinHeight = 120; // 規格：面板太矮時地圖區先縮，但不小於 120px
         }
 
         /// <param name="cameraCountByLevel">每個樓層（相機的下方樓層 LevelId）有幾台相機；精簡清單用。</param>
-        public void SetPlanOptions(List<PlanViewOption> plans, ElementId defaultId, Dictionary<ElementId, int> cameraCountByLevel = null)
+        public void SetPlanOptions(List<PlanViewOption> plans, ElementId defaultId, Dictionary<ElementId, int> cameraCountByLevel = null,
+            IList<LevelOption> levels = null, List<CameraRow> rows = null)
         {
             _allPlans = plans ?? new List<PlanViewOption>();
             _cameraCountByLevel = cameraCountByLevel ?? new Dictionary<ElementId, int>();
+            _levels = levels ?? new List<LevelOption>();
+            _planRows = rows ?? new List<CameraRow>();
             RebuildPlanItems(defaultId);
+        }
+
+        private static bool SameId(ElementId a, ElementId b) => a != null && b != null && a.GetIdValue() == b.GetIdValue();
+
+        /// <summary>§4.8 共用挑法：某樓層上（一組）相機的底圖。rows 給空＝只看樓層（步驟 4）。</summary>
+        private PlanViewOption ChooseFor(ElementId levelId, IList<CameraRow> rows, out string why, out int step)
+        {
+            List<double[]> eyes = (rows ?? new List<CameraRow>())
+                .Where(r => r != null && IsFinite(r.EyeXFeet) && IsFinite(r.EyeYFeet) && IsFinite(r.EyeZFeet))
+                .Select(r => new[] { r.EyeXFeet, r.EyeYFeet, r.EyeZFeet }).ToList();
+            SourcePlanHint src = rows != null && rows.Count == 1 ? SourcePlanHint.From(rows[0]) : SourcePlanHint.MostCommon(rows);
+            return BaseMapPlanChooser.Choose(_allPlans, levelId, eyes, _levels, out why, out step, src);
         }
 
         /// <summary>依「顯示全部平面」設定重建底圖 combo 的項目並選回 <paramref name="selectId"/>（程式化，不觸發匯出）。
@@ -246,15 +290,27 @@ namespace RevitMCP.UI
             else
             {
                 items = new List<PlanViewOption>();
-                var seenLevels = new HashSet<ElementId>();
-                foreach (PlanViewOption first in _allPlans) // _allPlans 已依名稱排序（ReadSnapshot）
+                // 2026-09-25（§4.8 第二版）：每個有相機的樓層用共用挑法（步驟 0–4）挑一張；多個樓層挑到同一張
+                // （例如數個「L1 - Block xx」都落到 Site Plan）就合併成一項、相機數相加。依樓層高程排序。
+                var chosen = new Dictionary<long, Tuple<PlanViewOption, int>>();
+                var order = new List<long>();
+                IEnumerable<ElementId> camLevels = _cameraCountByLevel.Where(kv => kv.Key != null && kv.Value > 0).Select(kv => kv.Key)
+                    .OrderBy(id => _levels.FirstOrDefault(l => SameId(l?.LevelId, id))?.ProjectElevationFeet ?? double.MaxValue).ToList();
+                foreach (ElementId lvId in camLevels)
                 {
-                    if (first?.GenLevelId == null) continue;
-                    if (!_cameraCountByLevel.TryGetValue(first.GenLevelId, out int n) || n <= 0) continue;
-                    if (!seenLevels.Add(first.GenLevelId)) continue;
-                    // 2026-09-25（§4.8）：每層一張＝該層面積最大的已裁剪平面（樓層平面、非從屬優先），不再是名稱第一張。
-                    PlanViewOption p = BaseMapPlanChooser.ChooseForLevel(_allPlans, first.GenLevelId, null, out string why) ?? first;
-                    Logger.Info($"相機管理面板：底圖精簡清單 樓層 {p.LevelName ?? "?"} → {p.CropLogText}（{why}）");
+                    int n = _cameraCountByLevel[lvId];
+                    List<CameraRow> rowsOnLevel = _planRows.Where(r => SameId(r?.LevelId, lvId)).ToList();
+                    PlanViewOption p = ChooseFor(lvId, rowsOnLevel, out string why, out int step);
+                    if (p == null) { Logger.Info($"相機管理面板：底圖精簡清單 樓層 id={lvId.GetIdValue()} 沒有可用平面（{why}）"); continue; }
+                    Logger.Info($"相機管理面板：底圖精簡清單 相機樓層 id={lvId.GetIdValue()} → {p.CropLogText}（{why}）");
+                    long key = p.ViewId.GetIdValue();
+                    if (chosen.TryGetValue(key, out var prev)) chosen[key] = Tuple.Create(p, prev.Item2 + n);
+                    else { chosen[key] = Tuple.Create(p, n); order.Add(key); }
+                }
+                foreach (long key in order)
+                {
+                    PlanViewOption p = chosen[key].Item1;
+                    int n = chosen[key].Item2;
                     items.Add(new PlanViewOption
                     {
                         ViewId = p.ViewId,
@@ -264,6 +320,9 @@ namespace RevitMCP.UI
                         DisplayName = $"{p.LevelName ?? "?"} — {p.PlanName ?? p.DisplayName}（{n} 台相機）",
                         IsFloorPlan = p.IsFloorPlan,
                         IsDependent = p.IsDependent,
+                        GenLevelElevationFeet = p.GenLevelElevationFeet,
+                        GenLevelIsStorey = p.GenLevelIsStorey,
+                        PrimaryViewId = p.PrimaryViewId,
                         HasCrop = p.HasCrop,
                         CropOriginX = p.CropOriginX, CropOriginY = p.CropOriginY,
                         CropBasisXX = p.CropBasisXX, CropBasisXY = p.CropBasisXY,
@@ -350,18 +409,29 @@ namespace RevitMCP.UI
                 _rows = rows ?? new List<CameraRow>();
         }
 
-        /// <summary>選到某個樓層對應的底圖平面（若清單裡有的話），觸發跟手動選 combo 一樣的
-        /// PlanSelected 事件；找不到就不動作。供「選取相機時自動切換底圖到該相機樓層」使用。</summary>
-        public bool SelectPlanByLevel(ElementId levelId, double? eyeX = null, double? eyeY = null)
+        /// <summary>選取相機時自動切換底圖：用共用挑法（§4.8 步驟 0–4）挑這台相機的底圖，觸發跟手動選 combo
+        /// 一樣的 PlanSelected 事件；找不到就不動作。</summary>
+        public bool SelectPlanForCamera(CameraRow row)
         {
-            if (levelId == null || !(_planCombo.ItemsSource is IEnumerable<PlanViewOption>)) return false;
-            // 2026-09-25（§4.8）：同層已裁剪平面中「包含相機眼睛、面積最大」者；都不包含 → 面積最大。
-            IList<double[]> eyes = eyeX.HasValue && eyeY.HasValue ? new List<double[]> { new[] { eyeX.Value, eyeY.Value } } : null;
-            PlanViewOption target = BaseMapPlanChooser.ChooseForLevel(_allPlans, levelId, eyes, out string why);
-            if (target == null) return false;
-            Logger.Info($"相機管理面板：選取相機 → 底圖候選 {target.CropLogText}（{why}）");
+            if (row?.LevelId == null || !(_planCombo.ItemsSource is IEnumerable<PlanViewOption>)) return false;
+            PlanViewOption target = ChooseFor(row.LevelId, new List<CameraRow> { row }, out string why, out _);
+            if (target == null) { Logger.Info($"相機管理面板：選取相機「{row.Name}」→ 沒有可用底圖（{why}）"); return false; }
+            if (CurrentPlanAlreadyShows(row, target)) return false;
+            Logger.Info($"相機管理面板：選取相機「{row.Name}」→ 底圖候選 {target.CropLogText}（{why}）");
             return SelectPlanOption(target);
         }
+
+        /// <summary>目前底圖（使用者可能手動選的）已包含這台相機、且與共用挑法的結果同樓層，而相機沒有放置平面記錄
+        /// → 不必換（尊重手動選擇）。有放置平面記錄時一律以步驟 0 為準。</summary>
+        private bool CurrentPlanAlreadyShows(CameraRow row, PlanViewOption target)
+        {
+            if (row.SourcePlanId != null) return false;
+            PlanViewOption cur = _planCombo.SelectedItem as PlanViewOption;
+            return cur != null && cur.CropContains(row.EyeXFeet, row.EyeYFeet) && SameId(cur.GenLevelId, target.GenLevelId);
+        }
+
+        /// <summary>目前底圖 combo 選的平面 Id（沒有則 null）。</summary>
+        public ElementId SelectedPlanViewId => (_planCombo.SelectedItem as PlanViewOption)?.ViewId;
 
         /// <summary>目前底圖 combo 選的平面裁剪框是否包含模型座標 (x,y)（沒有選取／沒有裁剪資訊＝false）。</summary>
         public bool SelectedPlanContains(double x, double y)
@@ -387,43 +457,19 @@ namespace RevitMCP.UI
             return true;
         }
 
-        /// <summary>2026-09-25：跟隨作用中透視圖用——找「該樓層」的已裁剪平面；沒有就找最近的下方樓層，
-        /// 再沒有就最近的上方樓層（<paramref name="levelsByElevation"/> 由低到高）。在全部平面（_allPlans）裡找，
-        /// 精簡清單沒有的就附加進 combo。回傳選到的樓層 Id（null＝完全找不到）；<paramref name="switched"/>＝
-        /// 是否真的換了 combo（已經是那張就不換、不觸發匯出）。</summary>
-        internal ElementId SelectPlanByLevelWithFallback(ElementId levelId, IList<LevelOption> levelsByElevation, out bool switched,
-            double? eyeX = null, double? eyeY = null)
+        /// <summary>2026-09-25：跟隨作用中透視圖用——共用挑法（§4.8 步驟 0–4，含步驟 4 的上下樓層退回），
+        /// 在全部平面（_allPlans）裡找，精簡清單沒有的就附加進 combo。回傳選到的平面（null＝完全找不到）；
+        /// <paramref name="switched"/>＝是否真的換了 combo（已經是那張就不換、不觸發匯出）；<paramref name="why"/>＝挑選理由（含步驟）。</summary>
+        internal PlanViewOption SelectPlanForCameraFollow(CameraRow row, out bool switched, out string why)
         {
-            switched = false;
-            if (levelId == null) return null;
-            List<PlanViewOption> all = _allPlans ?? new List<PlanViewOption>();
-            // 2026-09-25（§4.8）：每層用 BaseMapPlanChooser（包含相機眼睛且面積最大 → 否則面積最大），不再取名稱第一張。
-            IList<double[]> eyes = eyeX.HasValue && eyeY.HasValue ? new List<double[]> { new[] { eyeX.Value, eyeY.Value } } : null;
-            string lastWhy = "";
-            PlanViewOption FirstPlanOf(ElementId lv)
-            {
-                if (lv == null) return null;
-                PlanViewOption p = BaseMapPlanChooser.ChooseForLevel(all, lv, eyes, out string why);
-                if (p != null) lastWhy = why;
-                return p;
-            }
-
-            PlanViewOption target = FirstPlanOf(levelId);
-            if (target == null && levelsByElevation != null)
-            {
-                int idx = -1;
-                for (int i = 0; i < levelsByElevation.Count; i++)
-                    if (levelsByElevation[i]?.LevelId != null && levelsByElevation[i].LevelId.GetIdValue() == levelId.GetIdValue()) { idx = i; break; }
-                if (idx >= 0)
-                {
-                    for (int i = idx - 1; i >= 0 && target == null; i--) target = FirstPlanOf(levelsByElevation[i]?.LevelId);
-                    for (int i = idx + 1; i < levelsByElevation.Count && target == null; i++) target = FirstPlanOf(levelsByElevation[i]?.LevelId);
-                }
-            }
+            switched = false; why = "";
+            if (row?.LevelId == null) return null;
+            PlanViewOption target = ChooseFor(row.LevelId, new List<CameraRow> { row }, out why, out _);
             if (target == null) return null;
-            Logger.Info($"相機管理面板：跟隨 → 底圖候選 {target.CropLogText}（{lastWhy}）");
+            if (CurrentPlanAlreadyShows(row, target)) { why = "目前底圖已包含相機（同樓層），不換"; return _planCombo.SelectedItem as PlanViewOption; }
+            Logger.Info($"相機管理面板：跟隨「{row.Name}」→ 底圖候選 {target.CropLogText}（{why}）");
             switched = SelectPlanOption(target); // → PlanSelected → 匯出
-            return target.GenLevelId;
+            return target;
         }
 
         public void ShowMessage(string text)
@@ -440,7 +486,39 @@ namespace RevitMCP.UI
             _mapLayer.Children.Add(_hintText);
             _currentProject = null;
             _userAdjustedView = false;
+            SetOffImageNotice(false, null);
             FitToView();
+        }
+
+        /// <summary>2026-09-25（§4.8）：顯示／隱藏「相機不在這張底圖範圍內」提示。</summary>
+        private void SetOffImageNotice(bool show, string cameraName)
+        {
+            if (_offImageNotice == null) return;
+            bool wasShown = _offImageNotice.Visibility == System.Windows.Visibility.Visible;
+            _offImageNotice.Visibility = show ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+            if (show && !wasShown)
+                Logger.Info($"相機管理面板：③ 顯示提示「相機不在這張底圖範圍內」（{cameraName ?? "底圖樓層的相機"}）");
+        }
+
+        private HashSet<long> _lastRepresentedLevels = new HashSet<long>();
+
+        /// <summary>選取的相機若屬於這張底圖（同樓層／被代表的樓層）卻落在圖外 → 顯示提示；沒有選取時，
+        /// 這張底圖樓層（含被代表樓層）上有相機但一台都不在圖內 → 顯示提示。</summary>
+        private void UpdateOffImageNotice(HashSet<long> representedLevels = null)
+        {
+            if (representedLevels != null) _lastRepresentedLevels = representedLevels;
+            BaseMapSnapshot map = _currentMap;
+            if (map == null || _currentProject == null) { SetOffImageNotice(false, null); return; }
+            bool OnMapLevel(CameraRow r) => r?.LevelId != null && (map.GenLevelId == null || SameId(r.LevelId, map.GenLevelId)
+                || _lastRepresentedLevels.Contains((long)r.LevelId.GetIdValue()));
+            CameraRow sel = _selectedViewId != null ? _rows.FirstOrDefault(r => SameId(r?.ViewId, _selectedViewId)) : null;
+            if (sel != null)
+            {
+                SetOffImageNotice(OnMapLevel(sel) && !sel.InMapRange, sel.Name);
+                return;
+            }
+            List<CameraRow> mine = _rows.Where(OnMapLevel).ToList();
+            SetOffImageNotice(mine.Count > 0 && mine.All(r => !r.InMapRange), null);
         }
 
         /// <summary>用真實裁剪底圖畫面板。</summary>
@@ -483,9 +561,29 @@ namespace RevitMCP.UI
                 $"tfOrigin=({map.OriginX:F3},{map.OriginY:F3},{map.OriginZ:F3}) basisX=({map.BasisXX:F4},{map.BasisXY:F4}) basisY=({map.BasisYX:F4},{map.BasisYY:F4})");
 
             bool showOthers = Settings.ShowOtherLevelCamerasOnMap;
+            // 2026-09-25（§4.8 第二版）：底圖可能來自別的樓層（步驟 0/2/3/4 退回，例如相機在「L1 - Block 37」、
+            // 底圖是掛在「L1 - Block 43」的 Site Plan）。共用挑法會替該相機樓層挑到這張底圖所在樓層者，
+            // 視為「同一樓層」，正常（不淡化）畫出。
+            var representedLevels = new HashSet<long>();
+            if (map.GenLevelId != null)
+            {
+                foreach (IGrouping<long, CameraRow> g in _rows.Where(r => r?.LevelId != null && !SameId(r.LevelId, map.GenLevelId))
+                             .GroupBy(r => (long)r.LevelId.GetIdValue()))
+                {
+                    try
+                    {
+                        PlanViewOption p = ChooseFor(g.First().LevelId, g.ToList(), out _, out _);
+                        if (p != null && SameId(p.GenLevelId, map.GenLevelId)) representedLevels.Add(g.Key);
+                    }
+                    catch (Exception ex) { Logger.Error("相機管理面板：判斷相機樓層是否由此底圖代表失敗", ex); }
+                }
+                if (representedLevels.Count > 0)
+                    Logger.Info($"相機管理面板：底圖樓層 id={map.GenLevelId.GetIdValue()} 同時代表相機樓層 id={string.Join(",", representedLevels)}（§4.8 共用挑法），這些相機不淡化。");
+            }
             foreach (CameraRow row in _rows)
             {
-                bool dim = map.GenLevelId != null && row.LevelId != null && row.LevelId != map.GenLevelId;
+                bool dim = map.GenLevelId != null && row.LevelId != null && !SameId(row.LevelId, map.GenLevelId)
+                           && !representedLevels.Contains((long)row.LevelId.GetIdValue());
                 if (dim && !showOthers)
                 {
                     row.InMapRange = false;
@@ -493,6 +591,7 @@ namespace RevitMCP.UI
                 }
                 DrawOneCamera(row, project, dim, checkRange: true, map: map);
             }
+            UpdateOffImageNotice(representedLevels);
 
             if (preserveView && _userAdjustedView)
             {
@@ -524,6 +623,7 @@ namespace RevitMCP.UI
             _mapLayer.Height = canvasSize;
             _mapLayer.Background = CameraManagerTheme.Background;
 
+            SetOffImageNotice(false, null);
             for (int i = 0; i <= 10; i++)
             {
                 double t = i / 10.0 * canvasSize;
@@ -854,6 +954,7 @@ namespace RevitMCP.UI
         public void HighlightSelected(ElementId viewId)
         {
             _selectedViewId = viewId;
+            try { UpdateOffImageNotice(); } catch (Exception ex) { Logger.Error("相機管理面板：更新底圖外提示失敗", ex); }
             foreach (var kv in _markersByViewId)
             {
                 bool selected = viewId != null && kv.Key == viewId;

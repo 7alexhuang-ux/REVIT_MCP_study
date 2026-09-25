@@ -986,16 +986,14 @@ namespace RevitMCP.UI
 
         /// <summary>選到的相機若不在目前底圖所在樓層、且該樓層有現成的裁剪平面可用，自動切換底圖
         /// （2026-09-24 實測回報：不換底圖時容易誤以為「標記位置壞了」，其實是看錯樓層的圖）。
-        /// 透過既有的 <see cref="KeyPlanSection.SelectPlanByLevel"/>→PlanSelected→RefreshBaseMap
+        /// 透過既有的 <see cref="KeyPlanSection.SelectPlanForCamera"/>→PlanSelected→RefreshBaseMap
         /// 既有管線完成，這裡不重複底圖刷新邏輯。</summary>
         private void MaybeAutoSwitchBaseMapForSelection(CameraRow primary)
         {
             if (primary?.LevelId == null) return;
-            // 2026-09-25（§4.8）：同樓層、且目前底圖已包含這台相機 → 不換；否則挑「包含相機、面積最大」的同層平面。
-            ElementId mapLevel = _keyPlanSection.SelectedPlanLevelId;
-            if (mapLevel != null && mapLevel.GetIdValue() == primary.LevelId.GetIdValue() &&
-                _keyPlanSection.SelectedPlanContains(primary.EyeXFeet, primary.EyeYFeet)) return;
-            _keyPlanSection.SelectPlanByLevel(primary.LevelId, primary.EyeXFeet, primary.EyeYFeet);
+            // 2026-09-25（§4.8 第二版）：共用挑法（步驟 0 放置平面 → 1–4）；目前底圖已包含相機且同樓層、
+            // 相機又沒有放置平面記錄時不換（KeyPlanSection.CurrentPlanAlreadyShows）。
+            _keyPlanSection.SelectPlanForCamera(primary);
         }
 
         /// <summary>選到的相機若已經有連結的 Key Plan 剖面，讀取其目前實際剖面線（反映使用者
@@ -1228,29 +1226,18 @@ namespace RevitMCP.UI
             string mapAction = "底圖不變";
             if (_hasCroppedPlan && row.LevelId != null)
             {
-                ElementId mapLevel = _keyPlanSection.SelectedPlanLevelId;
-                // 2026-09-25（§4.8）：同樓層但目前底圖裁剪框不含相機（例如放大平面）也要重挑。
-                bool sameLevel = mapLevel != null && mapLevel.GetIdValue() == row.LevelId.GetIdValue();
-                if (!sameLevel || !_keyPlanSection.SelectedPlanContains(row.EyeXFeet, row.EyeYFeet))
+                // 2026-09-25（§4.8 第二版）：共用挑法（步驟 0 放置平面 → 1 同層包含 → 2 ±1.5 m 樓層包含 →
+                // 3 眼睛下方樓層包含 → 4 同層最大／上下樓層），理由（含步驟）由 KeyPlanSection 記 log。
+                _followCenterPendingViewId = row.ViewId;
+                // → PlanSelected → RefreshBaseMap（ExternalEvent 匯出，已有 in-flight 合併）。
+                PlanViewOption chosen = _keyPlanSection.SelectPlanForCameraFollow(row, out bool switched, out string why);
+                if (chosen == null)
                 {
-                    _followCenterPendingViewId = row.ViewId;
-                    // → PlanSelected → RefreshBaseMap（ExternalEvent 匯出，已有 in-flight 合併）。
-                    ElementId chosen = _keyPlanSection.SelectPlanByLevelWithFallback(row.LevelId, _levels, out bool switched, row.EyeXFeet, row.EyeYFeet);
-                    if (chosen == null)
-                    {
-                        _followCenterPendingViewId = null;
-                        mapAction = $"樓層 {row.LevelName} 與上下樓層都沒有可用的已裁剪平面，底圖不變";
-                    }
-                    else
-                    {
-                        string chosenName = _levels.FirstOrDefault(l => l.LevelId != null && l.LevelId.GetIdValue() == chosen.GetIdValue())?.Name ?? chosen.GetIdValue().ToString();
-                        bool fallback = chosen.GetIdValue() != row.LevelId.GetIdValue();
-                        if (fallback)
-                            Logger.Info($"相機管理面板：樓層 {row.LevelName} 沒有已裁剪平面，改用最近樓層 {chosenName} 的底圖。");
-                        if (switched) mapAction = fallback ? $"切換底圖到最近樓層 {chosenName}（{row.LevelName} 沒有已裁剪平面）" : $"切換底圖到樓層 {row.LevelName}";
-                        else { _followCenterPendingViewId = null; mapAction = $"底圖已是樓層 {chosenName}"; }
-                    }
+                    _followCenterPendingViewId = null;
+                    mapAction = $"樓層 {row.LevelName} 沒有可用的已裁剪平面（{why}），底圖不變";
                 }
+                else if (switched) mapAction = $"切換底圖到「{chosen.PlanName ?? chosen.DisplayName}」（樓層 {chosen.LevelName ?? "?"}；{why}）";
+                else { _followCenterPendingViewId = null; mapAction = $"底圖不變「{chosen.PlanName ?? chosen.DisplayName}」（{why}）"; }
             }
             bool panned = _followCenterPendingViewId == null && _keyPlanSection.CenterOnCamera(row.ViewId);
             Logger.Info($"相機管理面板：跟隨作用中透視圖「{row.Name}」：選取清單列、{mapAction}、" +
@@ -1320,7 +1307,7 @@ namespace RevitMCP.UI
                 if (r?.LevelId == null) continue;
                 cameraCountByLevel[r.LevelId] = cameraCountByLevel.TryGetValue(r.LevelId, out int c) ? c + 1 : 1;
             }
-            _keyPlanSection.SetPlanOptions(snapshot.PlanViews, comboPlanId, cameraCountByLevel);
+            _keyPlanSection.SetPlanOptions(snapshot.PlanViews, comboPlanId, cameraCountByLevel, _levels, _rows);
 
             if (snapshot.ErrorMessage != null)
             {
@@ -2125,6 +2112,32 @@ namespace RevitMCP.UI
         private readonly HashSet<ElementId> _markerRefreshPending = new HashSet<ElementId>();
         private DispatcherTimer _markerRefreshTimer;
         private bool _markerRefreshInFlight;
+        /// <summary>2026-09-25（§5.1）：主體 Level 改高程／改名 → 同一個去抖計時器，重畫所有簡化樓層記號。</summary>
+        private bool _levelMarkRefreshPending;
+
+        /// <summary>由 Application.cs 的 DocumentChanged 呼叫（有主體 Level 被修改時）。與相機標記共用 500ms 去抖。</summary>
+        public void QueueLevelMarkRefresh()
+        {
+            try
+            {
+                if (!_armed) return;
+                RunOnUiThread(() =>
+                {
+                    _levelMarkRefreshPending = true;
+                    EnsureMarkerRefreshTimer();
+                    _markerRefreshTimer.Stop();
+                    _markerRefreshTimer.Start();
+                });
+            }
+            catch (Exception ex) { Logger.Error("相機管理面板：排入樓層記號更新失敗", ex); }
+        }
+
+        private void EnsureMarkerRefreshTimer()
+        {
+            if (_markerRefreshTimer != null) return;
+            _markerRefreshTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromMilliseconds(500) };
+            _markerRefreshTimer.Tick += OnMarkerRefreshTimerTick;
+        }
 
         /// <summary>由 Application.cs 的 DocumentChanged 呼叫（只傳 Id，不在 DocumentChanged 內改模型）。
         /// 同一相機多次變更合併；最後一次變更後 500ms 才排入「更新相機標記」。</summary>
@@ -2137,14 +2150,7 @@ namespace RevitMCP.UI
                 RunOnUiThread(() =>
                 {
                     foreach (ElementId id in ids) _markerRefreshPending.Add(id);
-                    if (_markerRefreshTimer == null)
-                    {
-                        _markerRefreshTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
-                        {
-                            Interval = TimeSpan.FromMilliseconds(500)
-                        };
-                        _markerRefreshTimer.Tick += OnMarkerRefreshTimerTick;
-                    }
+                    EnsureMarkerRefreshTimer();
                     _markerRefreshTimer.Stop();
                     _markerRefreshTimer.Start(); // 重新計時＝去抖
                 });
@@ -2160,7 +2166,7 @@ namespace RevitMCP.UI
             try
             {
                 _markerRefreshTimer?.Stop();
-                if (_markerRefreshPending.Count == 0 || !_armed) { _markerRefreshPending.Clear(); return; }
+                if ((_markerRefreshPending.Count == 0 && !_levelMarkRefreshPending) || !_armed) { _markerRefreshPending.Clear(); _levelMarkRefreshPending = false; return; }
                 if (_markerRefreshInFlight || _fourViewsInFlight)
                 {
                     // 上一批或一鍵 4 視圖還在跑：稍後再試（一鍵 4 視圖本身就會重畫標記）。
@@ -2169,8 +2175,10 @@ namespace RevitMCP.UI
                 }
                 List<ElementId> batch = _markerRefreshPending.ToList();
                 _markerRefreshPending.Clear();
+                bool levelMarks = _levelMarkRefreshPending;
+                _levelMarkRefreshPending = false;
                 _markerRefreshInFlight = true;
-                Logger.Info($"相機管理面板：排入「更新相機標記」（{batch.Count} 台相機，去抖 500ms）。");
+                Logger.Info($"相機管理面板：排入「更新相機標記」（{batch.Count} 台相機{(levelMarks ? "＋簡化樓層記號" : "")}，去抖 500ms）。");
                 int gen = _generation;
                 EnqueueRevit(uiApp =>
                 {
@@ -2179,7 +2187,18 @@ namespace RevitMCP.UI
                     {
                         Document doc = uiApp?.ActiveUIDocument?.Document;
                         if (doc != null && GetDocumentKey(doc) == _loadedDocKey)
-                            n = CameraKeyPlanService.UpdateMarkersForCameras(doc, batch);
+                        {
+                            if (batch.Count > 0) n = CameraKeyPlanService.UpdateMarkersForCameras(doc, batch);
+                            if (levelMarks)
+                            {
+                                try { CameraKeyPlanService.UpdateLevelMarksFromLevels(doc); }
+                                catch (Exception exLv)
+                                {
+                                    Logger.Error("相機管理面板：更新簡化樓層記號失敗", exLv);
+                                    CameraManagerDiagnostics.RecordCaught("UpdateLevelMarksFromLevels", exLv);
+                                }
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -2199,7 +2218,7 @@ namespace RevitMCP.UI
                                 CameraRow primary = GetPrimarySelectedRow();
                                 if (primary != null && batch.Contains(primary.ViewId)) RefreshSelectedSectionLine(primary);
                             }
-                            if (_markerRefreshPending.Count > 0) _markerRefreshTimer?.Start();
+                            if (_markerRefreshPending.Count > 0 || _levelMarkRefreshPending) _markerRefreshTimer?.Start();
                         });
                     }
                 }, "UpdateCameraMarkers");

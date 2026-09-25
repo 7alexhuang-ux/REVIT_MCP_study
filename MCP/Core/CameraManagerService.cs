@@ -87,6 +87,7 @@ namespace RevitMCP.Core
                     .ToList();
 
                 snapshot.HasCroppedPlan = croppedPlanViews.Count > 0;
+                var storeyIds = new HashSet<long>(levels.Select(l => (long)l.Id.GetIdValue()));
 
                 foreach (ViewPlan pv in croppedPlanViews)
                 {
@@ -97,12 +98,16 @@ namespace RevitMCP.Core
                         PlanName = pv.Name,
                         LevelName = pv.GenLevel?.Name,
                         DisplayName = pv.Name + "（" + pv.ViewType + "）",
-                        IsFloorPlan = pv.ViewType == ViewType.FloorPlan
+                        IsFloorPlan = pv.ViewType == ViewType.FloorPlan,
+                        GenLevelElevationFeet = pv.GenLevel != null ? (double?)pv.GenLevel.ProjectElevation : null,
+                        GenLevelIsStorey = pv.GenLevel != null && storeyIds.Contains(pv.GenLevel.Id.GetIdValue())
                     };
                     // 2026-09-25（§4.8 底圖挑選）：攤平裁剪框供「包含相機／最大面積」判斷；失敗只記 log。
                     try
                     {
-                        opt.IsDependent = pv.GetPrimaryViewId() != ElementId.InvalidElementId;
+                        ElementId primaryId = pv.GetPrimaryViewId();
+                        opt.IsDependent = primaryId != ElementId.InvalidElementId;
+                        opt.PrimaryViewId = opt.IsDependent ? primaryId : null;
                         BoundingBoxXYZ cb = pv.CropBox;
                         if (cb != null)
                         {
@@ -129,16 +134,16 @@ namespace RevitMCP.Core
                         ? levelCameraCount.OrderByDescending(kv => kv.Value).First().Key
                         : null;
 
-                    // 2026-09-25（§4.8）：該樓層中包含最多相機眼睛的平面，同分取面積最大（非從屬優先）；
-                    // 不再是「依名稱排序的第一張」（實測選到 8.3×16.7 m 放大平面、相機在圖外）。
+                    // 2026-09-25（§4.8 第二版）：相機最多的樓層，用共用的 BaseMapPlanChooser.Choose（步驟 0–4）。
                     PlanViewOption chosenOpt = null;
                     string why = "";
                     if (busiestLevelId != null)
                     {
-                        List<double[]> eyes = snapshot.Cameras
-                            .Where(r => r.LevelId != null && r.LevelId.GetIdValue() == busiestLevelId.GetIdValue())
-                            .Select(r => new[] { r.EyeXFeet, r.EyeYFeet }).ToList();
-                        chosenOpt = BaseMapPlanChooser.ChooseForLevel(snapshot.PlanViews, busiestLevelId, eyes, out why);
+                        List<CameraRow> onLevel = snapshot.Cameras
+                            .Where(r => r.LevelId != null && r.LevelId.GetIdValue() == busiestLevelId.GetIdValue()).ToList();
+                        List<double[]> eyes = onLevel.Select(r => new[] { r.EyeXFeet, r.EyeYFeet, r.EyeZFeet }).ToList();
+                        chosenOpt = BaseMapPlanChooser.Choose(snapshot.PlanViews, busiestLevelId, eyes, snapshot.Levels, out why, out _,
+                            SourcePlanHint.MostCommon(onLevel));
                     }
                     if (chosenOpt == null)
                     {
@@ -186,8 +191,27 @@ namespace RevitMCP.Core
             Logger.Info($"相機管理：「{view.Name}」室內／室外＝{(isOutdoor.HasValue ? (isOutdoor.Value ? "室外" : "室內") : "?")}（{classLog}）" +
                         (isOutdoor == true ? $" 扇形半徑={CameraMath.FeetToMm(outdoorFanR):F0}mm" : ""));
 
+            // 2026-09-25（§4.8 步驟 0）：相機放置時的平面（ES 記錄；沒有＝null）。
+            ViewPlan src = CameraSourcePlanStore.TryGetSourcePlan(view);
+            ElementId srcPrimary = null;
+            bool srcCropped = false;
+            if (src != null)
+            {
+                try
+                {
+                    srcCropped = src.CropBoxActive;
+                    ElementId pid = src.GetPrimaryViewId();
+                    if (pid != ElementId.InvalidElementId) srcPrimary = pid;
+                }
+                catch (Exception exSrc) { Logger.Error("相機管理：讀取放置平面屬性失敗", exSrc); }
+            }
+
             return new CameraRow
             {
+                SourcePlanId = src?.Id,
+                SourcePlanName = src?.Name,
+                SourcePlanCropped = srcCropped,
+                SourcePlanPrimaryId = srcPrimary,
                 IsOutdoor = isOutdoor,
                 OutdoorFanRadiusFeet = outdoorFanR,
                 ViewId = view.Id,

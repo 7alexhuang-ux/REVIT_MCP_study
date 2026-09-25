@@ -62,6 +62,14 @@ namespace RevitMCP.Core
         /// <summary>2026-09-25 室內／室外判定（與一鍵 4 視圖同一套 FindEyeRoom）：true＝室外（眼睛不在任何房間），
         /// false＝室內，null＝判定失敗／找不到樓層。</summary>
         public bool? IsOutdoor { get; set; }
+
+        // 2026-09-25（§4.8 步驟 0）：相機放置時的平面（CameraSourcePlanStore 以 ES 記錄；沒有記錄＝null）。
+        public ElementId SourcePlanId { get; set; }
+        public string SourcePlanName { get; set; }
+        /// <summary>放置平面目前是否啟用裁剪框（未裁剪的平面不能當底圖，改找它的父／從屬視圖）。</summary>
+        public bool SourcePlanCropped { get; set; }
+        /// <summary>放置平面若是從屬視圖，其主視圖 Id；否則 null。</summary>
+        public ElementId SourcePlanPrimaryId { get; set; }
         /// <summary>室外相機的扇形半徑（feet）＝min(遠裁剪, 室外範圍半徑)；迷你地圖以模型比例畫出。室內為 0。</summary>
         public double OutdoorFanRadiusFeet { get; set; }
         /// <summary>DataGrid 列 ToolTip 前綴用：「室內」「室外」或「?」。</summary>
@@ -122,6 +130,12 @@ namespace RevitMCP.Core
         public bool IsFloorPlan { get; set; }
         /// <summary>從屬視圖（GetPrimaryViewId 有效）。挑底圖時次要。</summary>
         public bool IsDependent { get; set; }
+        /// <summary>2026-09-25（§4.8 第二版）：GenLevel 的 ProjectElevation（feet，與相機眼睛 Z 同座標）；沒有 GenLevel＝null。</summary>
+        public double? GenLevelElevationFeet { get; set; }
+        /// <summary>GenLevel 是否屬於相機管理的「建築樓層」集合（CameraMath.GetStoreyLevelsSorted）。</summary>
+        public bool GenLevelIsStorey { get; set; }
+        /// <summary>從屬視圖的主視圖 Id（非從屬＝null）；步驟 0 找放置平面的父／從屬視圖用。</summary>
+        public ElementId PrimaryViewId { get; set; }
 
         public double CropWidthFeet => HasCrop ? System.Math.Abs(CropMaxX - CropMinX) : 0;
         public double CropHeightFeet => HasCrop ? System.Math.Abs(CropMaxY - CropMinY) : 0;
@@ -147,46 +161,184 @@ namespace RevitMCP.Core
     }
 
     /// <summary>
-    /// 2026-09-25（規格 §4.8 底圖挑選，使用者回報：相機在 L1 但預設底圖是一張 8.3×16.7 m 的放大平面，相機不在圖內）：
-    /// 自動挑底圖（預設、跟隨、自動切換、精簡清單）一律用同一套規則。純資料運算，不碰 Revit API。
-    ///   同一樓層的已裁剪平面中：先限樓層平面（沒有才用天花／面積平面）；
-    ///   有「裁剪框包含相機眼睛 XY」者 → 其中非從屬優先、面積最大；
-    ///   都不包含（或沒給眼睛座標）→ 非從屬優先、面積最大。
+    /// 2026-09-25（規格 §4.8 底圖挑選）：自動挑底圖（預設、跟隨、選取自動切換、精簡清單）一律呼叫
+    /// <see cref="Choose"/>，純資料運算，不碰 Revit API。第二版（Snowdon Towers 實測：一樓由多個高程相近的
+    /// 「L1 - Block xx」樓層組成，相機所在樓層的平面都不含相機、Site Plan 掛在高 1 m 的另一個 L1 樓層）：
+    ///   步驟 0：相機「放置時的平面」（CameraSourcePlanStore 以 ES 記錄）——已裁剪就直接用；未裁剪改用其父／從屬／
+    ///           同主視圖的已裁剪平面（須包含相機）；都沒有才往下；
+    ///   步驟 1：相機樓層上、裁剪框包含相機眼睛 XY 的樓層平面 → 非從屬優先、面積最大；
+    ///   步驟 2：其他樓層、高程在相機樓層 ±1.5 m 內、包含眼睛的樓層平面 → 高程最接近優先、面積最大；
+    ///   步驟 3：任何建築樓層（Building Story）、高程 ≤ 眼睛高程、包含眼睛的樓層平面 → 最高樓層優先、面積最大；
+    ///   步驟 4：相機樓層面積最大的已裁剪平面（舊規則：樓層平面優先、非從屬優先），
+    ///           該層沒有 → 最近下方樓層、再最近上方樓層（各層同舊規則）。
+    /// 多台相機（預設底圖）時，「包含」以包含台數多者優先，再套各步驟的排序。
     /// </summary>
     internal static class BaseMapPlanChooser
     {
-        internal static PlanViewOption ChooseForLevel(IEnumerable<PlanViewOption> all, ElementId levelId,
-            IList<double[]> eyesXY, out string why)
+        /// <summary>步驟 2 的高程容差：±1.5 m。</summary>
+        internal const double NearElevationToleranceFeet = 1500.0 / 304.8;
+
+        /// <param name="levelId">相機所在（下方）樓層。</param>
+        /// <param name="eyes">相機眼睛模型座標 {x, y[, z]}（feet）；null／空＝直接走步驟 4。</param>
+        /// <param name="levelsByElevation">建築樓層（由低到高）；用於相機樓層高程與步驟 4 上下樓層退回，可為 null。</param>
+        /// <param name="step">選中的步驟 0–4（0＝放置平面，4 含上下樓層退回）；-1＝找不到。</param>
+        /// <param name="src">步驟 0：相機放置時的平面（<see cref="SourcePlanHint.From"/>）；null＝沒有記錄。</param>
+        internal static PlanViewOption Choose(IEnumerable<PlanViewOption> all, ElementId levelId, IList<double[]> eyes,
+            IList<LevelOption> levelsByElevation, out string why, out int step, SourcePlanHint src = null)
         {
-            why = "";
-            if (all == null || levelId == null) { why = "no level"; return null; }
-            long lv = levelId.GetIdValue();
-            List<PlanViewOption> ofLevel = all.Where(p => p?.GenLevelId != null && p.GenLevelId.GetIdValue() == lv).ToList();
-            if (ofLevel.Count == 0) { why = "該樓層沒有已裁剪平面"; return null; }
-            List<PlanViewOption> pool = ofLevel.Where(p => p.IsFloorPlan).ToList();
-            if (pool.Count == 0) pool = ofLevel;
+            why = ""; step = -1;
+            if (all == null) { why = "no plans"; return null; }
+            List<PlanViewOption> plans = all.Where(p => p != null && p.ViewId != null).ToList();
+            List<double[]> eyeList = (eyes ?? new List<double[]>()).Where(e => e != null && e.Length >= 2).ToList();
 
             int Contained(PlanViewOption p)
             {
-                if (eyesXY == null) return 0;
                 int n = 0;
-                foreach (double[] e in eyesXY)
-                    if (e != null && e.Length >= 2 && p.CropContains(e[0], e[1])) n++;
+                foreach (double[] e in eyeList) if (p.CropContains(e[0], e[1])) n++;
                 return n;
             }
+            bool OnLevel(PlanViewOption p, long id) => p.GenLevelId != null && p.GenLevelId.GetIdValue() == id;
+            string Tag(PlanViewOption p, int c) => $"包含相機 {c}/{eyeList.Count} 台";
 
-            PlanViewOption best = pool
-                .OrderByDescending(Contained)
-                .ThenBy(p => p.IsDependent ? 1 : 0)
-                .ThenByDescending(p => p.CropAreaSqFeet)
-                .ThenBy(p => p.PlanName ?? p.DisplayName, System.StringComparer.Ordinal)
-                .First();
-            int c = Contained(best);
-            why = (eyesXY == null || eyesXY.Count == 0)
-                ? $"最大面積（同層候選 {pool.Count} 張）"
-                : c > 0 ? $"包含相機 {c}/{eyesXY.Count} 台、面積最大（同層候選 {pool.Count} 張）"
-                        : $"沒有任何候選包含相機 → 最大面積（同層候選 {pool.Count} 張）";
-            return best;
+            // 步驟 0：相機放置時的平面。已裁剪 → 直接用；未裁剪 → 改找它的父／從屬／同主視圖的已裁剪平面
+            // （有相機座標時須包含相機），都沒有就往下走步驟 1–4。
+            string step0Note = "";
+            if (src?.ViewId != null)
+            {
+                long sid = src.ViewId.GetIdValue();
+                PlanViewOption exact = plans.FirstOrDefault(p => p.ViewId.GetIdValue() == sid);
+                if (exact != null)
+                {
+                    step = 0; why = $"步驟0 底圖＝相機放置時的平面「{src.Name ?? exact.PlanName}」";
+                    return exact;
+                }
+                long pid = src.PrimaryId != null ? (long)src.PrimaryId.GetIdValue() : -1;
+                List<PlanViewOption> related = plans.Where(p =>
+                        (pid > 0 && p.ViewId.GetIdValue() == pid) ||
+                        (p.PrimaryViewId != null && (p.PrimaryViewId.GetIdValue() == sid || (pid > 0 && p.PrimaryViewId.GetIdValue() == pid))))
+                    .Where(p => eyeList.Count == 0 || Contained(p) > 0).ToList();
+                if (related.Count > 0)
+                {
+                    PlanViewOption b = related.OrderByDescending(Contained).ThenBy(p => p.IsDependent ? 1 : 0)
+                        .ThenByDescending(p => p.CropAreaSqFeet).ThenBy(p => p.PlanName ?? p.DisplayName, System.StringComparer.Ordinal).First();
+                    step = 0; why = $"步驟0 底圖＝相機放置時的平面「{src.Name}」未啟用裁剪 → 改用其父／從屬視圖（候選 {related.Count} 張）";
+                    return b;
+                }
+                step0Note = $"（放置平面「{src.Name}」{(src.Cropped ? "不在清單" : "未啟用裁剪且無可用父／從屬視圖")}）";
+            }
+            if (levelId == null) { why = "no level" + step0Note; return null; }
+            long lv = levelId.GetIdValue();
+
+            // 相機樓層高程：先查樓層清單，再查該層平面帶的 GenLevel 高程。
+            double? camLevelElev = levelsByElevation?.FirstOrDefault(l => l?.LevelId != null && l.LevelId.GetIdValue() == lv)?.ProjectElevationFeet;
+            if (!camLevelElev.HasValue)
+                camLevelElev = plans.FirstOrDefault(p => OnLevel(p, lv) && p.GenLevelElevationFeet.HasValue)?.GenLevelElevationFeet;
+
+            if (eyeList.Count > 0)
+            {
+                // 步驟 1
+                List<PlanViewOption> s1 = plans.Where(p => p.IsFloorPlan && OnLevel(p, lv) && Contained(p) > 0).ToList();
+                if (s1.Count > 0)
+                {
+                    PlanViewOption b = s1.OrderByDescending(Contained).ThenBy(p => p.IsDependent ? 1 : 0)
+                        .ThenByDescending(p => p.CropAreaSqFeet).ThenBy(p => p.PlanName ?? p.DisplayName, System.StringComparer.Ordinal).First();
+                    step = 1; why = $"步驟1 同層包含相機：{Tag(b, Contained(b))}、非從屬優先、面積最大（候選 {s1.Count} 張）" + step0Note;
+                    return b;
+                }
+                // 步驟 2
+                if (camLevelElev.HasValue)
+                {
+                    double ce = camLevelElev.Value;
+                    List<PlanViewOption> s2 = plans.Where(p => p.IsFloorPlan && !OnLevel(p, lv) && p.GenLevelElevationFeet.HasValue &&
+                        System.Math.Abs(p.GenLevelElevationFeet.Value - ce) <= NearElevationToleranceFeet + 1e-9 && Contained(p) > 0).ToList();
+                    if (s2.Count > 0)
+                    {
+                        PlanViewOption b = s2.OrderByDescending(Contained).ThenBy(p => System.Math.Abs(p.GenLevelElevationFeet.Value - ce))
+                            .ThenByDescending(p => p.CropAreaSqFeet).ThenBy(p => p.PlanName ?? p.DisplayName, System.StringComparer.Ordinal).First();
+                        double dMm = CameraMath.FeetToMm(b.GenLevelElevationFeet.Value - ce);
+                        step = 2; why = $"步驟2 同層無平面包含相機 → 高程相近樓層「{b.LevelName ?? "?"}」（{dMm:+0;-0;0} mm）：{Tag(b, Contained(b))}、面積最大（候選 {s2.Count} 張）" + step0Note;
+                        return b;
+                    }
+                }
+                // 步驟 3（眼睛高程取多台相機中最低者，保守）
+                List<double> zs = eyeList.Where(e => e.Length >= 3).Select(e => e[2]).ToList();
+                if (zs.Count > 0)
+                {
+                    double eyeZ = zs.Min();
+                    List<PlanViewOption> s3 = plans.Where(p => p.IsFloorPlan && p.GenLevelIsStorey && p.GenLevelElevationFeet.HasValue &&
+                        p.GenLevelElevationFeet.Value <= eyeZ + 1e-9 && Contained(p) > 0).ToList();
+                    if (s3.Count > 0)
+                    {
+                        PlanViewOption b = s3.OrderByDescending(Contained).ThenByDescending(p => p.GenLevelElevationFeet.Value)
+                            .ThenByDescending(p => p.CropAreaSqFeet).ThenBy(p => p.PlanName ?? p.DisplayName, System.StringComparer.Ordinal).First();
+                        step = 3; why = $"步驟3 ±1.5 m 內無平面包含相機 → 眼睛下方最高樓層「{b.LevelName ?? "?"}」：{Tag(b, Contained(b))}、面積最大（候選 {s3.Count} 張）" + step0Note;
+                        return b;
+                    }
+                }
+            }
+
+            // 步驟 4：舊規則（同層最大面積），再上下樓層退回。
+            PlanViewOption Largest(long id, out int poolCount)
+            {
+                List<PlanViewOption> ofLevel = plans.Where(p => OnLevel(p, id)).ToList();
+                List<PlanViewOption> pool = ofLevel.Where(p => p.IsFloorPlan).ToList();
+                if (pool.Count == 0) pool = ofLevel;
+                poolCount = pool.Count;
+                return pool.OrderByDescending(Contained).ThenBy(p => p.IsDependent ? 1 : 0).ThenByDescending(p => p.CropAreaSqFeet)
+                    .ThenBy(p => p.PlanName ?? p.DisplayName, System.StringComparer.Ordinal).FirstOrDefault();
+            }
+            string noEye = eyeList.Count == 0 ? "沒有相機座標" : "沒有任何平面包含相機";
+            PlanViewOption own = Largest(lv, out int n4);
+            if (own != null)
+            {
+                step = 4; why = $"步驟4 {noEye} → 同層最大面積（同層候選 {n4} 張）" + step0Note;
+                return own;
+            }
+            if (levelsByElevation != null)
+            {
+                int idx = -1;
+                for (int i = 0; i < levelsByElevation.Count; i++)
+                    if (levelsByElevation[i]?.LevelId != null && levelsByElevation[i].LevelId.GetIdValue() == lv) { idx = i; break; }
+                if (idx >= 0)
+                {
+                    for (int i = idx - 1; i >= 0; i--)
+                    {
+                        LevelOption o = levelsByElevation[i];
+                        PlanViewOption p = o?.LevelId != null ? Largest(o.LevelId.GetIdValue(), out int n) : null;
+                        if (p != null) { step = 4; why = $"步驟4 {noEye}、同層沒有已裁剪平面 → 最近下方樓層「{o.Name}」最大面積" + step0Note; return p; }
+                    }
+                    for (int i = idx + 1; i < levelsByElevation.Count; i++)
+                    {
+                        LevelOption o = levelsByElevation[i];
+                        PlanViewOption p = o?.LevelId != null ? Largest(o.LevelId.GetIdValue(), out int n) : null;
+                        if (p != null) { step = 4; why = $"步驟4 {noEye}、同層與下方都沒有已裁剪平面 → 最近上方樓層「{o.Name}」最大面積" + step0Note; return p; }
+                    }
+                }
+            }
+            why = $"{noEye}，且該樓層（與上下樓層）沒有已裁剪平面" + step0Note;
+            return null;
+        }
+    }
+
+    /// <summary>§4.8 步驟 0 的輸入：相機放置時的平面（由 CameraRow 的 SourcePlan* 欄位組成）。純資料。</summary>
+    internal class SourcePlanHint
+    {
+        public ElementId ViewId { get; set; }
+        public string Name { get; set; }
+        public bool Cropped { get; set; }
+        public ElementId PrimaryId { get; set; }
+
+        public static SourcePlanHint From(CameraRow r) => r?.SourcePlanId == null ? null
+            : new SourcePlanHint { ViewId = r.SourcePlanId, Name = r.SourcePlanName, Cropped = r.SourcePlanCropped, PrimaryId = r.SourcePlanPrimaryId };
+
+        /// <summary>多台相機（預設底圖、底圖清單每層一張）：取最多台相機共用的放置平面；都沒有記錄＝null。</summary>
+        public static SourcePlanHint MostCommon(IEnumerable<CameraRow> rows)
+        {
+            CameraRow r = rows?.Where(x => x?.SourcePlanId != null)
+                .GroupBy(x => (long)x.SourcePlanId.GetIdValue())
+                .OrderByDescending(g => g.Count()).ThenBy(g => g.Key)
+                .Select(g => g.First()).FirstOrDefault();
+            return From(r);
         }
     }
 

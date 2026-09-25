@@ -375,7 +375,7 @@ namespace RevitMCP.Core
                     Logger.Info("相機 Key Plan：剖面規格 " + spec.Log);
                     ViewSection sectionView = GetOrCreateSectionView(doc, sectionName, cid, geom, spec, forceResetSection, out bool preserved);
                     DrawMarkerSafely(doc, "ApplyKeyPlanStyleSection",
-                        () => ApplyKeyPlanStyle(sectionView, faded, isSection: true, levelBelow: geom.LevelBelow, outdoor: cp.IsOutdoor, eye: geom.Eye));
+                        () => ApplyKeyPlanStyle(sectionView, faded, isSection: true, levelBelow: geom.LevelBelow, outdoor: cp.IsOutdoor, eye: geom.Eye, cid: cid));
                     DrawMarkerSafely(doc, "DrawSectionMarker",
                         () => DrawSectionMarker(doc, sectionView, geom, cp.CenterHoriz ?? forwardHoriz, fanRadiusFeet, cp.DownRad, cp.UpRad, cid));
                     result.SectionViewId = sectionView.Id;
@@ -1386,7 +1386,7 @@ namespace RevitMCP.Core
         ///          ③ 比例＝1:50/100/200 中最細且裁剪範圍放得進 A3 橫式 400×270mm 者（都放不下用 1:200）。
         ///   原始：Display Model＝一般（0）、取消隱藏同一組類別、清除房間標籤與 ④ 的類別／牆元素取代；比例不動。
         /// </summary>
-        private static void ApplyKeyPlanStyle(View view, bool faded, bool isSection = false, Level levelBelow = null, bool outdoor = false, XYZ eye = null)
+        private static void ApplyKeyPlanStyle(View view, bool faded, bool isSection = false, Level levelBelow = null, bool outdoor = false, XYZ eye = null, string cid = null)
         {
             if (view == null) return;
             string label = $"「{view.Name}」(id={view.Id.GetIdValue()})";
@@ -1440,12 +1440,14 @@ namespace RevitMCP.Core
             // ② 類別隱藏＋房間標籤半色調
             try
             {
-                // 剖面：樓層不整類隱藏（改逐元素，只留本層與上一層，見下方）
+                // 2026-09-25（§5.1 剖面樓層）：剖面的樓層整類隱藏（主體＋連結的樓層基準都藏），改畫自己的簡化樓層線＋
+                // 樓層字（見 DrawSectionLevelMarks）；那些字是 TextNote，所以剖面的文字類別不整類隱藏，
+                // 改成逐元素隱藏「不是我們的」文字（HideForeignTextNotes）。
                 IEnumerable<string> names = isSection
-                    ? KeyPlanDeclutterCategoryNames.Where(x => x != "OST_Levels")
+                    ? KeyPlanDeclutterCategoryNames.Where(x => x != "OST_TextNotes")
                     : KeyPlanDeclutterCategoryNames;
                 int n = HideCategoriesByName(view, names, includeAllTags: true, keepRoomTags: true, hide: faded);
-                if (isSection) HideCategoriesByName(view, new[] { "OST_Levels" }, false, false, hide: false);
+                if (isSection) HideCategoriesByName(view, new[] { "OST_TextNotes" }, false, false, hide: false);
                 Logger.Info($"相機 Key Plan：{label} {(faded ? "隱藏" : "取消隱藏")}雜項註解類別 {n} 個");
             }
             catch (Exception ex) { Logger.Error($"相機 Key Plan：{label} 類別隱藏/還原失敗", ex); }
@@ -1476,8 +1478,8 @@ namespace RevitMCP.Core
 
             if (isSection)
             {
-                try { ApplySectionLevelDatums(view, faded, levelBelow, outdoor, eye); }
-                catch (Exception ex) { Logger.Error($"相機 Key Plan：{label} 剖面樓層逐元素隱藏/半色調失敗", ex); }
+                try { ApplySectionLevelDatums(view, faded, levelBelow, outdoor, cid); }
+                catch (Exception ex) { Logger.Error($"相機 Key Plan：{label} 剖面樓層線處理失敗", ex); }
             }
             else if (faded)
             {
@@ -1506,25 +1508,31 @@ namespace RevitMCP.Core
         }
 
         /// <summary>
-        /// 剖面 Key Plan 的樓層標頭（2026-09-25 使用者截圖：一堆樓層標頭在小裁剪框內巨大且互相重疊）：
-        /// faded＝逐元素隱藏這張剖面內所有樓層，只留相機下方樓層與其上一層（本層上下界），這兩個設
-        /// 元素取代半色調；原始＝取消隱藏所有被藏的樓層並清掉樓層元素取代。
+        /// 剖面 Key Plan 的樓層（2026-09-25 第二版，使用者拍板：連結模型的樓層在「依主體視圖」下仍會顯示，且無法逐元素
+        /// 隱藏連結內的元素）：
+        ///   faded＝整類隱藏 OST_Levels（主體＋連結的樓層基準都不顯示，見 ApplyKeyPlanStyle ②），改畫「簡化樓層記號」：
+        ///          保留樓層（室內：下方樓層＋高差 ≥1 m 的下一個建築樓層；室外：只有下方樓層）各畫一條橫跨裁剪寬度的
+        ///          灰色細詳圖線＋左端一個 TextNote（樓層名＋依專案單位格式的高程）。每個元素以 ES（相機 UniqueId＋
+        ///          Role＝LevelMark＋Level UniqueId）連結真的 Level，重跑時整批替換、樓層改高程／改名時自動重畫
+        ///          （<see cref="UpdateLevelMarksFromLevels"/>）。另外把「不是我們的」文字逐元素隱藏（文字類別不整類藏）。
+        ///   原始＝刪除我們的樓層記號、取消隱藏文字；並清掉舊版（逐元素隱藏／半色調／視圖專屬 2D 範圍）留下的樓層設定。
+        /// 舊版逐元素樓層隱藏／半色調／2D 範圍／標頭擺放邏輯已移除（2026-09-25）。
         /// </summary>
-        private static void ApplySectionLevelDatums(View view, bool faded, Level levelBelow, bool outdoor = false, XYZ eye = null)
+        private static void ApplySectionLevelDatums(View view, bool faded, Level levelBelow, bool outdoor, string cid)
         {
             Document doc = view.Document;
-            List<Level> allLevels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
-                .OrderBy(l => l.ProjectElevation).ToList();
-
             if (!faded)
             {
+                int removed = DeleteLevelMarks(doc, view, null);
+                int unhidText = UnhideTextNotes(view);
+                // 舊版淡化樣式留下的逐元素樓層設定（隱藏／取代／視圖專屬 2D 範圍）一併還原。
+                List<Level> allLevels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().ToList();
                 var toUnhide = allLevels.Where(l => { try { return l.IsHidden(view); } catch { return false; } }).Select(l => l.Id).ToList();
-                if (toUnhide.Count > 0) view.UnhideElements(toUnhide);
+                if (toUnhide.Count > 0) { try { view.UnhideElements(toUnhide); } catch (Exception ex) { Logger.Error("相機 Key Plan：取消隱藏舊版樓層失敗", ex); } }
                 int extReset = 0;
                 foreach (Level l in allLevels)
                 {
                     try { view.SetElementOverrides(l.Id, new OverrideGraphicSettings()); } catch { }
-                    // 2026-09-25：淡化樣式設過的「視圖專屬 2D 範圍」還原成模型範圍（只影響這張 Key Plan 剖面）。
                     foreach (DatumEnds end in new[] { DatumEnds.End0, DatumEnds.End1 })
                     {
                         try
@@ -1538,205 +1546,312 @@ namespace RevitMCP.Core
                         catch { }
                     }
                 }
-                Logger.Info($"相機 Key Plan：剖面「{view.Name}」原始樣式：取消隱藏樓層 {toUnhide.Count} 個、清除樓層元素取代、2D 範圍還原模型 {extReset} 端");
+                Logger.Info($"相機 Key Plan：剖面「{view.Name}」原始樣式：樓層類別取消隱藏、刪除簡化樓層記號 {removed} 個、取消隱藏文字 {unhidText} 個、" +
+                            $"還原舊版逐元素隱藏樓層 {toUnhide.Count} 個／2D 範圍 {extReset} 端");
                 return;
             }
 
-            if (levelBelow == null)
+            int hiddenText = HideForeignTextNotes(view);
+            if (levelBelow == null || string.IsNullOrEmpty(cid))
             {
-                Logger.Info($"相機 Key Plan：剖面「{view.Name}」找不到相機樓層，樓層標頭不處理");
+                int removed = DeleteLevelMarks(doc, view, cid);
+                Logger.Info($"相機 Key Plan：剖面「{view.Name}」找不到相機樓層（或相機 Id），不畫樓層記號（刪除舊記號 {removed} 個；隱藏他人文字 {hiddenText} 個）");
                 return;
             }
+            List<Level> keep = ComputeSectionKeepLevels(doc, levelBelow, outdoor);
+            int drawn = DrawSectionLevelMarks(doc, view, keep, cid);
+            Logger.Info($"相機 Key Plan：剖面「{view.Name}」樓層類別整類隱藏（主體＋連結）；簡化樓層記號（{(outdoor ? "室外：只留下方樓層" : "室內：下方＋高差≥1m 上一個建築樓層")}）" +
+                        $" [{string.Join(", ", keep.Select(l => $"{l.Name}@{CameraMath.FeetToMm(l.ProjectElevation):F0}mm"))}] 畫了 {drawn} 個元素；隱藏他人文字 {hiddenText} 個");
+        }
 
-            // 2026-09-25（Snowdon Towers 室外相機實測：大量近同高程樓層重疊、部分仍是全黑未隱藏）：
-            // 保留＝下方樓層＋「高差 ≥ 1.0m 的下一個上層樓層」（近重複樓層不算）；室外只留下方樓層。
-            // 其餘樓層：視圖內 collector ∪ 全模型 Level 清單 → 過濾 CanBeHidden、未隱藏 → 一次 HideElements；
-            // 批次例外時逐一隱藏並記錄失敗。保留者一律元素取代半色調。
-            var keep = new List<Level> { levelBelow };
+        /// <summary>剖面要標的主體樓層：下方樓層＋（室內）高差 ≥ 1.0 m 的下一個建築樓層。</summary>
+        private static List<Level> ComputeSectionKeepLevels(Document doc, Level levelBelow, bool outdoor)
+        {
+            var keep = new List<Level>();
+            if (levelBelow == null) return keep;
+            keep.Add(levelBelow);
             if (!outdoor)
             {
                 double gap = CameraMath.MmToFeet(SectionLevelMinGapMm);
-                Level above = allLevels.FirstOrDefault(l => l.ProjectElevation >= levelBelow.ProjectElevation + gap);
+                Level above = CameraMath.GetStoreyLevelsSorted(doc)
+                    .FirstOrDefault(l => l.ProjectElevation >= levelBelow.ProjectElevation + gap);
                 if (above != null) keep.Add(above);
             }
-            var keepIds = new HashSet<ElementId>(keep.Select(l => l.Id));
-
-            var inView = new HashSet<ElementId>();
-            try
-            {
-                foreach (Element e in new FilteredElementCollector(doc, view.Id).OfClass(typeof(Level)))
-                    inView.Add(e.Id);
-            }
-            catch (Exception ex) { Logger.Error($"相機 Key Plan：剖面「{view.Name}」視圖內樓層 collector 失敗，改用全模型清單", ex); }
-
-            int failures = 0;
-            var failNames = new List<string>();
-            try
-            {
-                var keepHidden = keep.Where(l => { try { return l.IsHidden(view); } catch { return false; } }).Select(l => l.Id).ToList();
-                if (keepHidden.Count > 0) view.UnhideElements(keepHidden);
-            }
-            catch (Exception ex) { failures++; failNames.Add("unhide keep: " + ex.Message); }
-
-            var toHide = new List<ElementId>();
-            var hideNames = new List<string>();
-            int alreadyHidden = 0, notHideable = 0, visibleSeen = 0;
-            foreach (Level l in allLevels)
-            {
-                bool hidden;
-                try { hidden = l.IsHidden(view); } catch { hidden = false; }
-                bool visible = !hidden && inView.Contains(l.Id);
-                if (visible) visibleSeen++;
-                if (keepIds.Contains(l.Id)) continue;
-                if (hidden) { alreadyHidden++; continue; }
-                bool can;
-                try { can = l.CanBeHidden(view); } catch { can = false; }
-                if (!can)
-                {
-                    notHideable++;
-                    if (visible) { failures++; failNames.Add(l.Name + "(CanBeHidden=false)"); }
-                    continue;
-                }
-                toHide.Add(l.Id);
-                hideNames.Add(l.Name);
-            }
-
-            int hiddenNow = 0;
-            if (toHide.Count > 0)
-            {
-                try
-                {
-                    view.HideElements(toHide);
-                    hiddenNow = toHide.Count;
-                }
-                catch (Exception batchEx)
-                {
-                    Logger.Error($"相機 Key Plan：剖面「{view.Name}」樓層批次隱藏失敗（{toHide.Count} 個），改逐一隱藏", batchEx);
-                    foreach (ElementId id in toHide)
-                    {
-                        try { view.HideElements(new List<ElementId> { id }); hiddenNow++; }
-                        catch (Exception ex1)
-                        {
-                            failures++;
-                            failNames.Add((doc.GetElement(id)?.Name ?? id.GetIdValue().ToString()) + "(" + ex1.Message + ")");
-                        }
-                    }
-                }
-            }
-
-            var ogs = new OverrideGraphicSettings();
-            ogs.SetHalftone(true);
-            foreach (Level l in keep)
-            {
-                try { view.SetElementOverrides(l.Id, ogs); }
-                catch (Exception ex) { failures++; failNames.Add(l.Name + "(halftone: " + ex.Message + ")"); }
-            }
-
-            // 2026-09-25（使用者：「剖面 Key Plan 每個樓層文字都有白底色塊蓋住其他東西」，後續：標頭要看得到但不能蓋東西）：
-            // 樓層類型是全域的，不能為這張視圖換類型；改用「視圖專屬 2D 範圍」：保留樓層線橫跨剖面裁剪寬度、
-            // 顯示標頭的那一端伸出裁剪框外 1.5m（遠離相機標記的一側）落在空白處，另一端標頭隱藏。
-            // SetCurveInView 失敗的樓層才退回「兩端標頭都隱藏」。
-            PlaceSectionLevelHeads(view, keep, eye);
-
-            // 驗證：處理後仍可見、且不在保留清單的樓層
-            var stillVisible = new List<string>();
-            foreach (Level l in allLevels)
-            {
-                if (keepIds.Contains(l.Id)) continue;
-                try { if (!l.IsHidden(view) && inView.Contains(l.Id)) stillVisible.Add(l.Name); } catch { }
-            }
-
-            string keepNames = string.Join(", ", keep.Select(l => $"{l.Name}@{CameraMath.FeetToMm(l.ProjectElevation):F0}mm"));
-            Logger.Info($"相機 Key Plan：剖面「{view.Name}」樓層標頭（{(outdoor ? "室外：只留下方樓層" : "室內：下方＋高差≥1m 上一層")}）：" +
-                        $"全模型 {allLevels.Count} 個、視圖內 collector {inView.Count} 個、處理前可見 {visibleSeen} 個；" +
-                        $"保留 [{keepNames}]（半色調）；本次隱藏 {hiddenNow}/{toHide.Count} 個 [{string.Join(", ", hideNames)}]；" +
-                        $"原已隱藏 {alreadyHidden}、不可隱藏 {notHideable}；失敗 {failures}" +
-                        (failNames.Count > 0 ? " [" + string.Join("; ", failNames) + "]" : "") +
-                        $"；處理後仍可見（非保留）{stillVisible.Count}" + (stillVisible.Count > 0 ? " [" + string.Join(", ", stillVisible) + "]" : ""));
+            return keep;
         }
 
-        /// <summary>剖面 Key Plan 保留樓層：顯示標頭的那一端伸出裁剪框外的距離（模型 mm）。</summary>
-        private const double SectionLevelHeadOutsideMm = 1500.0;
+        // ── 簡化樓層記號（ES 連結真的 Level）──
+        // 固定 GUID，不要改——寫進使用者 .rvt 後靠它辨識。三個 string 欄位，不需要 Spec。
+        private static readonly Guid LevelMarkSchemaGuid = new Guid("AB09D4E8-CA14-4211-B54B-4F483BCF2C5B");
+        private const string LevelMarkRole = "LevelMark";
+        private const string FieldLevelUniqueId = "LevelUniqueId";
+        private const string LevelMarkLineStyleName = "相機Key Plan樓層線";
+        private const string LevelMarkTextTypeName = "相機Key Plan樓層字";
+        internal const string LevelMarkUpdateTransactionName = "更新 Key Plan 樓層線";
+        private const double LevelMarkTextSizeMm = 2.0;
 
-        /// <summary>
-        /// 2026-09-25：剖面 Key Plan 保留樓層的標頭擺放（只動這張視圖的視圖專屬 2D 範圍，正式視圖不受影響）：
-        ///   兩端 SetDatumExtentType(ViewSpecific) → 取 GetCurvesInView(ViewSpecific) 那條線，改成沿剖面 X 軸
-        ///   橫跨裁剪寬度，且「遠離相機眼睛」那一側多伸出 1.5m；該端 ShowBubbleInView、另一端 HideBubbleInView。
-        ///   視圖若開了註解裁剪（會把框外標頭切掉）→ 關閉註解裁剪並記 log。任何一層失敗 → 該層退回兩端標頭隱藏。
-        /// </summary>
-        private static void PlaceSectionLevelHeads(View view, List<Level> keep, XYZ eye)
+        private static Schema GetOrCreateLevelMarkSchema()
         {
-            if (view == null || keep == null || keep.Count == 0) return;
-            BoundingBoxXYZ crop;
-            Transform tf;
-            try { crop = view.CropBox; tf = crop.Transform; }
-            catch (Exception ex)
-            {
-                Logger.Error($"相機 Key Plan：剖面「{view.Name}」讀不到裁剪框，保留樓層改為兩端標頭隱藏", ex);
-                HideDatumBubblesInView(view, keep.Cast<DatumPlane>(), "剖面保留樓層（退回）");
-                return;
-            }
-            XYZ bx = tf.BasisX;
-            double minX = Math.Min(crop.Min.X, crop.Max.X), maxX = Math.Max(crop.Min.X, crop.Max.X);
-            double ex0 = eye != null ? (eye - tf.Origin).DotProduct(bx) : (minX + maxX) / 2.0;
-            bool bubbleHigh = (ex0 - minX) <= (maxX - ex0); // 眼睛靠近 min 側 → 標頭放 max 側
-            double outside = CameraMath.MmToFeet(SectionLevelHeadOutsideMm);
-            double lowX = bubbleHigh ? minX : minX - outside;
-            double highX = bubbleHigh ? maxX + outside : maxX;
+            Schema schema = Schema.Lookup(LevelMarkSchemaGuid);
+            if (schema != null) return schema;
+            SchemaBuilder b = new SchemaBuilder(LevelMarkSchemaGuid);
+            b.SetSchemaName("RevitMCP_CameraKeyPlanLevelMark");
+            b.SetReadAccessLevel(AccessLevel.Public);
+            b.SetWriteAccessLevel(AccessLevel.Public);
+            b.AddSimpleField(FieldCameraUniqueId, typeof(string));
+            b.AddSimpleField(FieldRole, typeof(string));
+            b.AddSimpleField(FieldLevelUniqueId, typeof(string));
+            return b.Finish();
+        }
 
-            // 註解裁剪會切掉框外的標頭 → 關閉（只這張 Key Plan 剖面）。
-            string annoLog = "註解裁剪=?";
+        private static void TagLevelMark(Element el, string cid, string levelUid)
+        {
+            Schema schema = GetOrCreateLevelMarkSchema();
+            Entity e = new Entity(schema);
+            e.Set(schema.GetField(FieldCameraUniqueId), cid ?? "");
+            e.Set(schema.GetField(FieldRole), LevelMarkRole);
+            e.Set(schema.GetField(FieldLevelUniqueId), levelUid ?? "");
+            el.SetEntity(e);
+        }
+
+        private static bool TryReadLevelMark(Element el, out string cid, out string levelUid)
+        {
+            cid = null; levelUid = null;
             try
             {
-                Parameter ap = view.get_Parameter(BuiltInParameter.VIEWER_ANNOTATION_CROP_ACTIVE);
-                if (ap != null && !ap.IsReadOnly && ap.StorageType == StorageType.Integer)
-                {
-                    if (ap.AsInteger() != 0) { ap.Set(0); annoLog = "註解裁剪 開→關（避免切掉框外標頭）"; }
-                    else annoLog = "註解裁剪 原本即關閉";
-                }
-                else annoLog = "註解裁剪參數不可用";
+                Schema schema = Schema.Lookup(LevelMarkSchemaGuid);
+                if (schema == null || el == null) return false;
+                Entity e = el.GetEntity(schema);
+                if (e == null || !e.IsValid()) return false;
+                if (e.Get<string>(schema.GetField(FieldRole)) != LevelMarkRole) return false;
+                cid = e.Get<string>(schema.GetField(FieldCameraUniqueId));
+                levelUid = e.Get<string>(schema.GetField(FieldLevelUniqueId));
+                return true;
             }
-            catch (Exception ex) { annoLog = "註解裁剪設定失敗：" + ex.Message; }
+            catch { return false; }
+        }
 
-            var ok = new List<string>();
-            var fallback = new List<Level>();
+        /// <summary>刪除這張視圖內（cid＝null 時不分相機）的簡化樓層記號，回傳刪除數。須在交易內。</summary>
+        private static int DeleteLevelMarks(Document doc, View view, string cid)
+        {
+            if (Schema.Lookup(LevelMarkSchemaGuid) == null) return 0;
+            List<ElementId> ids = new FilteredElementCollector(doc, view.Id).WhereElementIsNotElementType()
+                .Where(e => TryReadLevelMark(e, out string c, out _) && (cid == null || c == cid))
+                .Select(e => e.Id).ToList();
+            if (ids.Count > 0) doc.Delete(ids);
+            return ids.Count;
+        }
+
+        /// <summary>逐元素隱藏這張剖面內「不是我們的」TextNote（我們的樓層字除外）。回傳本次隱藏數。</summary>
+        private static int HideForeignTextNotes(View view)
+        {
+            try
+            {
+                Document doc = view.Document;
+                List<ElementId> ids = new FilteredElementCollector(doc, view.Id).OfClass(typeof(TextNote))
+                    .Where(e => !TryReadLevelMark(e, out _, out _))
+                    .Where(e => { try { return !e.IsHidden(view) && e.CanBeHidden(view); } catch { return false; } })
+                    .Select(e => e.Id).ToList();
+                if (ids.Count > 0) view.HideElements(ids);
+                return ids.Count;
+            }
+            catch (Exception ex) { Logger.Error("相機 Key Plan：隱藏剖面內其他文字失敗（略過）", ex); return 0; }
+        }
+
+        private static int UnhideTextNotes(View view)
+        {
+            try
+            {
+                Document doc = view.Document;
+                // 被隱藏的元素不在一般視圖 collector 內 → 用全文件 TextNote 過濾 OwnerViewId。
+                List<ElementId> ids = new FilteredElementCollector(doc).OfClass(typeof(TextNote))
+                    .Where(e => e.OwnerViewId == view.Id)
+                    .Where(e => { try { return e.IsHidden(view); } catch { return false; } })
+                    .Select(e => e.Id).ToList();
+                if (ids.Count > 0) view.UnhideElements(ids);
+                return ids.Count;
+            }
+            catch (Exception ex) { Logger.Error("相機 Key Plan：取消隱藏剖面內文字失敗（略過）", ex); return 0; }
+        }
+
+        /// <summary>線型「相機Key Plan樓層線」：灰 160、線寬 1、有虛線樣式就用虛線；只在第一次建立時設定。</summary>
+        private static GraphicsStyle GetOrCreateLevelMarkLineStyle(Document doc)
+        {
+            try
+            {
+                Category lines = Category.GetCategory(doc, BuiltInCategory.OST_Lines);
+                if (lines == null) return null;
+                Category sub = null;
+                foreach (Category c in lines.SubCategories) if (c.Name == LevelMarkLineStyleName) { sub = c; break; }
+                if (sub == null)
+                {
+                    sub = doc.Settings.Categories.NewSubcategory(lines, LevelMarkLineStyleName);
+                    sub.LineColor = new Color(160, 160, 160);
+                    try { sub.SetLineWeight(1, GraphicsStyleType.Projection); } catch { }
+                    string pat = "實線";
+                    try
+                    {
+                        LinePatternElement dash = new FilteredElementCollector(doc).OfClass(typeof(LinePatternElement)).Cast<LinePatternElement>()
+                            .Where(x => x.Name != null && (x.Name.IndexOf("dash", StringComparison.OrdinalIgnoreCase) >= 0 || x.Name.Contains("虛")))
+                            .OrderBy(x => x.Name, StringComparer.Ordinal).FirstOrDefault();
+                        if (dash != null) { sub.SetLinePatternId(dash.Id, GraphicsStyleType.Projection); pat = dash.Name; }
+                        else sub.SetLinePatternId(LinePatternElement.GetSolidPatternId(), GraphicsStyleType.Projection);
+                    }
+                    catch (Exception ex) { Logger.Error("相機 Key Plan：樓層線設定虛線樣式失敗（改實線）", ex); }
+                    Logger.Info($"相機 Key Plan：建立線型「{LevelMarkLineStyleName}」灰 160、線寬 1、樣式={pat}");
+                }
+                return sub.GetGraphicsStyle(GraphicsStyleType.Projection);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"相機 Key Plan：建立/取得線型「{LevelMarkLineStyleName}」失敗，樓層線改用預設線型", ex);
+                return null;
+            }
+        }
+
+        /// <summary>文字類型「相機Key Plan樓層字」：複製第一個文字類型，約 2 mm、背景透明、灰 128；只在第一次建立時設定。</summary>
+        private static ElementId GetOrCreateLevelMarkTextType(Document doc)
+        {
+            List<TextNoteType> all = new FilteredElementCollector(doc).OfClass(typeof(TextNoteType)).Cast<TextNoteType>().ToList();
+            TextNoteType named = all.FirstOrDefault(t => t.Name == LevelMarkTextTypeName);
+            if (named != null) return named.Id;
+            TextNoteType src = all.OrderBy(t => t.Name, StringComparer.Ordinal).FirstOrDefault();
+            if (src == null) return ElementId.InvalidElementId;
+            try
+            {
+                TextNoteType t = src.Duplicate(LevelMarkTextTypeName) as TextNoteType;
+                if (t == null) return src.Id;
+                try { t.get_Parameter(BuiltInParameter.TEXT_SIZE)?.Set(CameraMath.MmToFeet(LevelMarkTextSizeMm)); } catch (Exception ex) { Logger.Error("相機 Key Plan：樓層字大小設定失敗", ex); }
+                try { t.get_Parameter(BuiltInParameter.TEXT_BACKGROUND)?.Set(1); } catch (Exception ex) { Logger.Error("相機 Key Plan：樓層字背景透明設定失敗", ex); }
+                try { t.get_Parameter(BuiltInParameter.LINE_COLOR)?.Set(128 + 128 * 256 + 128 * 65536); } catch (Exception ex) { Logger.Error("相機 Key Plan：樓層字顏色設定失敗", ex); }
+                Logger.Info($"相機 Key Plan：建立文字類型「{LevelMarkTextTypeName}」（複製自「{src.Name}」，{LevelMarkTextSizeMm}mm、背景透明、灰 128）");
+                return t.Id;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"相機 Key Plan：建立文字類型「{LevelMarkTextTypeName}」失敗，改用「{src.Name}」", ex);
+                return src.Id;
+            }
+        }
+
+        /// <summary>樓層字：「樓層名  +高程」，高程用 Level.Elevation（同 Revit 樓層標頭，相對其高程基準）依專案單位格式化。</summary>
+        private static string FormatLevelMarkText(Document doc, Level l)
+        {
+            string elev;
+            try
+            {
+                double v = l.Elevation;
+                string f = UnitFormatUtils.Format(doc.GetUnits(), SpecTypeId.Length, Math.Abs(v), false);
+                elev = (v < -1e-9 ? "-" : "+") + f;
+            }
+            catch { elev = $"{(l.Elevation < 0 ? "-" : "+")}{Math.Abs(CameraMath.FeetToMm(l.Elevation)):F0} mm"; }
+            return $"{l.Name}  {elev}";
+        }
+
+        /// <summary>
+        /// 刪除這台相機在這張剖面的舊樓層記號，再依 keep 畫：每層一條橫跨裁剪寬度的詳圖線（剖面平面上、Z＝樓層高程）
+        /// ＋左端上方一個 TextNote。全部以 ES 連結 Level。回傳建立的元素數。須在交易內。
+        /// </summary>
+        private static int DrawSectionLevelMarks(Document doc, View view, IList<Level> keep, string cid)
+        {
+            int removed = DeleteLevelMarks(doc, view, cid);
+            if (keep == null || keep.Count == 0) return 0;
+            BoundingBoxXYZ crop = view.CropBox;
+            if (crop == null) return 0;
+            Transform tf = crop.Transform;
+            XYZ bx = new XYZ(tf.BasisX.X, tf.BasisX.Y, 0);
+            if (bx.GetLength() < 1e-6) return 0;
+            bx = bx.Normalize();
+            XYZ n = view.ViewDirection;
+            n = (n != null && n.GetLength() > 1e-6) ? n.Normalize() : tf.BasisZ;
+            double minX = Math.Min(crop.Min.X, crop.Max.X), maxX = Math.Max(crop.Min.X, crop.Max.X);
+            XYZ OnPlane(double x, double z)
+            {
+                XYZ b = tf.Origin + tf.BasisX * x;
+                b = b - n * (b - view.Origin).DotProduct(n);
+                return new XYZ(b.X, b.Y, z);
+            }
+            GraphicsStyle style = GetOrCreateLevelMarkLineStyle(doc);
+            ElementId textType = GetOrCreateLevelMarkTextType(doc);
+            int scale = view.Scale > 0 ? view.Scale : 100;
+            double textLift = CameraMath.MmToFeet((LevelMarkTextSizeMm + 1.0) * scale);
+            double textInset = CameraMath.MmToFeet(1.0 * scale);
+            int created = 0;
+            var names = new List<string>();
             foreach (Level l in keep)
             {
                 try
                 {
-                    foreach (DatumEnds end in new[] { DatumEnds.End0, DatumEnds.End1 })
+                    double z = l.ProjectElevation;
+                    XYZ a = OnPlane(minX, z), b = OnPlane(maxX, z);
+                    if (a.DistanceTo(b) < 1e-6) continue;
+                    DetailCurve dc = doc.Create.NewDetailCurve(view, Line.CreateBound(a, b));
+                    if (style != null) { try { dc.LineStyle = style; } catch { } }
+                    TagLevelMark(dc, cid, l.UniqueId);
+                    created++;
+                    if (textType != ElementId.InvalidElementId)
                     {
-                        if (l.GetDatumExtentTypeInView(end, view) != DatumExtentType.ViewSpecific)
-                            l.SetDatumExtentType(end, view, DatumExtentType.ViewSpecific);
+                        XYZ tp = OnPlane(minX, z + textLift) + bx * textInset;
+                        TextNote tn = TextNote.Create(doc, view.Id, tp, FormatLevelMarkText(doc, l), textType);
+                        TagLevelMark(tn, cid, l.UniqueId);
+                        created++;
                     }
-                    IList<Curve> cs = l.GetCurvesInView(DatumExtentType.ViewSpecific, view);
-                    if (cs == null || cs.Count == 0) throw new InvalidOperationException("GetCurvesInView(ViewSpecific) 回傳空");
-                    Curve c = cs[0];
-                    XYZ p0 = c.GetEndPoint(0), p1 = c.GetEndPoint(1);
-                    double x0 = (p0 - tf.Origin).DotProduct(bx), x1 = (p1 - tf.Origin).DotProduct(bx);
-                    XYZ At(double x) => p0 + bx * (x - x0);
-                    bool forward = x0 <= x1;
-                    Line nl = forward ? Line.CreateBound(At(lowX), At(highX)) : Line.CreateBound(At(highX), At(lowX));
-                    l.SetCurveInView(DatumExtentType.ViewSpecific, view, nl);
-
-                    DatumEnds bubbleEnd = (forward == bubbleHigh) ? DatumEnds.End1 : DatumEnds.End0;
-                    DatumEnds otherEnd = bubbleEnd == DatumEnds.End1 ? DatumEnds.End0 : DatumEnds.End1;
-                    string bubbleNote = "";
-                    try { if (!l.IsBubbleVisibleInView(bubbleEnd, view)) l.ShowBubbleInView(bubbleEnd, view); }
-                    catch (Exception exB) { bubbleNote += $" 顯示標頭失敗({exB.Message})"; }
-                    try { if (l.IsBubbleVisibleInView(otherEnd, view)) l.HideBubbleInView(otherEnd, view); }
-                    catch (Exception exB) { bubbleNote += $" 隱藏另一端失敗({exB.Message})"; }
-                    ok.Add($"{l.Name}: 2D 範圍 X[{CameraMath.FeetToMm(lowX):F0},{CameraMath.FeetToMm(highX):F0}]mm 標頭={bubbleEnd}（{(bubbleHigh ? "右" : "左")}側框外 1.5m）{bubbleNote}");
+                    names.Add(FormatLevelMarkText(doc, l));
                 }
-                catch (Exception ex)
+                catch (Exception ex) { Logger.Error($"相機 Key Plan：剖面「{view.Name}」畫樓層記號 {l.Name} 失敗（略過）", ex); }
+            }
+            Logger.Info($"相機 Key Plan：剖面「{view.Name}」簡化樓層記號：刪除舊 {removed} 個、建立 {created} 個 [{string.Join("；", names)}]");
+            return created;
+        }
+
+        /// <summary>
+        /// 2026-09-25（§5.1 簡化樓層記號自動同步）：主體 Level 改高程／改名後，由面板去抖排入。掃描所有帶 LevelMark 的
+        /// 元素，依「剖面視圖＋相機」分組，用目前的 Level 值整組重畫（同一組保留原本的樓層集合）。單一交易
+        /// 「更新 Key Plan 樓層線」，期間 IsUpdatingMarkers＝true（Application 的 DocumentChanged 據此忽略）。
+        /// 回傳重畫的組數。須在 API context（ExternalEvent）內。
+        /// </summary>
+        internal static int UpdateLevelMarksFromLevels(Document doc)
+        {
+            if (doc == null || Schema.Lookup(LevelMarkSchemaGuid) == null) return 0;
+            var groups = new Dictionary<string, Tuple<View, string, HashSet<string>>>(StringComparer.Ordinal);
+            foreach (Element e in new FilteredElementCollector(doc).WhereElementIsNotElementType().OfClass(typeof(CurveElement)).Cast<Element>()
+                         .Concat(new FilteredElementCollector(doc).OfClass(typeof(TextNote))))
+            {
+                if (!TryReadLevelMark(e, out string cid, out string luid)) continue;
+                if (!(doc.GetElement(e.OwnerViewId) is View v)) continue;
+                string key = v.Id.GetIdValue() + "|" + cid;
+                if (!groups.TryGetValue(key, out var g)) groups[key] = g = Tuple.Create(v, cid, new HashSet<string>(StringComparer.Ordinal));
+                if (!string.IsNullOrEmpty(luid)) g.Item3.Add(luid);
+            }
+            if (groups.Count == 0) return 0;
+            int done = 0;
+            IsUpdatingMarkers = true;
+            try
+            {
+                using (Transaction t = TransactionHelper.Begin(doc, LevelMarkUpdateTransactionName))
                 {
-                    Logger.Error($"相機 Key Plan：剖面「{view.Name}」樓層 {l.Name} 視圖專屬 2D 範圍設定失敗，退回兩端標頭隱藏", ex);
-                    fallback.Add(l);
+                    t.Start();
+                    try
+                    {
+                        foreach (var g in groups.Values)
+                        {
+                            List<Level> levels = g.Item3.Select(u => doc.GetElement(u) as Level).Where(l => l != null)
+                                .OrderBy(l => l.ProjectElevation).ToList();
+                            DrawMarkerSafely(doc, "UpdateLevelMarks", () => DrawSectionLevelMarks(doc, g.Item1, levels, g.Item2));
+                            done++;
+                        }
+                        t.Commit();
+                    }
+                    catch
+                    {
+                        try { if (t.HasStarted() && !t.HasEnded()) t.RollBack(); } catch { }
+                        throw;
+                    }
                 }
             }
-            if (fallback.Count > 0) HideDatumBubblesInView(view, fallback.Cast<DatumPlane>(), "剖面保留樓層（退回）");
-            Logger.Info($"相機 Key Plan：剖面「{view.Name}」保留樓層標頭：{annoLog}；眼睛沿剖面 X={CameraMath.FeetToMm(ex0):F0}mm " +
-                        $"裁剪 X[{CameraMath.FeetToMm(minX):F0},{CameraMath.FeetToMm(maxX):F0}]mm；成功 {ok.Count} [{string.Join("; ", ok)}]；退回隱藏 {fallback.Count}");
+            finally { IsUpdatingMarkers = false; }
+            Logger.Info($"相機 Key Plan：樓層變更 → 重畫簡化樓層記號 {done} 組（剖面×相機）");
+            return done;
         }
 
         /// <summary>
@@ -2794,8 +2909,14 @@ namespace RevitMCP.Core
                                 DrawMarkerSafely(doc, "UpdatePlanMarker",
                                     () => DrawPlanMarker(doc, plan, cp.Geom, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, cp.FanRadiusFeet, cid));
                             if (sections.TryGetValue(cid, out ViewSection sec))
+                            {
                                 DrawMarkerSafely(doc, "UpdateSectionMarker",
                                     () => DrawSectionMarker(doc, sec, cp.Geom, cp.CenterHoriz ?? cp.ForwardHoriz, cp.FanRadiusFeet, cp.DownRad, cp.UpRad, cid));
+                                // 2026-09-25（§5.1）：淡化樣式下，簡化樓層記號跟著相機目前樓層重畫。
+                                if (IsKeyPlanFadedStyle())
+                                    DrawMarkerSafely(doc, "UpdateSectionLevelMarks",
+                                        () => DrawSectionLevelMarks(doc, sec, ComputeSectionKeepLevels(doc, cp.Geom.LevelBelow, cp.IsOutdoor), cid));
+                            }
                             if (plan != null && sec != null)
                                 DrawMarkerSafely(doc, "UpdateHideOtherSections",
                                     () => HideOtherSectionMarkers(doc, plan, sec));
@@ -2863,7 +2984,7 @@ namespace RevitMCP.Core
         private const double MarkerArrowHeadLenRatio = 1.4 / 3.0;
         private const double MarkerArrowHeadHalfWidthRatio = 0.3;
         /// <summary>箭頭 FilledRegion 在該視圖的「依元素取代」表面透明度（0–100）。</summary>
-        private const int MarkerArrowTransparency = 30; // 2026-09-25：眼睛楔形 30%（比扇形 70% 深）
+        private const int MarkerArrowTransparency = 30; // 2026-09-25：眼睛楔形 30%（比扇形 90% 深）
 
         /// <summary>箭頭總長（feet）：max(8mm 紙上 × 比例, 15% × 扇形半徑)。</summary>
         private static double ComputeArrowLenFeet(View view, double fanRadiusFeet)
@@ -2945,7 +3066,7 @@ namespace RevitMCP.Core
                     if (!TryReadLink(fr, out string _, out string role)) continue;
                     if (role != "MarkerPlan" && role != "MarkerSection") continue;
                     if (!(doc.GetElement(fr.OwnerViewId) is View v)) continue;
-                    // 預設楔形 30%、扇形 70%；沿用該元素目前的透明度（使用者可能調過），只更新顏色。
+                    // 預設楔形 30%、扇形 MarkerFanTransparency（90%）；沿用該元素目前的透明度（使用者可能調過），只更新顏色。
                     int tr = MarkerArrowTransparency;
                     try { int cur = v.GetElementOverrides(fr.Id).Transparency; if (cur > 0 && cur < 100) tr = cur; } catch { }
                     ApplyArrowOverride(doc, v, fr.Id, color, tr);
@@ -2987,8 +3108,34 @@ namespace RevitMCP.Core
         private const string MarkerRegionTypeName = "相機標記-實心";
         private const string MarkerLineStyleName = "相機標記線";
         private const int MarkerLineWeight = 5;
-        /// <summary>視野扇形半透明填滿的表面透明度（0–100）。</summary>
-        private const int MarkerFanTransparency = 70;
+        /// <summary>視野扇形半透明填滿的表面透明度（0–100）。平面與剖面共用這一個值，要調淡／調深只改這裡。
+        /// 2026-09-25：70 → 90（使用者回報扇形蓋住其他圖面；詳圖元件在 Revit 一律畫在模型之上，只能調淡＋排到詳圖最底層）。</summary>
+        private const int MarkerFanTransparency = 90;
+
+        // 2026-09-25（§5.3 繪製順序）：一次標記重畫期間建立的元素，畫完後扇形填滿送到詳圖最底層、
+        // 楔形與標記線拉到最上層（DetailElementOrderUtils）。只在交易內、單執行緒使用。
+        private static readonly List<ElementId> _orderFanIds = new List<ElementId>();
+        private static readonly List<ElementId> _orderFrontIds = new List<ElementId>();
+
+        private static void BeginMarkerDrawOrder() { _orderFanIds.Clear(); _orderFrontIds.Clear(); }
+
+        /// <summary>扇形填滿 SendToBack、眼睛楔形＋標記線 BringToFront；任何失敗只記 log。</summary>
+        private static void ApplyMarkerDrawOrder(Document doc, View view, string role)
+        {
+            try
+            {
+                if (_orderFanIds.Count > 0)
+                    DetailElementOrderUtils.SendToBack(doc, view, new List<ElementId>(_orderFanIds));
+                if (_orderFrontIds.Count > 0)
+                    DetailElementOrderUtils.BringToFront(doc, view, new List<ElementId>(_orderFrontIds));
+                Logger.Info($"相機 Key Plan：{role} 繪製順序 扇形填滿 {_orderFanIds.Count} 個送到最底、楔形／標記線 {_orderFrontIds.Count} 個拉到最上");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"相機 Key Plan：{role} 調整詳圖繪製順序失敗（標記照常存在）", ex);
+            }
+            finally { _orderFanIds.Clear(); _orderFrontIds.Clear(); }
+        }
 
         /// <summary>設定裡的標記顏色（#RRGGBB）；解析失敗退回預設藍 #3B82C4。</summary>
         internal static Color GetConfiguredMarkerColor()
@@ -3137,6 +3284,7 @@ namespace RevitMCP.Core
                     try { dc.LineStyle = style; } catch { }
                 }
                 TagLink(dc, cid, role);
+                _orderFrontIds.Add(dc.Id);
             }
         }
 
@@ -3200,7 +3348,7 @@ namespace RevitMCP.Core
         /// <summary>
         /// 2026-09-25（箭頭反轉）：取代舊的「朝前三角形箭頭」——在眼睛處畫一個實心小楔形（FilledRegion），
         /// 頂點＝眼睛、沿「與視野扇形相同的兩條（非對稱）邊界」向外張開，長度＝原箭頭長度規則
-        /// （max(8mm 紙上, 15% 扇形半徑)）。同標記色、透明度 30%（比扇形填滿 70% 深），在扇形根部讀成較深的一塊。
+        /// （max(8mm 紙上, 15% 扇形半徑)）。同標記色、透明度 30%（比扇形填滿 90% 深），在扇形根部讀成較深的一塊。
         /// edgeEndA／edgeEndB＝兩條邊界在楔形長度處的端點，arcMid＝兩端點之間的弧中點（三點弧）；全部須與 eye 共面於視圖平面。
         /// </summary>
         private static void CreateEyeWedgeRegion(Document doc, View view, XYZ eye, XYZ edgeEndA, XYZ arcMid, XYZ edgeEndB,
@@ -3218,11 +3366,12 @@ namespace RevitMCP.Core
                 try { region.SetLineStyleId(style.Id); } catch { /* 外框線型設定失敗不影響填滿 */ }
             }
             TagLink(region, cid, role);
+            _orderFrontIds.Add(region.Id);
             string mode = ApplyArrowOverride(doc, view, region.Id, GetConfiguredMarkerColor(), MarkerArrowTransparency);
             Logger.Info($"相機 Key Plan：眼睛楔形 {role} 長={CameraMath.FeetToMm(eye.DistanceTo(edgeEndA)):F0}/{CameraMath.FeetToMm(eye.DistanceTo(edgeEndB)):F0}mm 取代={mode}");
         }
 
-        /// <summary>視野扇形半透明填滿（FilledRegion，同標記色、透明度 70%，取代方式同箭頭）。</summary>
+        /// <summary>視野扇形半透明填滿（FilledRegion，同標記色、透明度 <see cref="MarkerFanTransparency"/>，取代方式同箭頭）。</summary>
         private static void CreateFanWedgeRegion(Document doc, View view, CurveLoop loop, string cid, string role, GraphicsStyle style)
         {
             ElementId typeId = GetOrCreateSolidFilledRegionType(doc);
@@ -3232,6 +3381,7 @@ namespace RevitMCP.Core
                 try { region.SetLineStyleId(style.Id); } catch { }
             }
             TagLink(region, cid, role);
+            _orderFanIds.Add(region.Id);
             string mode = ApplyArrowOverride(doc, view, region.Id, GetConfiguredMarkerColor(), MarkerFanTransparency);
             Logger.Info($"相機 Key Plan：扇形填滿 {role} 取代={mode}");
         }
@@ -3243,6 +3393,7 @@ namespace RevitMCP.Core
             // 2026-09-25（非對稱視錐）：扇形從相機左緣 leftRad 到右緣 rightRad（相對正前方帶號角，相機右為正），
             // 不再是 ±h/2；中央視線仍沿相機正前方。原本的朝前三角形箭頭改成「眼睛處的實心楔形」。
             DeleteOldMarkers(doc, planView, cid, "MarkerPlan");
+            BeginMarkerDrawOrder();
             GraphicsStyle style = GetOrCreateMarkerLineStyle(doc);
 
             double levelZ = geom.LevelBelow.ProjectElevation;
@@ -3312,6 +3463,7 @@ namespace RevitMCP.Core
             }
             Logger.Info($"相機 Key Plan：平面扇形 leftDeg={leftRad * 180 / Math.PI:F1} rightDeg={rightRad * 180 / Math.PI:F1} " +
                         $"radius={CameraMath.FeetToMm(farClipFeet):F0}mm wedgeLen={CameraMath.FeetToMm(arrowLen):F0}mm");
+            ApplyMarkerDrawOrder(doc, planView, "MarkerPlan");
         }
 
         /// <summary>
@@ -3326,6 +3478,7 @@ namespace RevitMCP.Core
             XYZ forwardHoriz, double fanRadiusFeet, double downRad, double upRad, string cid)
         {
             DeleteOldMarkers(doc, sectionView, cid, "MarkerSection");
+            BeginMarkerDrawOrder();
             GraphicsStyle style = GetOrCreateMarkerLineStyle(doc);
 
             XYZ up = XYZ.BasisZ;
@@ -3419,6 +3572,7 @@ namespace RevitMCP.Core
                     Logger.Error("相機 Key Plan：剖面眼睛楔形填滿失敗（扇形與視線照畫）", ex);
                 }
             }
+            ApplyMarkerDrawOrder(doc, sectionView, "MarkerSection");
         }
 
         /// <summary>射線（起點在裁剪框內）沿 dir 走到裁剪框 X/Y 邊界的距離（只看剖面的 X＝水平、Y＝垂直，

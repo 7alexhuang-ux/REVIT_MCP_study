@@ -210,10 +210,14 @@ namespace RevitMCP
         /// </summary>
         private static void OnCameraManagerDocumentChanged(object sender, DocumentChangedEventArgs e)
         {
+            // 2026-09-25（§4.8 步驟 0）：記錄「相機是從哪張平面放置的」——不管面板有沒有啟用都要記。
+            CaptureCameraSourcePlan(e);
             try
             {
                 // 使用者還沒按過重新整理＝live sync 未啟用，連過濾都不做（最便宜的早退）。
                 if (_cameraManagerPanel == null || !_cameraManagerPanel.IsLiveSyncArmed) return;
+                // 自己寫入放置平面記錄的交易不算使用者變更。
+                if (RevitMCP.Core.CameraSourcePlanStore.IsWriting) return;
                 // 底圖匯出自己建立／回滾的暫存視圖不算使用者變更，避免「匯出→DocumentChanged→刷新」迴圈。
                 if (RevitMCP.Core.CameraManagerService.IsExportingBaseMap) return;
                 // 2026-09-24 第四輪：我們自己的「更新相機標記」交易（DocumentChanged 在 Commit 時觸發）
@@ -227,12 +231,16 @@ namespace RevitMCP
                 try
                 {
                     System.Collections.Generic.List<ElementId> perspIds = null;
+                    bool levelChanged = false;
                     foreach (ElementId id in e.GetModifiedElementIds())
                     {
-                        if (doc.GetElement(id) is View3D v3 && v3.IsPerspective && !v3.IsTemplate)
+                        Element el = doc.GetElement(id);
+                        if (el is View3D v3 && v3.IsPerspective && !v3.IsTemplate)
                             (perspIds ?? (perspIds = new System.Collections.Generic.List<ElementId>())).Add(id);
+                        else if (el is Level) levelChanged = true; // 主體 Level（高程／名稱）→ 重畫 Key Plan 剖面的簡化樓層記號
                     }
                     if (perspIds != null) _cameraManagerPanel.QueueCameraMarkerRefresh(perspIds);
+                    if (levelChanged) _cameraManagerPanel.QueueLevelMarkRefresh();
                 }
                 catch (Exception exMarker)
                 {
@@ -250,6 +258,52 @@ namespace RevitMCP
             }
         }
 
+        /// <summary>
+        /// 2026-09-25（§4.8 步驟 0）：新增的透視 View3D → 讀「當下」的作用中視圖；是 ViewPlan（樓層／天花／面積平面）
+        /// 就排入 <see cref="RevitMCP.Core.CameraSourcePlanStore"/>，下一次 Idling 以 ES 寫到相機上（DocumentChanged
+        /// 不可修改文件）。時序假設：放置相機的交易 Commit（觸發本事件）時 Revit 尚未切到新的 3D 視圖——
+        /// log 會記下當時作用中視圖的 id／型別以便實機驗證。只讀 Id／型別，任何失敗只記 log。
+        /// </summary>
+        private static void CaptureCameraSourcePlan(DocumentChangedEventArgs e)
+        {
+            try
+            {
+                if (RevitMCP.Core.CameraSourcePlanStore.IsWriting || RevitMCP.Core.CameraManagerService.IsExportingBaseMap) return;
+                Document doc = e.GetDocument();
+                if (!IsCameraManagerRelevantDocument(doc)) return;
+                System.Collections.Generic.List<ElementId> newCams = null;
+                foreach (ElementId id in e.GetAddedElementIds())
+                    if (doc.GetElement(id) is View3D v3 && v3.IsPerspective && !v3.IsTemplate)
+                        (newCams ?? (newCams = new System.Collections.Generic.List<ElementId>())).Add(id);
+                if (newCams == null) return;
+
+                UIApplication uiApp = _cameraManagerIdlingUiApp ?? _uiApp;
+                UIDocument uiDoc = uiApp?.ActiveUIDocument;
+                View av = null;
+                try { if (uiDoc != null && uiDoc.Document.Equals(doc)) av = uiDoc.ActiveView; } catch { av = null; }
+                string txn = "";
+                try { txn = string.Join("／", e.GetTransactionNames()); } catch { }
+                foreach (ElementId camId in newCams)
+                {
+                    string avText = av == null ? "(無／非此文件)" : $"「{av.Name}」id={av.Id.GetIdValue()} type={av.ViewType}";
+                    if (av is ViewPlan vp && !vp.IsTemplate &&
+                        (vp.ViewType == ViewType.FloorPlan || vp.ViewType == ViewType.CeilingPlan || vp.ViewType == ViewType.AreaPlan))
+                    {
+                        RevitMCP.Core.CameraSourcePlanStore.Enqueue(doc, camId, vp.Id);
+                        Logger.Info($"相機管理：新增透視相機 id={camId.GetIdValue()}（交易「{txn}」），當下作用中視圖 {avText} → 排入記錄放置平面。");
+                    }
+                    else
+                    {
+                        Logger.Info($"相機管理：新增透視相機 id={camId.GetIdValue()}（交易「{txn}」），當下作用中視圖 {avText} 不是平面 → 不記錄放置平面。");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"相機管理：擷取相機放置平面失敗: {ex.Message}");
+            }
+        }
+
         /// <summary>這次 DocumentChanged 是否只來自相機管理的「更新相機標記」交易（以交易名稱判斷）。</summary>
         private static bool IsOwnMarkerTransaction(DocumentChangedEventArgs e)
         {
@@ -257,7 +311,9 @@ namespace RevitMCP
             {
                 System.Collections.Generic.ICollection<string> names = e.GetTransactionNames();
                 return names != null && names.Count > 0 &&
-                       names.All(n => n == RevitMCP.Core.CameraKeyPlanService.MarkerUpdateTransactionName);
+                       names.All(n => n == RevitMCP.Core.CameraKeyPlanService.MarkerUpdateTransactionName ||
+                                      n == RevitMCP.Core.CameraKeyPlanService.LevelMarkUpdateTransactionName ||
+                                      n == RevitMCP.Core.CameraSourcePlanStore.TransactionName);
             }
             catch
             {
@@ -337,6 +393,13 @@ namespace RevitMCP
             try
             {
                 if (_cameraManagerIdlingUiApp == null) _cameraManagerIdlingUiApp = sender as UIApplication;
+                // 2026-09-25（§4.8 步驟 0）：把 DocumentChanged 排隊的「相機放置平面」寫進 ES（不受面板狀態影響）。
+                if (RevitMCP.Core.CameraSourcePlanStore.HasPending)
+                {
+                    RevitMCP.Core.CameraSourcePlanStore.FlushPending();
+                    // 寫入後讓面板（若已啟用）重讀一次，步驟 0 才拿得到記錄。
+                    if (_cameraManagerPanel != null && _cameraManagerPanel.IsLiveSyncArmed) _cameraManagerRefreshPending = true;
+                }
                 if (!_cameraManagerRefreshPending && !_cameraManagerDocCheckPending && !_cameraManagerActiveViewPending) return;
                 bool refresh = _cameraManagerRefreshPending;
                 bool followActiveView = _cameraManagerActiveViewPending;
