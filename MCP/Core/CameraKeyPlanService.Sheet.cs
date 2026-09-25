@@ -474,17 +474,37 @@ namespace RevitMCP.Core
             stripLeftX = null; stripTopY = null;
             double W = bb.Max.X - bb.Min.X, H = bb.Max.Y - bb.Min.Y;
             var lines = new List<(XYZ a, XYZ b)>();
-            try
+            // 2026-09-26 第三輪（MCP 自測：E1 30 x 42 讀到 0 條線）：依序試幾組 Options，取線最多的一組；
+            // 每組都逐層展開 GeometryInstance（GetInstanceGeometry，空的話改 GetSymbolGeometry(gi.Transform)）、
+            // 收 Line／PolyLine／實體邊，並統計各類幾何物件數寫進 log，下次讀不到時看得出原因。
+            string optUsed = null, typeStats = null;
+            var optionSets = new List<(string name, Func<Options> make)>
             {
-                GeometryElement ge = tb.get_Geometry(new Options { View = sheet });
-                CollectSheetLines(ge, lines, 0);
+                ("View=sheet", () => new Options { View = sheet, IncludeNonVisibleObjects = false }),
+                ("View=sheet+NonVisible", () => new Options { View = sheet, IncludeNonVisibleObjects = true }),
+                ("無 View/Fine", () => new Options { DetailLevel = ViewDetailLevel.Fine, IncludeNonVisibleObjects = true })
+            };
+            var tried = new List<string>();
+            foreach (var (name, make) in optionSets)
+            {
+                try
+                {
+                    var tmp = new List<(XYZ a, XYZ b)>();
+                    var stats = new Dictionary<string, int>(StringComparer.Ordinal);
+                    GeometryElement ge = tb.get_Geometry(make());
+                    CollectSheetLines(ge, tmp, 0, stats);
+                    string st = stats.Count == 0 ? "(空)" : string.Join(",", stats.Select(kv => kv.Key + "×" + kv.Value));
+                    tried.Add($"{name}:{tmp.Count}線[{st}]");
+                    if (tmp.Count > lines.Count) { lines = tmp; optUsed = name; typeStats = st; }
+                }
+                catch (Exception ex) { tried.Add($"{name}:失敗 {ex.Message}"); }
             }
-            catch (Exception ex) { Logger.Error("相機圖紙：讀取圖框幾何失敗（改用保留比例）", ex); }
+            if (lines.Count == 0) Logger.Info("相機圖紙：圖框幾何讀不到線，各 Options 結果＝" + string.Join("；", tried));
 
             double tolDir = 1e-3, frameGap = CameraMath.MmToFeet(TitleStripFrameGapMm);
             var vert = lines.Where(l => Math.Abs(l.a.X - l.b.X) < tolDir && Math.Abs(l.a.Y - l.b.Y) >= 0.6 * H).Select(l => (l.a.X + l.b.X) / 2).ToList();
             var horz = lines.Where(l => Math.Abs(l.a.Y - l.b.Y) < tolDir && Math.Abs(l.a.X - l.b.X) >= 0.6 * W).Select(l => (l.a.Y + l.b.Y) / 2).ToList();
-            string found = $"圖框幾何線 {lines.Count} 條（長直 {vert.Count}、長橫 {horz.Count}）";
+            string found = $"圖框幾何線 {lines.Count} 條（長直 {vert.Count}、長橫 {horz.Count}；{(optUsed != null ? optUsed + " " + typeStats : "試過 " + string.Join("；", tried))}）";
             if (vert.Count > 0)
             {
                 double rightFrame = vert.Max();
@@ -514,18 +534,40 @@ namespace RevitMCP.Core
             log = found + "；未偵測到標題欄線（直式圖紙不保留）";
         }
 
-        private static void CollectSheetLines(GeometryElement ge, List<(XYZ a, XYZ b)> lines, int depth)
+        private static void CollectSheetLines(GeometryElement ge, List<(XYZ a, XYZ b)> lines, int depth, Dictionary<string, int> stats = null)
         {
-            if (ge == null || depth > 4) return;
+            if (ge == null || depth > 6) return;
+            void Count(string k) { if (stats != null) stats[k] = stats.TryGetValue(k, out int n) ? n + 1 : 1; }
             foreach (GeometryObject go in ge)
             {
+                if (go == null) continue;
+                Count(go.GetType().Name);
                 if (go is Line ln && ln.IsBound) lines.Add((ln.GetEndPoint(0), ln.GetEndPoint(1)));
                 else if (go is PolyLine pl)
                 {
                     IList<XYZ> pts = pl.GetCoordinates();
                     for (int i = 0; i + 1 < pts.Count; i++) lines.Add((pts[i], pts[i + 1]));
                 }
-                else if (go is GeometryInstance gi) CollectSheetLines(gi.GetInstanceGeometry(), lines, depth + 1);
+                else if (go is Solid so && so.Edges != null && so.Edges.Size > 0)
+                {
+                    // 填滿區域／遮罩在部分版本以薄實體回傳：收它的直線邊
+                    foreach (Edge e in so.Edges)
+                    {
+                        try { if (e.AsCurve() is Line el && el.IsBound) lines.Add((el.GetEndPoint(0), el.GetEndPoint(1))); } catch { }
+                    }
+                }
+                else if (go is GeometryInstance gi)
+                {
+                    GeometryElement inst = null;
+                    try { inst = gi.GetInstanceGeometry(); } catch { inst = null; }
+                    bool any = false;
+                    if (inst != null) foreach (GeometryObject _ in inst) { any = true; break; }
+                    if (!any)
+                    {
+                        try { inst = gi.GetSymbolGeometry(gi.Transform); Count("SymbolGeometryFallback"); } catch { inst = null; }
+                    }
+                    CollectSheetLines(inst, lines, depth + 1, stats);
+                }
             }
         }
 
@@ -539,16 +581,56 @@ namespace RevitMCP.Core
         private static void LayoutSheetViewports(Document doc, List<(string role, View view)> items, Dictionary<string, Viewport> vps,
             SheetResult res, double x0, double y0, double x1, double y1)
         {
+            // 2026-09-26 第三輪（MCP 自測：透視圖無法以裁剪框放大 → 圖紙約 40 % 空白、Key Plan 被迫 1:75）：
+            //   ① 先處理透視圖（出圖複本仍試放大裁剪框；FOV 會變就還原），讀回「實際視埠大小」，
+            //      透視格＝實際寬 + 左右間距（夾在可繪寬 20–70 %），其餘寬度全給右側；
+            //   ② 右側試幾種版面（單欄三列／上二下一／2×2），各自挑「放得進的最細比例」，取最粗比例最小、再比例和最小者；
+            //   ③ 圖紙上透視圖大小只能在 Revit 內手動調（裁剪區域大小 → 縮放〔鎖定比例〕），見 spec §10.13。
             double gap = CameraMath.MmToFeet(SheetCellGapMm);
             var rightRoles = new[] { "Plan", "Section", "Iso" }.Where(r => vps.ContainsKey(r)).ToList();
             bool hasPersp = vps.ContainsKey("Perspective");
-            double splitX = hasPersp && rightRoles.Count > 0 ? x0 + (x1 - x0) * SheetPerspectiveFraction
-                          : hasPersp ? x1 + gap / 2 : x0 - gap / 2;
+            double W = x1 - x0;
             var cells = new Dictionary<string, double[]>();
-            if (hasPersp) cells["Perspective"] = new[] { x0, y0, splitX - gap / 2, y1 };
+            string layoutLog = "";
 
-            // 右欄：各視圖「模型內容」長寬比（比例無關：外框尺寸 × 目前比例），列高依長寬比分配。
-            double rx0 = splitX + gap / 2, rw = x1 - rx0;
+            double splitX = hasPersp && rightRoles.Count > 0 ? x0 + W * SheetPerspectiveFraction
+                          : hasPersp ? x1 + gap / 2 : x0 - gap / 2;
+            if (hasPersp)
+            {
+                var (role, view) = items.First(i => i.role == "Perspective");
+                Viewport vp = vps["Perspective"];
+                SheetViewportInfo pinfo = res.Viewports.FirstOrDefault(i => i.Role == "Perspective");
+                double cw = splitX - gap / 2 - x0, ch = y1 - y0;
+                try
+                {
+                    if (view is View3D p3 && IsSheetPerspectiveCopy(p3))
+                    {
+                        var (w, h) = ViewportSize(vp);
+                        if (w > 1e-9 && h > 1e-9)
+                        {
+                            double k = SheetFillRatio * Math.Min(cw / w, ch / h);
+                            if (pinfo != null) pinfo.Note = EnlargePerspectiveCrop(doc, p3, k);
+                        }
+                    }
+                    else if (pinfo != null) pinfo.Note = "原相機（不是出圖複本）：不改裁剪框大小";
+                }
+                catch (Exception ex) { Logger.Error("相機圖紙：透視圖尺寸調整失敗（照原尺寸放置）", ex); }
+                doc.Regenerate();
+                if (rightRoles.Count > 0)
+                {
+                    var (aw, ah) = ViewportSize(vp);
+                    double want = aw + 2 * gap;
+                    double pw = Math.Max(0.20 * W, Math.Min(0.70 * W, want));
+                    splitX = x0 + pw;
+                    layoutLog = $"透視視埠實際 {CameraMath.FeetToMm(aw):F0}×{CameraMath.FeetToMm(ah):F0}mm → 透視格寬 {CameraMath.FeetToMm(pw):F0}mm（可繪寬 {CameraMath.FeetToMm(W):F0}mm 的 {pw / W * 100:F0}%）";
+                    if (aw > pw + 1e-9 || ah > ch + 1e-9) layoutLog += "（透視視埠比格子大：請在 Revit 以「裁剪區域大小→縮放（鎖定比例）」縮小）";
+                    if (pinfo != null) pinfo.Note = (pinfo.Note != null ? pinfo.Note + "；" : "") + "圖紙上透視圖大小請在 Revit 內用「裁剪區域大小 → 縮放（鎖定比例）」手動調整";
+                }
+                cells["Perspective"] = new[] { x0, y0, splitX - gap / 2, y1 };
+            }
+
+            // 右側：各視圖「模型內容」大小（比例無關：外框尺寸 × 目前比例）。
+            double rx0 = splitX + gap / 2;
             var model = new Dictionary<string, (double w, double h, int scale)>();
             foreach (string r in rightRoles)
             {
@@ -558,61 +640,53 @@ namespace RevitMCP.Core
                 var (w, h) = ViewportSize(vps[r]);
                 model[r] = (w * sc, h * sc, sc);
             }
+            int PickScale(string r, double cw, double ch)
+            {
+                var m = model[r];
+                foreach (int s in KeyPlanStandardScales.Concat(KeyPlanExtendedScales))
+                    if (m.w / s <= cw * SheetFitRatio && m.h / s <= ch * SheetFitRatio) return s;
+                return KeyPlanExtendedScales.Last();
+            }
+            var picks = new Dictionary<string, int>();
             if (rightRoles.Count > 0)
             {
-                double avail = (y1 - y0) - gap * (rightRoles.Count - 1);
-                var weight = rightRoles.ToDictionary(r => r, r =>
+                var candidates = BuildRightLayouts(rightRoles, model.ToDictionary(kv => kv.Key, kv => (kv.Value.w, kv.Value.h)), rx0, y0, x1, y1, gap);
+                (string name, Dictionary<string, double[]> cells, Dictionary<string, int> picks, int max, int sum) best = default;
+                var tried = new List<string>();
+                foreach (var (name, lc) in candidates)
                 {
-                    var m = model[r];
-                    double a = m.w > 1e-9 ? m.h / m.w : 1.0;
-                    return Math.Max(0.25, Math.Min(4.0, a));
-                });
-                double sum = weight.Values.Sum();
-                double top = y1;
-                foreach (string r in rightRoles)
-                {
-                    double hRow = avail * weight[r] / sum;
-                    cells[r] = new[] { rx0, top - hRow, x1, top };
-                    top -= hRow + gap;
+                    var p = rightRoles.ToDictionary(r => r, r => PickScale(r, lc[r][2] - lc[r][0], lc[r][3] - lc[r][1]));
+                    int mx = p.Values.Max(), sm = p.Values.Sum();
+                    tried.Add($"{name}(" + string.Join("/", rightRoles.Select(r => "1:" + p[r])) + ")");
+                    if (best.name == null || mx < best.max || (mx == best.max && sm < best.sum)) best = (name, lc, p, mx, sm);
                 }
+                foreach (var kv in best.cells) cells[kv.Key] = kv.Value;
+                picks = best.picks;
+                layoutLog += (layoutLog.Length > 0 ? "；" : "") + $"右側版面＝{best.name}（試過 {string.Join("、", tried)}）";
+            }
+            if (layoutLog.Length > 0)
+            {
+                res.DrawAreaSource = (res.DrawAreaSource ?? "") + "；" + layoutLog;
+                Logger.Info("相機圖紙：" + layoutLog);
             }
 
             foreach (var (role, view) in items)
             {
                 SheetViewportInfo info = res.Viewports.FirstOrDefault(i => i.Role == role);
-                if (info == null || !vps.TryGetValue(role, out Viewport vp) || !cells.TryGetValue(role, out double[] c)) continue;
+                if (info == null || !vps.ContainsKey(role) || !cells.TryGetValue(role, out double[] c)) continue;
                 info.CellMinX = c[0]; info.CellMinY = c[1]; info.CellMaxX = c[2]; info.CellMaxY = c[3];
-                double cw = c[2] - c[0], ch = c[3] - c[1];
+                if (role == "Perspective") continue;
                 try
                 {
-                    if (role == "Perspective")
+                    var m = model[role];
+                    int pick = picks.TryGetValue(role, out int pp) ? pp : PickScale(role, c[2] - c[0], c[3] - c[1]);
+                    if (pick != m.scale)
                     {
-                        if (view is View3D p3 && IsSheetPerspectiveCopy(p3))
-                        {
-                            var (w, h) = ViewportSize(vp);
-                            if (w > 1e-9 && h > 1e-9)
-                            {
-                                double k = SheetFillRatio * Math.Min(cw / w, ch / h);
-                                info.Note = EnlargePerspectiveCrop(doc, p3, k);
-                            }
-                        }
-                        else info.Note = "原相機（不是出圖複本）：不改裁剪框大小";
+                        try { view.Scale = pick; info.Note = $"比例 1:{m.scale} → 1:{pick}"; }
+                        catch (Exception ex) { info.Note = $"改比例 1:{pick} 失敗（{ex.Message}；可能是視圖樣板控制比例）"; res.Warnings.Add($"{view.Name}：{info.Note}"); }
                     }
-                    else
-                    {
-                        var m = model[role];
-                        int pick = 0;
-                        foreach (int s in KeyPlanStandardScales.Concat(KeyPlanExtendedScales))
-                            if (m.w / s <= cw * SheetFitRatio && m.h / s <= ch * SheetFitRatio) { pick = s; break; }
-                        if (pick == 0) pick = KeyPlanExtendedScales.Last();
-                        if (pick != m.scale)
-                        {
-                            try { view.Scale = pick; info.Note = $"比例 1:{m.scale} → 1:{pick}"; }
-                            catch (Exception ex) { info.Note = $"改比例 1:{pick} 失敗（{ex.Message}；可能是視圖樣板控制比例）"; res.Warnings.Add($"{view.Name}：{info.Note}"); }
-                        }
-                        else info.Note = $"比例 1:{pick}（不變）";
-                        if (pick > KeyPlanStandardScales.Last()) res.Warnings.Add($"{view.Name}：標準比例 1:20–1:200 都放不進格子，改用 1:{pick}");
-                    }
+                    else info.Note = $"比例 1:{pick}（不變）";
+                    if (pick > KeyPlanStandardScales.Last()) res.Warnings.Add($"{view.Name}：標準比例 1:20–1:200 都放不進格子，改用 1:{pick}");
                 }
                 catch (Exception ex) { Logger.Error($"相機圖紙：{role} 尺寸調整失敗（照原尺寸放置）", ex); }
             }
@@ -624,6 +698,74 @@ namespace RevitMCP.Core
                 catch (Exception ex) { Logger.Error("相機圖紙：視埠置中失敗", ex); }
             }
             doc.Regenerate();
+        }
+
+        /// <summary>
+        /// 2026-09-26 第三輪：右側 Key Plan 版面候選（純計算，不碰 Revit）。
+        ///   單欄：由上而下，列高依內容長寬比（夾 0.25–4）分配（沿用舊規則）；
+        ///   上二下一（3 張時）：上列兩格＋下列一格橫跨全寬；下列放「最扁」（寬/高最大）者，上下列高試 40/50/60 %；
+        ///   2×2（3 張時）：四等分，依序放左上／右上／左下（右下留白）；
+        ///   並排（2 張時）：左右兩格。
+        /// </summary>
+        private static List<(string name, Dictionary<string, double[]> cells)> BuildRightLayouts(List<string> roles,
+            Dictionary<string, (double w, double h)> model, double rx0, double y0, double x1, double y1, double gap)
+        {
+            var list = new List<(string, Dictionary<string, double[]>)>();
+            double rw = x1 - rx0, rh = y1 - y0;
+            if (rw <= 0 || rh <= 0) return list;
+
+            // 單欄
+            {
+                var c = new Dictionary<string, double[]>();
+                double avail = rh - gap * (roles.Count - 1);
+                var weight = roles.ToDictionary(r => r, r =>
+                {
+                    var m = model[r];
+                    double a = m.w > 1e-9 ? m.h / m.w : 1.0;
+                    return Math.Max(0.25, Math.Min(4.0, a));
+                });
+                double sum = weight.Values.Sum(), top = y1;
+                foreach (string r in roles)
+                {
+                    double hRow = avail * weight[r] / sum;
+                    c[r] = new[] { rx0, top - hRow, x1, top };
+                    top -= hRow + gap;
+                }
+                list.Add(("單欄", c));
+            }
+            double midX = rx0 + rw / 2;
+            if (roles.Count == 3)
+            {
+                string flat = roles.OrderByDescending(r => model[r].h > 1e-9 ? model[r].w / model[r].h : 1.0).First();
+                var upper = roles.Where(r => r != flat).ToList();
+                foreach (double f in new[] { 0.4, 0.5, 0.6 })
+                {
+                    double splitY = y1 - rh * f;
+                    var c = new Dictionary<string, double[]>
+                    {
+                        [upper[0]] = new[] { rx0, splitY + gap / 2, midX - gap / 2, y1 },
+                        [upper[1]] = new[] { midX + gap / 2, splitY + gap / 2, x1, y1 },
+                        [flat] = new[] { rx0, y0, x1, splitY - gap / 2 }
+                    };
+                    list.Add(($"上二下一({f * 100:F0}%)", c));
+                }
+                double midY = y0 + rh / 2;
+                list.Add(("2×2", new Dictionary<string, double[]>
+                {
+                    [roles[0]] = new[] { rx0, midY + gap / 2, midX - gap / 2, y1 },
+                    [roles[1]] = new[] { midX + gap / 2, midY + gap / 2, x1, y1 },
+                    [roles[2]] = new[] { rx0, y0, midX - gap / 2, midY - gap / 2 }
+                }));
+            }
+            else if (roles.Count == 2)
+            {
+                list.Add(("並排", new Dictionary<string, double[]>
+                {
+                    [roles[0]] = new[] { rx0, y0, midX - gap / 2, y1 },
+                    [roles[1]] = new[] { midX + gap / 2, y0, x1, y1 }
+                }));
+            }
+            return list;
         }
 
         /// <summary>

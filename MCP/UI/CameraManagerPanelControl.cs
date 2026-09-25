@@ -1050,7 +1050,7 @@ namespace RevitMCP.UI
         // 2026-09-25 Wave 3：一鍵出圖紙、圖紙圖框、視角版本
         // ══════════════════════════════════════════════════════════
 
-        private const string SheetTip = "一鍵出圖紙：建立或更新圖紙「Key Plan-<相機名>」——左側約 60% 放透視圖，右欄由上而下放 Key Plan 平面／剖面／等角；只移動視埠位置、不改比例；相機還沒有 Key Plan 時先跑一鍵 4 視圖；已在其他圖紙上的視圖會略過並在 ⑥ 說明";
+        private const string SheetTip = "一鍵出圖紙：建立或更新圖紙「Key Plan-<相機名>」——左側放透視圖（格寬＝透視視埠實際寬），其餘寬度放 Key Plan 平面／剖面／等角（自動挑單欄／上二下一／2×2 與放得進的最細比例）；圖紙上透視圖大小請用 Revit「裁剪區域大小 → 縮放（鎖定比例）」手動調整；相機還沒有 Key Plan 時先跑一鍵 4 視圖；已在其他圖紙上的視圖會略過並在 ⑥ 說明";
         private const string TitleBlockTip = "④ 圖紙圖框：一鍵出圖紙使用的圖框類型（本機記憶）；自動＝專案內最常用的圖框。改了之後再按一鍵出圖紙，既有相機圖紙的圖框也會換成這個類型";
         private List<TitleBlockOption> _titleBlocks = new List<TitleBlockOption>();
         private WpfMenuItem _titleBlockRoot, _versionRoot;
@@ -1118,7 +1118,8 @@ namespace RevitMCP.UI
                             int skipped = r.Viewports.Count(v => v.Status == "略過");
                             msg = $"{(r.Created ? "已建立" : "已更新")}圖紙 {r.SheetNumber} {r.SheetName}（圖框：{r.TitleBlockName ?? "無"}；新放置 {placed}、重新排版 {kept}" +
                                   (skipped > 0 ? $"、略過 {skipped}" : "") + "）" + (r.RanFourViews ? "；已先建立 Key Plan" : "") +
-                                  (r.Warnings.Count > 0 ? "。注意：" + string.Join("；", r.Warnings) : "。");
+                                  (r.Warnings.Count > 0 ? "。注意：" + string.Join("；", r.Warnings) : "。") +
+                                  "提示：圖紙上的透視圖大小請在 Revit 選取視埠後「裁剪區域大小 → 縮放（鎖定比例）」手動調整。";
                             try { uiApp.ActiveUIDocument.RequestViewChange(doc.GetElement(r.SheetId) as View); }
                             catch (Exception exOpen) { Logger.Error("相機管理面板：開啟相機圖紙失敗", exOpen); }
                         }

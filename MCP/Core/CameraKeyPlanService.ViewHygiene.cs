@@ -37,6 +37,12 @@ namespace RevitMCP.Core
 
         internal static void ResetCropWarnings() => _cropWarnings.Clear();
 
+        private static void AddCropWarning(string msg)
+        {
+            Logger.Info("相機 Key Plan WARNING：" + msg);
+            _cropWarnings.Add(msg);
+        }
+
         internal static List<string> TakeCropWarnings()
         {
             var copy = new List<string>(_cropWarnings);

@@ -275,12 +275,16 @@ namespace RevitMCP.Core
                 x0 = Math.Min(x0, ax0); y0 = Math.Min(y0, ay0); x1 = Math.Max(x1, ax1); y1 = Math.Max(y1, ay1);
             }
             bool anyOutdoor = cams.Any(c => c.cp.IsOutdoor);
+            var fanRadiusLog = new List<string>();
             foreach (var c in cams)
             {
                 XYZ eye = c.cp.Geom.Eye;
                 Grow(eye.X - m, eye.Y - m, eye.X + m, eye.Y + m);
-                if (c.cp.IsOutdoor) continue; // 室外扇形（可達 60 m）不撐大總覽，改以建築範圍＋眼睛表示
-                ComputeSampledFanBox(eye, c.cp.ForwardHoriz, c.cp.LeftRad, c.cp.RightRad, c.cp.FanRadiusFeet, m,
+                if (c.cp.IsOutdoor) { fanRadiusLog.Add($"{c.cam.Name}=室外(不撐大)"); continue; } // 室外扇形（可達 60 m）不撐大總覽，改以建築範圍＋眼睛表示
+                // 2026-09-26 第三輪：裁剪與畫扇形用同一個半徑函式（OverviewFanRadiusFeet）。
+                double r = OverviewFanRadiusFeet(c.cp);
+                fanRadiusLog.Add($"{c.cam.Name}=R{CameraMath.FeetToMm(r):F0}");
+                ComputeSampledFanBox(eye, c.cp.ForwardHoriz, c.cp.LeftRad, c.cp.RightRad, r, m,
                     out double fx0, out double fy0, out double fx1, out double fy1);
                 Grow(fx0, fy0, fx1, fy1);
             }
@@ -300,29 +304,30 @@ namespace RevitMCP.Core
                 else res.ExtentsMode = "室內扇形 +3 m ∪ 眼睛 +3 m（有室外相機、但底圖沒有裁剪框可當建築範圍）";
             }
             else res.ExtentsMode = "室內扇形聯集 +3 m";
-            res.IntendedMinX = x0; res.IntendedMinY = y0; res.IntendedMaxX = x1; res.IntendedMaxY = y1;
+            res.ExtentsMode += "；扇形半徑 " + string.Join("、", fanRadiusLog);
 
             try { view.GetCropRegionShapeManager()?.RemoveCropRegionShape(); } catch { /* 沒有非矩形裁剪時會丟例外，忽略 */ }
             view.CropBoxActive = true;
             view.CropBoxVisible = true;
-            BoundingBoxXYZ box = view.CropBox;
-            Transform inv = box.Transform.Inverse;
             double z = level.ProjectElevation;
-            double lx0 = double.MaxValue, ly0 = double.MaxValue, lx1 = double.MinValue, ly1 = double.MinValue;
-            foreach (XYZ p in new[] { new XYZ(x0, y0, z), new XYZ(x1, y0, z), new XYZ(x0, y1, z), new XYZ(x1, y1, z) })
+            void ApplyCrop()
             {
-                XYZ l = inv.OfPoint(p);
-                lx0 = Math.Min(lx0, l.X); lx1 = Math.Max(lx1, l.X); ly0 = Math.Min(ly0, l.Y); ly1 = Math.Max(ly1, l.Y);
+                res.IntendedMinX = x0; res.IntendedMinY = y0; res.IntendedMaxX = x1; res.IntendedMaxY = y1;
+                BoundingBoxXYZ box = view.CropBox;
+                Transform inv = box.Transform.Inverse;
+                double lx0 = double.MaxValue, ly0 = double.MaxValue, lx1 = double.MinValue, ly1 = double.MinValue;
+                foreach (XYZ p in new[] { new XYZ(x0, y0, z), new XYZ(x1, y0, z), new XYZ(x0, y1, z), new XYZ(x1, y1, z) })
+                {
+                    XYZ l = inv.OfPoint(p);
+                    lx0 = Math.Min(lx0, l.X); lx1 = Math.Max(lx1, l.X); ly0 = Math.Min(ly0, l.Y); ly1 = Math.Max(ly1, l.Y);
+                }
+                box.Min = new XYZ(lx0, ly0, box.Min.Z);
+                box.Max = new XYZ(lx1, ly1, box.Max.Z);
+                ResetCropWarnings();
+                SetCropAndVerify(view, box, "樓層總覽");
+                res.Warnings.AddRange(TakeCropWarnings());
             }
-            box.Min = new XYZ(lx0, ly0, box.Min.Z);
-            box.Max = new XYZ(lx1, ly1, box.Max.Z);
-            ResetCropWarnings();
-            SetCropAndVerify(view, box, "樓層總覽");
-            res.Warnings.AddRange(TakeCropWarnings());
-            // 回報值一律讀回視圖（不回報預期值）。
-            if (TryGetCropWorldXY(view, out double rx0, out double ry0, out double rx1, out double ry1))
-            { res.MinX = rx0; res.MinY = ry0; res.MaxX = rx1; res.MaxY = ry1; }
-            else { res.MinX = x0; res.MinY = y0; res.MaxX = x1; res.MaxY = y1; res.Warnings.Add("讀不到總覽裁剪框，範圍改報預期值。"); }
+            ApplyCrop();
             EnsureSectionsVisible(view);
 
             // 表現法（同 Key Plan 平面）；總覽保留文字類別，改逐元素隱藏他人文字。
@@ -344,16 +349,68 @@ namespace RevitMCP.Core
                 res.CameraNames.Add(camName);
             }
             res.CameraCount = cams.Count;
+
+            // 2026-09-26 第三輪（MCP 自測：總覽裁剪切到扇形）：畫完標記後讀回「室內相機」標記元素（B 扇形／邊線／名稱）
+            // 在本視圖的外接框；超出裁剪（含 3 m 餘裕）就外擴並記 log——裁剪永遠包得住實際畫出的扇形。
+            try
+            {
+                doc.Regenerate();
+                var indoorCids = new HashSet<string>(cams.Where(c => !c.cp.IsOutdoor).Select(c => c.cam.UniqueId), StringComparer.Ordinal);
+                var roles = new HashSet<string>(new[] { "MarkerPlan", MarkerNameRole }, StringComparer.Ordinal);
+                double bx0 = double.MaxValue, by0 = double.MaxValue, bx1 = double.MinValue, by1 = double.MinValue;
+                int nMarkers = 0;
+                if (indoorCids.Count > 0)
+                {
+                    // OwnedByView（不經視圖可見性／裁剪過濾）：被裁掉一部分的標記也要讀到
+                    foreach (Element e in new FilteredElementCollector(doc).OwnedByView(view.Id).WhereElementIsNotElementType())
+                    {
+                        if (!TryReadLink(e, out string ecid, out string erole) || !roles.Contains(erole) || !indoorCids.Contains(ecid ?? "")) continue;
+                        BoundingBoxXYZ eb = null;
+                        try { eb = e.get_BoundingBox(view); } catch { eb = null; }
+                        if (eb == null) continue;
+                        foreach (XYZ w in WorldCorners(eb))
+                        {
+                            bx0 = Math.Min(bx0, w.X); by0 = Math.Min(by0, w.Y); bx1 = Math.Max(bx1, w.X); by1 = Math.Max(by1, w.Y);
+                        }
+                        nMarkers++;
+                    }
+                }
+                if (nMarkers > 0)
+                {
+                    double tol = CameraMath.MmToFeet(1.0);
+                    bool grow = bx0 - m < x0 - tol || by0 - m < y0 - tol || bx1 + m > x1 + tol || by1 + m > y1 + tol;
+                    string rb = $"標記讀回外接框 X[{CameraMath.FeetToMm(bx0):F0},{CameraMath.FeetToMm(bx1):F0}] Y[{CameraMath.FeetToMm(by0):F0},{CameraMath.FeetToMm(by1):F0}]mm（{nMarkers} 個）";
+                    if (grow)
+                    {
+                        Grow(bx0 - m, by0 - m, bx1 + m, by1 + m);
+                        ApplyCrop();
+                        res.ExtentsMode += "；" + rb + " 超出裁剪 → 已外擴（+3 m）";
+                        res.Warnings.Add("總覽：實際畫出的相機標記超出原裁剪，已外擴包含（" + rb + "）");
+                        Logger.Info("樓層總覽：" + rb + " 超出原裁剪，已外擴");
+                    }
+                    else res.ExtentsMode += "；" + rb + " 皆在裁剪內";
+                }
+            }
+            catch (Exception ex) { Logger.Error("樓層總覽：標記讀回外擴失敗（保留原裁剪）", ex); }
+
+            // 回報值一律讀回視圖（不回報預期值）。
+            if (TryGetCropWorldXY(view, out double rx0, out double ry0, out double rx1, out double ry1))
+            { res.MinX = rx0; res.MinY = ry0; res.MaxX = rx1; res.MaxY = ry1; }
+            else { res.MinX = x0; res.MinY = y0; res.MaxX = x1; res.MaxY = y1; res.Warnings.Add("讀不到總覽裁剪框，範圍改報預期值。"); }
             if (faded) DrawMarkerSafely(doc, "HideForeignTextOverview", () => HideForeignTextNotes(view));
             try { res.Scale = view.Scale; } catch { }
             Logger.Info($"樓層總覽：「{view.Name}」(id={view.Id.GetIdValue()}) {(res.Created ? "新建" : "更新")}；底圖＝{res.BasePlanName ?? "(無)"}（{why}）；" +
                         $"相機 {cams.Count} 台；範圍 預期 {CameraMath.FeetToMm(x1 - x0):F0}×{CameraMath.FeetToMm(y1 - y0):F0}mm／實際 {CameraMath.FeetToMm(res.MaxX - res.MinX):F0}×{CameraMath.FeetToMm(res.MaxY - res.MinY):F0}mm（{res.ExtentsMode}）；刪除舊標記 {removed} 個；比例 1:{res.Scale}");
         }
 
+        /// <summary>2026-09-26 第三輪：總覽扇形半徑——裁剪（ComputeSampledFanBox）與畫扇形（DrawPlanMarker）共用這一個函式，
+        /// 兩邊不會各算各的。目前＝相機參數的扇形半徑（與 Key Plan 平面／A 扇形同源）。</summary>
+        private static double OverviewFanRadiusFeet(CameraParams cp) => cp?.FanRadiusFeet ?? 0.0;
+
         /// <summary>總覽上一台相機的標記：B 型平面標記（不論 ⋯ 相機標記設定，總覽一律畫 B）＋名稱 TextNote。須在交易內。</summary>
         private static void DrawOverviewCameraMarker(Document doc, ViewPlan view, CameraParams cp, string cid, string camName, double markerZ)
         {
-            DrawPlanMarker(doc, view, cp.Geom, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, cp.FanRadiusFeet, cid, markerZ, forceB: true);
+            DrawPlanMarker(doc, view, cp.Geom, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, OverviewFanRadiusFeet(cp), cid, markerZ, forceB: true);
             DeleteMarkersInView(doc, view, cid, MarkerNameRole);
             ElementId textType = GetOrCreateMarkerNameTextType(doc);
             if (textType == ElementId.InvalidElementId) return;

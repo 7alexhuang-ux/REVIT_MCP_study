@@ -367,6 +367,10 @@ namespace RevitMCP.Core
             public CameraSectionOrientationMode SectionModeRequested;
             public CameraSectionOrientationMode SectionModeUsed;
             public string SectionSpecLog;
+            /// <summary>2026-09-26：剖面套用紀錄（新建／移動旋轉／刪除重建＋世界範圍後檢）。</summary>
+            public string SectionApplyLog;
+            /// <summary>2026-09-26：剖面意圖 vs 讀回的世界範圍最大偏差（mm）；null＝未檢（例如保留手動調整）。</summary>
+            public double? SectionExtentDeviationMm;
             public CameraIsoExtentMode IsoExtentMode;
             public bool FadedStyle;
         }
@@ -505,7 +509,10 @@ namespace RevitMCP.Core
                     Logger.Info("相機 Key Plan：剖面規格 " + spec.Log);
                     dec.SectionModeUsed = spec.ModeUsed;
                     dec.SectionSpecLog = spec.Log;
+                    _lastSectionApplyLog = null; _lastSectionDeviationMm = double.NaN;
                     ViewSection sectionView = GetOrCreateSectionView(doc, sectionName, cid, geom, spec, forceResetSection, out bool preserved);
+                    dec.SectionApplyLog = preserved ? "保留使用者手動調整（範圍未動）" : _lastSectionApplyLog;
+                    dec.SectionExtentDeviationMm = double.IsNaN(_lastSectionDeviationMm) ? (double?)null : _lastSectionDeviationMm;
                     DrawMarkerSafely(doc, "ApplyKeyPlanStyleSection",
                         () => ApplyKeyPlanStyle(sectionView, faded, isSection: true, levelBelow: geom.LevelBelow, outdoor: cp.IsOutdoor, eye: geom.Eye, cid: cid));
                     DrawMarkerSafely(doc, "DrawSectionMarker",
@@ -989,13 +996,31 @@ namespace RevitMCP.Core
                 }
                 else
                 {
-                    existing.CropBox = box;
+                    // 2026-09-26 第三輪（回歸）：既有剖面設 CropBox 時 Revit 不採用新 Transform（只把 Min/Max 套在舊座標系）
+                    // → 先移動／旋轉剖面到新原點與方向，再在「讀回的實際座標系」算區域範圍；做不到且不在圖紙上才刪除重建。
+                    ViewSection moved = UpdateExistingSectionFrame(doc, existing, box, sectionName, cid, out string applyLog);
+                    _lastSectionApplyLog = applyLog;
+                    if (moved == null)
+                    {
+                        preserved = false;
+                        TagLink(existing, cid, "Section");
+                        return existing;
+                    }
+                    if (moved.Id != existing.Id) { SaveSectionStateActual(doc, moved, box, forwardHoriz); return moved; }
                     SaveSectionStateActual(doc, existing, box, forwardHoriz); // 2026-09-25 第二輪：存套用後讀回的實際狀態
                 }
                 TagLink(existing, cid, "Section");
                 return existing;
             }
 
+            ViewSection created = CreateSectionFromBox(doc, box, sectionName, cid);
+            _lastSectionApplyLog = "新建剖面；" + DescribeSectionExtentCheck(doc, created, box, out _);
+            SaveSectionStateActual(doc, created, box, forwardHoriz);
+            return created;
+        }
+
+        private static ViewSection CreateSectionFromBox(Document doc, BoundingBoxXYZ box, string sectionName, string cid)
+        {
             ViewFamilyType sectionVft = new FilteredElementCollector(doc).OfClass(typeof(ViewFamilyType))
                 .Cast<ViewFamilyType>().FirstOrDefault(v => v.ViewFamily == ViewFamily.Section);
             if (sectionVft == null) throw new Exception("找不到任何剖面視圖類型 (ViewFamily.Section)。");
@@ -1003,8 +1028,227 @@ namespace RevitMCP.Core
             ViewSection created = ViewSection.CreateSection(doc, sectionVft.Id, box);
             created.Name = MakeUniqueName(doc, sectionName, created.Id);
             TagLink(created, cid, "Section");
-            SaveSectionStateActual(doc, created, box, forwardHoriz);
             return created;
+        }
+
+        /// <summary>本次一鍵 4 視圖的剖面套用紀錄（移動/旋轉/重建＋世界範圍後檢）；交易內寫、呼叫端讀出放進 Decisions。</summary>
+        private static string _lastSectionApplyLog;
+        /// <summary>剖面世界範圍後檢：意圖 vs 讀回的最大偏差（mm）；NaN＝未檢。</summary>
+        private static double _lastSectionDeviationMm = double.NaN;
+        private const double SectionExtentToleranceMm = 5.0;
+
+        /// <summary>
+        /// 2026-09-26 第三輪：既有剖面改到新的原點／方向。
+        /// ① 找剖面的 viewer 元素（GetDependentElements(OST_Viewers) 中 OwnerViewId 不是剖面自己者＝其他視圖裡的剖面標記；
+        ///    自己的裁剪框元素 OwnerViewId＝剖面，不能拿來移）；
+        /// ② 繞「目前原點」的鉛直軸 RotateElement 到新方向 → Regenerate → 讀回 → MoveElement 水平位移到新原點 → Regenerate；
+        /// ③ 讀回實際 CropBox.Transform，確認 BasisX 與目標一致（&lt; 0.05°），在「實際座標系」內把意圖的 8 個世界角點換成
+        ///    區域 Min/Max 再設 CropBox（Transform 用讀回值），Regenerate 後比對世界範圍（容許 5mm）；
+        /// ④ 任一步做不到 → 剖面不在任何圖紙上才刪除重建（同名、重掛 ES 連結）；在圖紙上 → 不動範圍、回傳 null 並記原因。
+        /// 回傳：生效的剖面（可能是重建後的新視圖）；null＝無法更新。
+        /// </summary>
+        private static ViewSection UpdateExistingSectionFrame(Document doc, ViewSection section, BoundingBoxXYZ intended,
+            string sectionName, string cid, out string log)
+        {
+            var sb = new System.Text.StringBuilder();
+            _lastSectionDeviationMm = double.NaN;
+            Transform target = intended.Transform;
+            XYZ targetX = new XYZ(target.BasisX.X, target.BasisX.Y, 0).Normalize();
+            string failReason = null;
+            try
+            {
+                Transform cur = section.CropBox.Transform;
+                XYZ curX = new XYZ(cur.BasisX.X, cur.BasisX.Y, 0);
+                if (curX.GetLength() < 1e-6) throw new InvalidOperationException("目前剖面 BasisX 退化（非鉛直剖面？）");
+                curX = curX.Normalize();
+                double ang = Math.Atan2(curX.CrossProduct(targetX).Z, curX.DotProduct(targetX));
+                double moveMm = CameraMath.FeetToMm(Horizontal(target.Origin - cur.Origin).GetLength());
+                sb.Append($"舊原點({Mm3(cur.Origin)}) 舊方向({curX.X:F3},{curX.Y:F3}) → 新原點({Mm3(target.Origin)}) 新方向({targetX.X:F3},{targetX.Y:F3})；Δ角={ang * 180 / Math.PI:F2}° 水平位移={moveMm:F0}mm；");
+
+                if (Math.Abs(ang) > 1e-5 || moveMm > 0.5)
+                {
+                    ElementId viewerId = FindSectionViewerId(doc, section, out string how);
+                    if (viewerId == null) throw new InvalidOperationException("找不到剖面的 viewer 元素");
+                    sb.Append($"viewer={viewerId.GetIdValue()}（{how}）；");
+                    if (Math.Abs(ang) > 1e-5)
+                    {
+                        Line axisLine = Line.CreateBound(cur.Origin, cur.Origin + XYZ.BasisZ);
+                        ElementTransformUtils.RotateElement(doc, viewerId, axisLine, ang);
+                        doc.Regenerate();
+                        cur = section.CropBox.Transform;
+                        sb.Append($"已旋轉；");
+                    }
+                    XYZ delta = Horizontal(target.Origin - cur.Origin);
+                    if (delta.GetLength() > CameraMath.MmToFeet(0.5))
+                    {
+                        ElementTransformUtils.MoveElement(doc, viewerId, delta);
+                        doc.Regenerate();
+                        cur = section.CropBox.Transform;
+                        sb.Append($"已移動；");
+                    }
+                }
+
+                // 讀回實際座標系，確認方向（BasisX 水平分量與 BasisY 為上）一致
+                XYZ actX = new XYZ(cur.BasisX.X, cur.BasisX.Y, 0);
+                double angErr = actX.GetLength() < 1e-6 ? 180 : actX.Normalize().AngleTo(targetX) * 180 / Math.PI;
+                double upErr = cur.BasisY.AngleTo(target.BasisY) * 180 / Math.PI;
+                // 剖切平面位置：實際原點與目標原點沿法向（BasisZ）的距離——Min/Max 會換算，但記下來供查
+                double normalOffMm = CameraMath.FeetToMm((cur.Origin - target.Origin).DotProduct(target.BasisZ));
+                sb.Append($"讀回 原點({Mm3(cur.Origin)}) 方向誤差={angErr:F3}° 上方向誤差={upErr:F3}° 法向偏移={normalOffMm:F0}mm；");
+                if (angErr > 0.05 || upErr > 0.05)
+                    throw new InvalidOperationException($"移動/旋轉後方向仍不符（{angErr:F2}°/{upErr:F2}°）");
+
+                // 在實際座標系算區域範圍：意圖 8 角點（世界）→ 實際.Inverse
+                Transform inv = cur.Inverse;
+                double x0 = double.MaxValue, y0 = double.MaxValue, z0 = double.MaxValue, x1 = double.MinValue, y1 = double.MinValue, z1 = double.MinValue;
+                foreach (XYZ w in WorldCorners(intended))
+                {
+                    XYZ l = inv.OfPoint(w);
+                    x0 = Math.Min(x0, l.X); y0 = Math.Min(y0, l.Y); z0 = Math.Min(z0, l.Z);
+                    x1 = Math.Max(x1, l.X); y1 = Math.Max(y1, l.Y); z1 = Math.Max(z1, l.Z);
+                }
+                section.CropBox = new BoundingBoxXYZ { Transform = cur, Min = new XYZ(x0, y0, z0), Max = new XYZ(x1, y1, z1) };
+                sb.Append(DescribeSectionExtentCheck(doc, section, intended, out double dev));
+                if (dev > SectionExtentToleranceMm)
+                    throw new InvalidOperationException($"世界範圍偏差 {dev:F1}mm > {SectionExtentToleranceMm}mm");
+                log = sb.ToString();
+                Logger.Info($"相機 Key Plan：更新既有剖面「{section.Name}」 {log}");
+                return section;
+            }
+            catch (Exception ex)
+            {
+                failReason = ex.Message;
+                sb.Append($"移動路徑失敗：{ex.Message}；");
+                Logger.Error($"相機 Key Plan：更新既有剖面「{section.Name}」的位置失敗", ex);
+            }
+
+            // ④ 退路：不在圖紙上 → 刪除重建；在圖紙上 → 回報
+            List<string> sheets = SheetsHostingView(doc, section.Id);
+            if (sheets.Count > 0)
+            {
+                sb.Append($"剖面已放在圖紙（{string.Join("、", sheets)}）上，不刪除重建；範圍未更新，請按「重設剖面位置」或手動調整。");
+                log = sb.ToString();
+                AddCropWarning($"Key Plan 剖面「{section.Name}」無法移到新位置（{failReason}），且已放在圖紙上，未刪除重建——範圍未更新。");
+                return null;
+            }
+            try
+            {
+                ElementId oldId = section.Id;
+                doc.Delete(oldId);
+                ViewSection created = CreateSectionFromBox(doc, intended, sectionName, cid);
+                sb.Append($"已刪除舊剖面 {oldId.GetIdValue()} 並重建為 {created.Id.GetIdValue()}；");
+                sb.Append(DescribeSectionExtentCheck(doc, created, intended, out _));
+                log = sb.ToString();
+                Logger.Info($"相機 Key Plan：剖面「{sectionName}」刪除重建 {log}");
+                return created;
+            }
+            catch (Exception ex2)
+            {
+                sb.Append($"刪除重建也失敗：{ex2.Message}（範圍未更新）");
+                log = sb.ToString();
+                AddCropWarning($"Key Plan 剖面「{sectionName}」無法更新到新位置：{ex2.Message}");
+                Logger.Error("相機 Key Plan：剖面刪除重建失敗", ex2);
+                return null;
+            }
+        }
+
+        /// <summary>剖面的 viewer（其他視圖裡的剖面標記；移動/旋轉它＝移動剖面）。自己的裁剪框元素（OwnerViewId＝剖面）排除。</summary>
+        private static ElementId FindSectionViewerId(Document doc, ViewSection section, out string how)
+        {
+            how = null;
+            try
+            {
+                IList<ElementId> deps = section.GetDependentElements(new ElementCategoryFilter(BuiltInCategory.OST_Viewers));
+                if (deps != null)
+                {
+                    foreach (ElementId d in deps)
+                    {
+                        if (d == section.Id) continue;
+                        Element e = doc.GetElement(d);
+                        if (e == null || e.OwnerViewId == section.Id) continue;
+                        how = "GetDependentElements";
+                        return d;
+                    }
+                }
+            }
+            catch (Exception ex) { Logger.Error("相機 Key Plan：找剖面 viewer（GetDependentElements）失敗，改用名稱比對", ex); }
+            foreach (Element e in new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_Viewers).WhereElementIsNotElementType())
+            {
+                if (e.Id == section.Id || e.OwnerViewId == section.Id) continue;
+                if (e.Name == section.Name) { how = "Name"; return e.Id; }
+            }
+            return null;
+        }
+
+        private static List<string> SheetsHostingView(Document doc, ElementId viewId)
+        {
+            var names = new List<string>();
+            foreach (Viewport vp in new FilteredElementCollector(doc).OfClass(typeof(Viewport)).Cast<Viewport>())
+            {
+                if (vp.ViewId != viewId) continue;
+                if (doc.GetElement(vp.SheetId) is ViewSheet s) names.Add(s.SheetNumber + " " + s.Name);
+            }
+            return names;
+        }
+
+        private static XYZ Horizontal(XYZ v) => new XYZ(v.X, v.Y, 0);
+
+        private static string Mm3(XYZ p) => $"{CameraMath.FeetToMm(p.X):F0},{CameraMath.FeetToMm(p.Y):F0},{CameraMath.FeetToMm(p.Z):F0}";
+
+        private static IEnumerable<XYZ> WorldCorners(BoundingBoxXYZ b)
+        {
+            Transform tf = b.Transform ?? Transform.Identity;
+            foreach (double x in new[] { b.Min.X, b.Max.X })
+                foreach (double y in new[] { b.Min.Y, b.Max.Y })
+                    foreach (double z in new[] { b.Min.Z, b.Max.Z })
+                        yield return tf.OfPoint(new XYZ(x, y, z));
+        }
+
+        /// <summary>剖面世界範圍後檢：把意圖框與讀回框的 8 個世界角點都投到「意圖座標系」，比較 X（沿剖面）、
+        /// Y（高程）、Z（深度）三軸的 min/max，取最大偏差（mm）。Regenerate 後讀回。</summary>
+        private static string DescribeSectionExtentCheck(Document doc, ViewSection section, BoundingBoxXYZ intended, out double devMm)
+        {
+            devMm = double.NaN;
+            try
+            {
+                doc.Regenerate();
+                BoundingBoxXYZ act = section.CropBox;
+                Transform inv = intended.Transform.Inverse;
+                double[] Ext(BoundingBoxXYZ b)
+                {
+                    double[] r = { double.MaxValue, double.MinValue, double.MaxValue, double.MinValue, double.MaxValue, double.MinValue };
+                    foreach (XYZ w in WorldCorners(b))
+                    {
+                        XYZ l = inv.OfPoint(w);
+                        r[0] = Math.Min(r[0], l.X); r[1] = Math.Max(r[1], l.X);
+                        r[2] = Math.Min(r[2], l.Y); r[3] = Math.Max(r[3], l.Y);
+                        r[4] = Math.Min(r[4], l.Z); r[5] = Math.Max(r[5], l.Z);
+                    }
+                    return r;
+                }
+                double[] a = Ext(intended), b2 = Ext(act);
+                double dXY = 0, dZ = 0;
+                for (int i = 0; i < 4; i++) dXY = Math.Max(dXY, Math.Abs(CameraMath.FeetToMm(a[i] - b2[i])));
+                for (int i = 4; i < 6; i++) dZ = Math.Max(dZ, Math.Abs(CameraMath.FeetToMm(a[i] - b2[i])));
+                // 世界高程（剖面 Y 軸＝世界上）
+                double wz0 = double.MaxValue, wz1 = double.MinValue;
+                foreach (XYZ w in WorldCorners(act)) { wz0 = Math.Min(wz0, w.Z); wz1 = Math.Max(wz1, w.Z); }
+                double iz0 = double.MaxValue, iz1 = double.MinValue;
+                foreach (XYZ w in WorldCorners(intended)) { iz0 = Math.Min(iz0, w.Z); iz1 = Math.Max(iz1, w.Z); }
+                devMm = Math.Max(dXY, dZ);
+                _lastSectionDeviationMm = devMm;
+                string s = $"世界範圍後檢：沿剖面/高程最大偏差={dXY:F1}mm、深度偏差={dZ:F1}mm；世界Z 意圖[{CameraMath.FeetToMm(iz0):F0},{CameraMath.FeetToMm(iz1):F0}] 實際[{CameraMath.FeetToMm(wz0):F0},{CameraMath.FeetToMm(wz1):F0}]mm";
+                if (devMm > SectionExtentToleranceMm)
+                {
+                    s += $"（> {SectionExtentToleranceMm}mm）";
+                    AddCropWarning($"Key Plan 剖面「{section.Name}」世界範圍與意圖差 {devMm:F1}mm（沿剖面/高程 {dXY:F1}、深度 {dZ:F1}）");
+                }
+                return s;
+            }
+            catch (Exception ex)
+            {
+                return "世界範圍後檢失敗：" + ex.Message;
+            }
         }
 
         /// <summary>

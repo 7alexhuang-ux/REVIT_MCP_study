@@ -4,6 +4,15 @@
 > 除非另外註明，每一條都「已編譯、未經 Revit 實機驗證」。
 > 現行行為見 [spec.zh-TW.md](spec.zh-TW.md)；決策理由見 [adr.zh-TW.md](adr.zh-TW.md)。
 
+## 2026-09-26
+
+### 01:45｜MCP 自測第三輪修正（5 項，已編譯、待 MCP 複測；Revit 執行中未部署）
+- **（回歸）更新既有 Key Plan 剖面時內容跑位**：既有剖面設 CropBox 時 Revit 不採用新 Transform；改為先旋轉／移動剖面 viewer 到新原點與方向，在讀回座標系算範圍，後檢世界範圍（> 5 mm 警告，`Decisions.SectionApplyLog`／`SectionExtentDeviationMm`）；做不到且不在圖紙上才刪除重建（D-037）。
+- **圖框幾何讀到 0 條線**：試三組 Options 取線最多者，GeometryInstance 空時改讀 SymbolGeometry、收實體直線邊，幾何類型統計寫進 `DrawAreaSource`；保留 20 % 退路。
+- **圖紙空白過多**：透視格＝透視視埠實際寬＋間距，其餘寬度給右側；右側自動在單欄／上二下一／2×2 中挑比例最細者（D-035）。面板提示：圖紙上透視圖大小請用 Revit「裁剪區域大小 → 縮放（鎖定比例）」手動調整。
+- **樓層總覽裁剪切到扇形**：裁剪與畫扇形共用 `OverviewFanRadiusFeet`；畫完後讀回標記外接框，超出就外擴（D-036）。
+- **A 扇形子類別讀回「讀不到扇形幾何」**：讀回前先 Regenerate，Options 改 Fine＋NonVisible＋ComputeReferences，展開實例、比對實體／面／網格的 GraphicsStyleId（扇形本身未改）。
+
 ## 2026-09-25
 
 ### 22:50｜MCP 自測第二輪修正（6 項，已編譯、待 MCP 複測）

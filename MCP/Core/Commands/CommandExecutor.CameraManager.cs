@@ -330,6 +330,8 @@ namespace RevitMCP.Core
                     SectionModeRequested = d.SectionModeRequested.ToString(),
                     SectionModeUsed = d.SectionModeUsed.ToString(),
                     d.SectionSpecLog,
+                    d.SectionApplyLog,
+                    SectionExtentDeviationMm = CmRound(d.SectionExtentDeviationMm, 1),
                     IsoExtentMode = d.IsoExtentMode.ToString(),
                     KeyPlanStyle = d.FadedStyle ? "淡化背景" : "原始"
                 }

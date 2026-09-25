@@ -263,6 +263,14 @@
 
 ES `RevitMCP_CameraSectionStateV2` 記下上次程式產生剖面時的原點與 X 軸方向——2026-09-25 第二輪起存的是「CropBox 套用＋Regenerate 之後讀回」的實際 `CropBox.Transform`（Revit 會正規化剖切面、深度外擴會平移原點；舊版存要求值 → 沒人動過也被判成手動移過）。重跑時若剖面目前的 `CropBox.Transform` 與記錄差 > 5 mm 或 > 0.5°（兩者都是模型座標讀回值），視為使用者手動調整過，log 記下兩組值與法向位移：這次只補畫標記，裁剪框完全不動，狀態列「剖面位置已保留（你曾手動調整）」。沒有記錄（舊版產生）視為沒動過。「重設剖面位置」無條件依目前方向設定重算覆蓋。
 
+**更新既有剖面（2026-09-26 第三輪，D-037，修回歸）**：對既有 `ViewSection` 設 `CropBox` 時 Revit **不採用新 Transform**，只把 Min/Max 套在舊座標系（實測：log 的新原點 (-8880,7230,7370) mm，讀回仍是舊原點 (-6505.4,2222.6,4740.4)，區域範圍卻換成新值 → 世界 Z 2111–7523、畫面跑到鄰近樓梯核與下層）。改為：
+1. 找剖面的 viewer（`GetDependentElements(OST_Viewers)` 中 `OwnerViewId` 不是剖面自己者；退回同名 viewer）；
+2. 先繞「目前原點」的鉛直軸 `ElementTransformUtils.RotateElement` 到新方向 → Regenerate → 讀回 → `MoveElement` 水平位移到新原點 → Regenerate；
+3. 讀回實際 `CropBox.Transform`，確認 BasisX／BasisY 與目標差 < 0.05°，在**實際座標系**內把意圖框的 8 個世界角點換成區域 Min/Max 再設 CropBox；
+4. 後檢：Regenerate 後把意圖框與讀回框的角點都投到意圖座標系比對（沿剖面／高程／深度），最大偏差 > 5 mm 列警告；結果放進 `Decisions.SectionApplyLog`、`Decisions.SectionExtentDeviationMm`；
+5. 任一步做不到（找不到 viewer、方向仍不符、偏差 > 5 mm）→ 剖面**不在任何圖紙上**才刪除重建（同名、重掛 ES 連結與狀態）；在圖紙上 → 範圍不動、列警告（請按「重設剖面位置」或手動調整）。
+新建剖面也做同一個後檢。之後照舊 `SaveSectionStateActual` 存讀回狀態。
+
 #### 10.5.4 表現與標記
 
 見 §10.7、§10.8。剖面裡的其他剖面／立面／詳圖索引標記（例：穿過畫面、編號「-/---」的大剖面標頭）一律逐元素隱藏，立面／詳圖索引類別隱藏（2026-09-25 MCP 自測後；一鍵 4 視圖與「更新相機標記」都做）。視線、扇形邊線一律投影到剖面平面（斜交時自然縮短）；視線與剖面平面夾角 > 60° 記 log，接近 90° 只畫眼睛圓圈。
@@ -337,6 +345,7 @@ Schema 在交易外先建；剖面狀態讀寫失敗只記 log，不中斷建立
 - 裁剪（只改範圍、不旋轉）：
   - 該層全部室內：每台相機扇形（室內扇形半徑、非對稱左右緣、弧上 16 點）外接框 **+3 m** 的聯集，另含每個眼睛 +3 m。
   - 有室外相機：再聯集底圖的裁剪框（＝建築範圍）；室外扇形（可達 60 m）不撐大總覽。
+  - 2026-09-26 第三輪（D-036）：裁剪與畫扇形共用同一個半徑函式 `OverviewFanRadiusFeet`；每台相機用的半徑寫進 `ExtentsMode`。畫完標記後再讀回**室內相機**的 B 標記元素（`OwnedByView`，Role＝MarkerPlan／MarkerName）在本視圖的外接框，超出裁剪（含 3 m 餘裕）就外擴並列警告——裁剪一定包得住實際畫出的扇形。
 - 表現法同 Key Plan 平面（§10.7）；但文字類別不整類隱藏，改逐元素隱藏「不是我們的」文字，保留相機名稱。
 - 每次更新先刪除這張視圖內**所有**相機標記（Role＝MarkerPlan／MarkerName），再逐台重畫：B 型平面標記（§10.8，不論 ⋯ 相機標記設定）＋名稱 `TextNote`（文字類型「相機標記名稱字」2.5 mm、背景透明、黑；放在眼睛後方紙上 3 mm）。已刪除或換到別層的相機因此不殘留。
 - 單一交易「更新樓層總覽」，每層一個 `SubTransaction`：某層失敗只回滾那一層。
@@ -347,7 +356,7 @@ Schema 在交易外先建；剖面狀態讀寫失敗只記 log，不中斷建立
 
 - **族群「RevitMCP 相機標記」**：第一次需要時以程式建立——樣板路徑由執行中 Revit 版本組成：`%ProgramData%\Autodesk\RVT <版本>\Family Templates\English\Generic Model.rft`，找不到依序試 `English\Metric Generic Model.rft`、`English-Imperial\Generic Model.rft`、`English_I\Generic Model.rft`、`Application.FamilyTemplatePath` 下同名檔（本機 2024 只有 `English\Metric Generic Model.rft`）。都找不到 → 回報原因、A 略過、B 不受影響。族群內容：子類別「相機標記」（一般模型）、相機體擠出 200×120×120 mm（眼睛在前緣中心＝原點）、扁平視線箭頭擠出（長 350 mm）；實例參數 視野角左、視野角右、遠裁剪、俯仰角、相機名稱。存成 `%TEMP%\RevitMCP\RevitMCP 相機標記.rfa`，在交易「載入相機標記族群」內 `LoadFamily`。
 - **每台相機一個實例**：放在眼睛（樓層＝相機的下方樓層，室內＝房間的 Level），繞 Z 旋轉使族群 +Y＝相機水平前方向；非工作平面族群不能傾斜，一律水平，俯仰角只寫進參數。參數隨相機更新。
-- **視野扇形**：參數驅動的族群扇形未實作（見 D-026）；改為每台相機一個 `DirectShape`（一般模型，幾何以 `SolidOptions(材料, GraphicsStyleId)` 指定子類別「相機標記」的投影 GraphicsStyle、材料「RevitMCP 相機標記」70% 透明），水平扇形 10 mm 厚、左右緣＝非對稱邊界角、半徑＝與 Key Plan 相同的扇形半徑；釘選避免誤拖。2026-09-25 第二輪：GraphicsStyle 取不到時先 Regenerate 再取；`SetShape` 後讀回幾何確認每個實體的 `GraphicsStyleId`＝子類別樣式，不符記在 `AMarkerLog`（「子類別樣式 gs=…，不符 N」）。
+- **視野扇形**：參數驅動的族群扇形未實作（見 D-026）；改為每台相機一個 `DirectShape`（一般模型，幾何以 `SolidOptions(材料, GraphicsStyleId)` 指定子類別「相機標記」的投影 GraphicsStyle、材料「RevitMCP 相機標記」70% 透明），水平扇形 10 mm 厚、左右緣＝非對稱邊界角、半徑＝與 Key Plan 相同的扇形半徑；釘選避免誤拖。2026-09-25 第二輪：GraphicsStyle 取不到時先 Regenerate 再取；`SetShape` 後讀回幾何確認每個實體的 `GraphicsStyleId`＝子類別樣式，不符記在 `AMarkerLog`（「子類別樣式 gs=…，不符 N」）。2026-09-26 第三輪：讀回前先 Regenerate（`SetShape` 後不 Regenerate 讀不到幾何，舊版因此每台都報「讀不到扇形幾何」），Options＝Fine＋IncludeNonVisibleObjects＋ComputeReferences（再退一組 Fine），逐層展開 GeometryInstance，實體（含各面）與網格的 GraphicsStyleId 都比對；扇形本身不改。
 - **透視圖不看到標記**：每次同步對所有透視圖（含出圖用透視複本）`SetCategoryHidden(子類別「相機標記」)`（已隱藏者不動）。**視圖本身不能隱藏且套了視圖樣板（樣板控制 V/G）→ 改在該樣板上隱藏這個子類別**（2026-09-25 第二輪，D-033；只動本工具的子類別，套同一樣板的其他 3D 視圖也一併隱藏），樣板名稱記進 `AMarkerLog` 與 log；連樣板都不能隱藏才列為失敗。一鍵出圖紙建立／同步透視複本後也跑一次。Enscape 是否也排除＝使用者實測（roadmap）。
 - **標記型式不含 A 時**（面板設定或 MCP `markerMode=B`）：一鍵 4 視圖成功後刪除「這台相機」的 A 實例＋扇形（交易「更新相機 A 標記」，`AMarkerLog`＝「標記型式＝B：已刪除本相機 A 實例／扇形 N 個」）；不含 B 時 Key Plan 平面／剖面的 B 標記照舊刪除。
 - **淡化樣式**：相機標記含 A 時，Key Plan 淡化表現法不把「一般模型」類別半色調（否則 A 標記被淡化）。
@@ -368,8 +377,12 @@ Schema 在交易外先建；剖面狀態讀寫失敗只記 log，不中斷建立
 1. **先確保有 Key Plan**：相機缺平面／剖面／等角任一張 → 先跑一鍵 4 視圖（不並排，獨立交易「建立相機 Key Plan」）。
 2. **圖框類型**：MCP 參數 `titleBlockTypeId` → 面板設定「圖紙圖框」→ 專案內**已放置次數最多**的圖框類型 → 第一個圖框類型（名稱排序）→ 專案沒有圖框＝不放圖框。既有相機圖紙的圖框類型與選擇不同時換類型（不動位置）。
 3. **圖紙**：以 ES（`CameraKeyPlanLink`，`CameraUniqueId`＝相機、Role＝`Sheet`）找本相機的圖紙；沒有就 `ViewSheet.Create`（圖紙編號由 Revit 自動給），名稱 `Key Plan-<相機名>`（相機改名後重跑會跟著改）。不以名稱比對找既有圖紙（避免接管使用者自己的同名圖紙）。
-4. **可繪區**：圖框實例在圖紙上的外接框（`get_BoundingBox(sheet)`）四邊各內縮 `SheetMarginMm`（本機設定，預設 15 mm）；沒有圖框或讀不到＝A3 橫式 420×297 mm 內縮同樣邊界。**扣除圖框標題欄（2026-09-25 第二輪，D-034）**：讀圖框實例在圖紙視圖中的幾何（`get_Geometry(Options{View=sheet})`，展開 GeometryInstance 取 Line／PolyLine）——右側標題欄＝長度 ≥ 60 % 圖框高的垂直線、位在圖框右側 40 % 內、離最右長直線 > 25 mm（排除外框／內框）者取最左；下方標題欄＝長度 ≥ 60 % 圖框寬的水平線、位在下方 35 % 內、離最下長橫線 > 25 mm 者取最高。可繪區右緣／下緣退到標題欄線再內縮邊界。都偵測不到且圖紙橫式 → 保留右側 `SheetReservedStripFraction`（本機設定，預設 0.20）。判定結果寫進 `DrawAreaSource`。
-5. **版面**：左格＝可繪區左側 55 % 寬、全高，放透視圖；右欄＝其餘寬度，由上而下平面、剖面、等角，**列高依各視圖內容長寬比分配**（內容尺寸＝視埠外框 × 目前比例，與比例無關；長寬比夾在 0.25–4）；格子之間留 6 mm（給視埠標題）。先確保四個視埠都在圖紙上（新的暫放中心），Regenerate 後量尺寸、調整，最後 `SetBoxCenter` 置中於格子。
+4. **可繪區**：圖框實例在圖紙上的外接框（`get_BoundingBox(sheet)`）四邊各內縮 `SheetMarginMm`（本機設定，預設 15 mm）；沒有圖框或讀不到＝A3 橫式 420×297 mm 內縮同樣邊界。**扣除圖框標題欄（2026-09-25 第二輪，D-034）**：讀圖框實例在圖紙視圖中的幾何（`get_Geometry(Options{View=sheet})`，展開 GeometryInstance 取 Line／PolyLine）——右側標題欄＝長度 ≥ 60 % 圖框高的垂直線、位在圖框右側 40 % 內、離最右長直線 > 25 mm（排除外框／內框）者取最左；下方標題欄＝長度 ≥ 60 % 圖框寬的水平線、位在下方 35 % 內、離最下長橫線 > 25 mm 者取最高。可繪區右緣／下緣退到標題欄線再內縮邊界。都偵測不到且圖紙橫式 → 保留右側 `SheetReservedStripFraction`（本機設定，預設 0.20）。判定結果寫進 `DrawAreaSource`。2026-09-26 第三輪（MCP 自測：E1 30 x 42 讀到 0 條線）：依序試 `Options{View=sheet}`、`{View=sheet, IncludeNonVisibleObjects}`、`{無 View, Fine}` 取線最多的一組；GeometryInstance 的 `GetInstanceGeometry()` 為空時改 `GetSymbolGeometry(gi.Transform)`；另收實體的直線邊；各類幾何物件數寫進 `DrawAreaSource`（讀不到時看得出原因）。仍保留 20 % 退路。
+5. **版面（2026-09-26 第三輪，D-035，取代「透視 55 %」）**：透視圖**無法**以放大裁剪框放大（實測 FOV 64°→101°，已由 FOV 讀回還原），所以：
+   - 先處理透視圖（出圖複本仍試放大，失敗即還原），Regenerate 後讀回**實際視埠寬**，透視格寬＝實際寬＋左右 6 mm，夾在可繪寬 20–70 %；其餘寬度全給右側。
+   - 右側試幾種版面：單欄（由上而下平面、剖面、等角，列高依內容長寬比分配，夾 0.25–4）、上二下一（最扁的視圖放下列橫跨全寬，上下列高 40／50／60 %）、2×2（左上／右上／左下）；各自挑放得進的最細比例，取「最粗比例最小、再比例和最小」者。版面判定寫進 `DrawAreaSource`。
+   - **圖紙上透視圖的大小只能在 Revit 內手動調整**：選視埠 → 裁剪區域大小（Size Crop）→「縮放（鎖定比例）」。面板完成訊息與透視視埠的 `Note` 都會提示。
+   - 格子之間留 6 mm（給視埠標題）。先確保四個視埠都在圖紙上（新的暫放中心），Regenerate 後量尺寸、調整，最後 `SetBoxCenter` 置中於格子。
 6. **自動比例與大小（2026-09-25 第二輪，D-034，取代舊的「不改比例」）**：
    - Key Plan 平面／剖面／等角（本工具的視圖）：挑「內容 ÷ 比例 ≤ 格子 95 %」的最細標準比例（1:20、25、50、75、100、150、200）；都放不進再試 1:250、300、400、500、750、1000 並列警告。改比例失敗（例：樣板控制比例）列警告。
    - 出圖用透視複本：裁剪框等比放大 k＝0.9 × min(格寬／視埠寬, 格高／視埠高)，讓視埠填滿格子約 90 %。依序試「X/Y/Z 一起乘 k」「只乘 X/Y」，每次 Regenerate 後以 `ComputePerspectiveFov` 讀回比對水平／垂直 FOV 與四個邊界角（容許 0.2°），都不符就還原並列警告。複本之後被去抖「更新相機標記」同步裁剪框時，會等比縮放回同步前的圖紙外框大小（FOV 不變）。圖紙上放的是原相機時不動它的裁剪框。

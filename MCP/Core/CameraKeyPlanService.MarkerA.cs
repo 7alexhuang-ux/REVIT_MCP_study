@@ -592,16 +592,61 @@ namespace RevitMCP.Core
             log = null;
             try
             {
-                GeometryElement ge = fan.get_Geometry(new Options());
-                if (ge == null) { log = "讀不到扇形幾何"; return false; }
+                // 2026-09-26 第三輪（MCP 自測：「讀不到扇形幾何」）：SetShape 後幾何要 Regenerate 才讀得到；
+                // Options 用 Fine＋IncludeNonVisibleObjects＋ComputeReferences，逐層展開 GeometryInstance，實體／網格都收。
+                try { fan.Document.Regenerate(); } catch { }
                 var ids = new List<long>();
-                foreach (GeometryObject go in ge)
-                    if (go is Solid so && so.Volume > 0) ids.Add(go.GraphicsStyleId != null ? (long)go.GraphicsStyleId.GetIdValue() : -1L);
-                bool ok = ids.Count > 0 && gsId != ElementId.InvalidElementId && ids.All(x => x == (long)gsId.GetIdValue());
-                if (!ok) log = $"扇形讀回 GraphicsStyleId=[{string.Join(",", ids)}]，預期 {gsId.GetIdValue()}";
+                int solids = 0, meshes = 0, faces = 0;
+                foreach (Options opt in new[]
+                {
+                    new Options { DetailLevel = ViewDetailLevel.Fine, IncludeNonVisibleObjects = true, ComputeReferences = true },
+                    new Options { DetailLevel = ViewDetailLevel.Fine }
+                })
+                {
+                    GeometryElement ge = null;
+                    try { ge = fan.get_Geometry(opt); } catch { ge = null; }
+                    if (ge == null) continue;
+                    CollectFanStyleIds(ge, ids, ref solids, ref meshes, ref faces, 0);
+                    if (ids.Count > 0) break;
+                }
+                if (ids.Count == 0) { log = $"讀不到扇形幾何（實體 {solids}、網格 {meshes}）"; return false; }
+                bool ok = gsId != ElementId.InvalidElementId && ids.All(x => x == (long)gsId.GetIdValue());
+                log = ok
+                    ? null
+                    : $"扇形讀回 GraphicsStyleId=[{string.Join(",", ids.Distinct())}]（實體 {solids}、網格 {meshes}、面 {faces}），預期 {gsId.GetIdValue()}";
                 return ok;
             }
             catch (Exception ex) { log = "驗證扇形樣式失敗：" + ex.Message; return false; }
+        }
+
+        private static void CollectFanStyleIds(GeometryElement ge, List<long> ids, ref int solids, ref int meshes, ref int faces, int depth)
+        {
+            if (ge == null || depth > 3) return;
+            foreach (GeometryObject go in ge)
+            {
+                if (go is Solid so)
+                {
+                    if (so.Faces.Size == 0) continue;
+                    solids++;
+                    ids.Add(go.GraphicsStyleId != null ? (long)go.GraphicsStyleId.GetIdValue() : -1L);
+                    // 面上的 GraphicsStyleId（DirectShape 的面通常沿用實體樣式；若面有自己的樣式也要一致）
+                    foreach (Face f in so.Faces)
+                    {
+                        faces++;
+                        ElementId fg = f.GraphicsStyleId;
+                        if (fg != null && fg != ElementId.InvalidElementId) ids.Add((long)fg.GetIdValue());
+                    }
+                }
+                else if (go is Mesh me)
+                {
+                    meshes++;
+                    ids.Add(me.GraphicsStyleId != null ? (long)me.GraphicsStyleId.GetIdValue() : -1L);
+                }
+                else if (go is GeometryInstance gi)
+                {
+                    CollectFanStyleIds(gi.GetInstanceGeometry(), ids, ref solids, ref meshes, ref faces, depth + 1);
+                }
+            }
         }
 
         /// <summary>刪除「相機已不存在」的標記（A 實例、A 扇形、總覽／Key Plan 的 B 標記與名稱）。須在交易內。回傳刪除數。</summary>
