@@ -442,6 +442,38 @@ export const visualizationTools: Tool[] = [
         },
     },
     {
+        name: "set_view_template_controls",
+        description: "列出或切換視圖樣版（View Template）的「控制參數」清單，對應 Revit「View Template」對話框每一列的 Include 勾選框。常見用途：使用者在視圖上看不到篩選器上色，原因是樣版正在控制『V/G Overrides Filters』——把該項目從控制中排除（uncontrol），使用者才能在個別視圖自行開關篩選器。不帶 uncontrol/control 時為純唯讀列表模式，用來查出合法的參數名稱（比對用，不分大小寫）；不確定名稱時應先這樣呼叫一次。dryRun=true 只預覽變更、不寫入模型。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                templateId: {
+                    type: "number",
+                    description: "目標視圖樣版的 ElementId（與 templateName 二擇一）",
+                },
+                templateName: {
+                    type: "string",
+                    description: "目標視圖樣版的名稱（與 templateId 二擇一；精確比對，IsTemplate=true 的 view 中查找）",
+                },
+                uncontrol: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "要讓樣版『停止控制』的參數名稱清單（Include 勾掉），例如 [\"V/G Overrides Filters\"]。名稱不分大小寫，找不到時會回傳相近名稱建議。",
+                },
+                control: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "要讓樣版『開始控制』的參數名稱清單（Include 勾上）。與 uncontrol 用同一份可控參數名單，同一名稱不可同時出現在兩邊。",
+                },
+                dryRun: {
+                    type: "boolean",
+                    description: "true = 只計算並回傳變更結果，不寫入模型。預設 false。",
+                    default: false,
+                },
+            },
+        },
+    },
+    {
         name: "set_category_visibility",
         description: "在指定視圖中隱藏或顯示整個類別（同時影響主模型與連結模型）。使用 View.SetCategoryHidden() API。",
         inputSchema: {

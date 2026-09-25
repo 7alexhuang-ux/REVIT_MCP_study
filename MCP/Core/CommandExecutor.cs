@@ -411,6 +411,10 @@ namespace RevitMCP.Core
                         result = GetViewTemplates(parameters);
                         break;
 
+                    case "set_view_template_controls":
+                        result = SetViewTemplateControls(parameters);
+                        break;
+
                     case "create_view_schedule":
                         result = CreateViewSchedule(parameters);
                         break;
