@@ -43,6 +43,7 @@ namespace RevitMCP.Core
         // ── 設定 ──
         internal static CameraMarkerMode GetMarkerMode()
         {
+            if (_markerModeOverride.HasValue) return _markerModeOverride.Value; // 2026-09-25：MCP run_camera_keyplan markerMode 單次覆寫
             try { return ConfigManager.Instance.Settings.CameraManager.MarkerMode; }
             catch { return CameraMarkerMode.B; }
         }
@@ -313,7 +314,7 @@ namespace RevitMCP.Core
                 : cameraIds.Select(id => doc.GetElement(id) as View3D);
             foreach (View3D v in source)
             {
-                if (v == null || v.IsTemplate || !v.IsPerspective) continue;
+                if (v == null || v.IsTemplate || !v.IsPerspective || IsSheetPerspectiveCopy(v)) continue; // 出圖用透視複本不是相機
                 try { cams.Add((v, ComputeCameraParams(v, levels))); }
                 catch (Exception ex) { Logger.Error($"相機 A 型標記：相機「{v.Name}」參數計算失敗（略過）", ex); }
             }
@@ -601,7 +602,7 @@ namespace RevitMCP.Core
             if (MarkerModeIncludesA()) aMsg = SyncAMarkers(doc, null, placeMissing: true);
             else aMsg = $"已刪除 A 標記 {RemoveAllAMarkers(doc)} 個";
             List<ElementId> all = new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>()
-                .Where(v => !v.IsTemplate && v.IsPerspective).Select(v => v.Id).ToList();
+                .Where(v => !v.IsTemplate && v.IsPerspective && !IsSheetPerspectiveCopy(v)).Select(v => v.Id).ToList();
             int n = all.Count > 0 ? UpdateMarkersForCameras(doc, all) : 0;
             string label = mode == CameraMarkerMode.A ? "A 模型" : mode == CameraMarkerMode.AB ? "A+B" : "B 詳圖";
             return $"相機標記＝{label}：{aMsg}；已重畫 {n} 台相機的 Key Plan／總覽標記。";

@@ -305,6 +305,10 @@ namespace RevitMCP.Core
             public ElementId OverviewViewId;
             /// <summary>2026-09-25 Wave 2：A 型標記同步結果（null＝未啟用 A）。</summary>
             public string AMarkerLog;
+            /// <summary>2026-09-25：這次實際生效的相機標記型式（含 MCP 單次覆寫）。</summary>
+            public string MarkerModeUsed;
+            /// <summary>2026-09-25：裁剪框讀回與預期不符（&gt; 1 %）等警告。</summary>
+            public List<string> Warnings = new List<string>();
         }
 
         /// <summary>一鍵 4 視圖的關鍵判定（feet／度），供 MCP 自動測試讀取；與 log 內容同源。</summary>
@@ -343,6 +347,8 @@ namespace RevitMCP.Core
         {
             public CameraSectionOrientationMode? SectionMode;
             public CameraIsoExtentMode? IsoMode;
+            /// <summary>2026-09-25：相機標記型式單次覆寫（B／A／AB），不寫回面板設定。</summary>
+            public CameraMarkerMode? MarkerMode;
         }
 
         // Revit API 只在主執行緒執行，一次只會有一個一鍵 4 視圖在跑，靜態欄位即可。
@@ -353,9 +359,11 @@ namespace RevitMCP.Core
             bool forceResetSection, KeyPlanRunOptions options)
         {
             KeyPlanRunOptions previous = _runOptions;
+            CameraMarkerMode? previousMarker = _markerModeOverride;
             _runOptions = options;
+            if (options?.MarkerMode != null) _markerModeOverride = options.MarkerMode;
             try { return CreateOrUpdateFourViews(uiApp, doc, cameraViewId, forceResetSection); }
-            finally { _runOptions = previous; }
+            finally { _runOptions = previous; _markerModeOverride = previousMarker; }
         }
 
         /// <summary>
@@ -435,6 +443,8 @@ namespace RevitMCP.Core
 
             // ES Schema 註冊不需要交易；先在交易外建好，Schema 問題不會在交易中途才爆出來。
             // 剖面狀態只是附屬簿記：失敗只記 log，視圖照建（SaveSectionState 內部也會吞掉例外）。
+            ResetCropWarnings();
+            result.MarkerModeUsed = GetMarkerMode().ToString();
             string schemaErr = SelfCheckSchemas();
             if (schemaErr != null) Logger.Error("相機 Key Plan：ES Schema 自我檢查失敗（剖面狀態簿記將略過）：" + schemaErr);
 
@@ -444,6 +454,8 @@ namespace RevitMCP.Core
                 try
                 {
                     ViewPlan planView = GetOrCreatePlanView(doc, uiApp, geom.LevelBelow, planName, cid);
+                    // 2026-09-25：複製來的平面可能鎖在 Scope Box（CropBox 設定會被忽略）→ 每次先解除，再設裁剪框。
+                    NormalizeDuplicatedPlan(planView, "Key Plan 平面");
                     ConfigurePlanCropBox(planView, geom, forwardHoriz, leftRad, rightRad, fanRadiusFeet, isoXY, cp.IsOutdoor);
                     bool faded = IsKeyPlanFadedStyle();
                     dec.FadedStyle = faded;
@@ -469,6 +481,9 @@ namespace RevitMCP.Core
                     result.SectionPreserved = preserved;
                     DrawMarkerSafely(doc, "HideOtherSectionMarkers",
                         () => HideOtherSectionMarkers(doc, planView, sectionView));
+                    // 2026-09-25：剖面裡也會出現其他剖面／立面／詳圖索引標記 → 逐元素隱藏（剖面沒有要保留的 viewer）。
+                    DrawMarkerSafely(doc, "HideForeignViewersSection",
+                        () => HideForeignViewers(doc, sectionView, null, "剖面"));
 
                     View3D isoView = GetOrCreateIsoView(doc, isoName, cid, geom, isoXY, storeyTop, forwardHoriz);
                     result.IsoViewId = isoView.Id;
@@ -485,6 +500,7 @@ namespace RevitMCP.Core
                 }
             }
 
+            result.Warnings.AddRange(TakeCropWarnings());
             if (result.Error == null)
             {
                 // 2026-09-25 Wave 2：自動更新本層總覽＋（A 啟用時）A 型標記；各自獨立交易，失敗只記 log，不影響 4 視圖。
@@ -654,23 +670,10 @@ namespace RevitMCP.Core
 
                 EnsureOurSectionMarkerVisible(doc, plan, ourSection, ourViewerIds);
 
-                var toHide = new List<ElementId>();
-                int skippedNonSection = 0;
-                foreach (Element e in new FilteredElementCollector(doc, plan.Id).OfCategory(BuiltInCategory.OST_Viewers)
-                    .WhereElementIsNotElementType())
-                {
-                    if (ourViewerIds.Contains(e.Id)) continue;
-                    string vn = e.Name;
-                    bool isSection = (vn != null && sectionViewsByName.ContainsKey(vn))
-                        || (ViewerViewName(e) is string pvn && sectionViewsByName.ContainsKey(pvn));
-                    if (!isSection) { skippedNonSection++; continue; }
-                    if (!e.CanBeHidden(plan)) continue;
-                    toHide.Add(e.Id);
-                }
-                if (toHide.Count > 0) plan.HideElements(toHide);
+                // 2026-09-25：不只其他剖面，立面／詳圖索引標記也逐元素隱藏（只留本相機剖面），並隱藏立面／詳圖索引類別。
+                int hiddenCount = HideForeignViewers(doc, plan, ourViewerIds, "平面");
                 Logger.Info($"相機 Key Plan：平面「{plan.Name}」只留本相機剖面「{ourName}」（viewer 比對依據={matchedBy}，" +
-                    $"ids={string.Join(",", ourViewerIds.Select(i => i.GetIdValue().ToString()))}），隱藏其他剖面 {toHide.Count} 個，" +
-                    $"略過非剖面 viewer {skippedNonSection} 個");
+                    $"ids={string.Join(",", ourViewerIds.Select(i => i.GetIdValue().ToString()))}），隱藏其他視圖標記 {hiddenCount} 個");
             }
             catch (Exception ex)
             {
@@ -812,7 +815,7 @@ namespace RevitMCP.Core
                     }
                     box.Min = new XYZ(ox0 - m, oy0 - m, box.Min.Z);
                     box.Max = new XYZ(ox1 + m, oy1 + m, box.Max.Z);
-                    planView.CropBox = box;
+                    SetCropAndVerify(planView, box, "Key Plan 平面");
                     Logger.Info($"相機 Key Plan：平面裁剪（室外）＝扇形 R={CameraMath.FeetToMm(farClipFeet):F0}mm 外接框 +2m → {CameraMath.FeetToMm(ox1 - ox0 + 2 * m):F0}×{CameraMath.FeetToMm(oy1 - oy0 + 2 * m):F0}mm");
                     return;
                 }
@@ -869,7 +872,7 @@ namespace RevitMCP.Core
                     }
                     box.Min = new XYZ(ax0, ay0, box.Min.Z);
                     box.Max = new XYZ(ax1, ay1, box.Max.Z);
-                    planView.CropBox = box;
+                    SetCropAndVerify(planView, box, "Key Plan 平面");
                     Logger.Info($"相機 Key Plan：平面裁剪＝房間聯集∪完整扇形(+0.5m) → {CameraMath.FeetToMm(ax1 - ax0):F0}×{CameraMath.FeetToMm(ay1 - ay0):F0}mm");
                     return;
                 }
@@ -891,7 +894,7 @@ namespace RevitMCP.Core
 
             box.Min = new XYZ(minX - marginFeet, minY - marginFeet, box.Min.Z);
             box.Max = new XYZ(maxX + marginFeet, maxY + marginFeet, box.Max.Z);
-            planView.CropBox = box;
+            SetCropAndVerify(planView, box, "Key Plan 平面");
         }
 
         /// <summary>2026-09-25：平面上的視錐邊界方向。edgeRad＝相對正前方的帶號角（相機右為正）；RotateHorizontal
@@ -1118,7 +1121,7 @@ namespace RevitMCP.Core
         internal static void DescribeEyeRoom(View3D camera, CameraMath.CameraGeometry geom, out long? roomId, out string roomName, out string log)
         {
             roomId = null; roomName = null; log = null;
-            if (camera == null || geom?.LevelBelow == null) { log = "no level below"; return; }
+            if (camera == null || geom == null) { log = "no camera"; return; }
             RoomCtx rc = FindEyeRoom(camera.Document, camera, geom);
             log = rc?.Log;
             if (rc?.Room != null) { roomId = rc.Room.Id.GetIdValue(); roomName = rc.Room.Name; }
@@ -2669,7 +2672,7 @@ namespace RevitMCP.Core
             double minR = CameraMath.MmToFeet(FanMinRadiusMm);
             try
             {
-                cp.Room = cp.Geom.LevelBelow != null ? FindEyeRoom(camera.Document, camera, cp.Geom) : null;
+                cp.Room = FindEyeRoom(camera.Document, camera, cp.Geom); // 2026-09-25：不再需要下方樓層（房間搜尋以眼睛 XY＋垂直範圍）
             }
             catch (Exception ex)
             {
@@ -2729,7 +2732,7 @@ namespace RevitMCP.Core
         {
             outdoorFanRadiusFeet = 0;
             log = null;
-            if (camera == null || geom?.LevelBelow == null) { log = "no level below"; return null; }
+            if (camera == null || geom == null) { log = "no camera"; return null; }
             try
             {
                 RoomCtx rc = FindEyeRoom(camera.Document, camera, geom);
@@ -2777,100 +2780,7 @@ namespace RevitMCP.Core
             public string Log;
         }
 
-        /// <summary>
-        /// 眼睛所在房間：doc.GetRoomAtPoint（透視圖 VIEW_PHASE），依序試「眼睛高度」「樓層 +1m」「樓層 +0.3m」
-        /// （挑高房間跨兩層時眼睛高度仍在房間體積內；其他特殊情形再退到樓層附近）。輪廓＝房間邊界線段
-        /// （Tessellate）；取不到邊界就用房間 BoundingBox 四角。房間頂＝房間 BoundingBox Max.Z。找不到房間回傳
-        /// Room==null 的 RoomCtx（Log 說明試過哪些點）。
-        /// </summary>
-        private static RoomCtx FindEyeRoom(Document doc, View3D camera, CameraMath.CameraGeometry geom)
-        {
-            var rc = new RoomCtx();
-            Phase phase = null;
-            try
-            {
-                Parameter pp = camera.get_Parameter(BuiltInParameter.VIEW_PHASE);
-                if (pp != null) phase = doc.GetElement(pp.AsElementId()) as Phase;
-            }
-            catch { phase = null; }
-
-            double levelZ = geom.LevelBelow.ProjectElevation;
-            var tries = new List<KeyValuePair<string, XYZ>>
-            {
-                new KeyValuePair<string, XYZ>("eyeZ", geom.Eye),
-                new KeyValuePair<string, XYZ>("level+1m", new XYZ(geom.Eye.X, geom.Eye.Y, levelZ + CameraMath.MmToFeet(1000))),
-                new KeyValuePair<string, XYZ>("level+0.3m", new XYZ(geom.Eye.X, geom.Eye.Y, levelZ + CameraMath.MmToFeet(300)))
-            };
-            Autodesk.Revit.DB.Architecture.Room room = null;
-            string how = null;
-            foreach (var t in tries)
-            {
-                try { room = phase != null ? doc.GetRoomAtPoint(t.Value, phase) : doc.GetRoomAtPoint(t.Value); }
-                catch { room = null; }
-                if (room != null) { how = t.Key; break; }
-            }
-            if (room == null)
-            {
-                rc.Log = $"none (phase={phase?.Name ?? "(none)"}, tried eyeZ/level+1m/level+0.3m)";
-                return rc;
-            }
-            rc.Room = room;
-
-            try
-            {
-                var opts = new SpatialElementBoundaryOptions();
-                IList<IList<BoundarySegment>> loops = room.GetBoundarySegments(opts);
-                if (loops != null)
-                {
-                    foreach (IList<BoundarySegment> loop in loops)
-                    {
-                        foreach (BoundarySegment seg in loop)
-                        {
-                            Curve c = seg?.GetCurve();
-                            if (c == null) continue;
-                            IList<XYZ> tp = c.Tessellate();
-                            for (int k = 0; k < tp.Count; k++)
-                            {
-                                XYZ q = new XYZ(tp[k].X, tp[k].Y, 0);
-                                rc.Pts.Add(q);
-                                if (k > 0) rc.Segs.Add(new KeyValuePair<XYZ, XYZ>(new XYZ(tp[k - 1].X, tp[k - 1].Y, 0), q));
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex) { Logger.Error("相機 Key Plan：讀房間邊界失敗，改用房間 BoundingBox", ex); rc.Pts.Clear(); rc.Segs.Clear(); }
-
-            bool hasBounds = SectionBoxLevelHelper.TryGetWorldBounds(room, out double bx0, out double by0, out double bz0, out double bx1, out double by1, out double bz1);
-            string footSrc = "boundary";
-            if (rc.Pts.Count < 3 && hasBounds)
-            {
-                footSrc = "boundingBox";
-                XYZ a = new XYZ(bx0, by0, 0), b = new XYZ(bx1, by0, 0), c2 = new XYZ(bx1, by1, 0), d = new XYZ(bx0, by1, 0);
-                rc.Pts.Clear(); rc.Segs.Clear();
-                rc.Pts.AddRange(new[] { a, b, c2, d });
-                rc.Segs.Add(new KeyValuePair<XYZ, XYZ>(a, b)); rc.Segs.Add(new KeyValuePair<XYZ, XYZ>(b, c2));
-                rc.Segs.Add(new KeyValuePair<XYZ, XYZ>(c2, d)); rc.Segs.Add(new KeyValuePair<XYZ, XYZ>(d, a));
-            }
-            if (rc.Pts.Count > 0)
-            {
-                rc.MinX = rc.Pts.Min(q => q.X); rc.MaxX = rc.Pts.Max(q => q.X);
-                rc.MinY = rc.Pts.Min(q => q.Y); rc.MaxY = rc.Pts.Max(q => q.Y);
-            }
-            if (hasBounds) rc.TopZ = bz1;
-
-            string unb = "?";
-            try
-            {
-                double baseZ = (room.Level?.ProjectElevation ?? levelZ) + room.BaseOffset;
-                unb = CameraMath.FeetToMm(baseZ + room.UnboundedHeight).ToString("F0") + "mm";
-            }
-            catch { }
-            rc.Log = $"id={room.Id.GetIdValue()} 「{SafeRoomLabel(room)}」 foundBy={how} phase={phase?.Name ?? "(none)"} footprint={footSrc}[{rc.Pts.Count} pts] " +
-                     $"X[{CameraMath.FeetToMm(rc.MinX):F0},{CameraMath.FeetToMm(rc.MaxX):F0}] Y[{CameraMath.FeetToMm(rc.MinY):F0},{CameraMath.FeetToMm(rc.MaxY):F0}]mm " +
-                     $"top(bbox)={(rc.TopZ.HasValue ? CameraMath.FeetToMm(rc.TopZ.Value).ToString("F0") + "mm" : "?")} base+unboundedHeight={unb}";
-            return rc;
-        }
+        // 眼睛所在房間 FindEyeRoom：見 CameraKeyPlanService.EyeRoom.cs（2026-09-25 改為房間輪廓＋垂直範圍搜尋）。
 
         /// <summary>水平視線（自眼睛 XY 沿 dir）第一次碰到房間邊界線段的距離（feet）；沒碰到回傳 null。</summary>
         private static double? RayExitDistance(RoomCtx rc, XYZ eye, XYZ dir)
@@ -3025,23 +2935,25 @@ namespace RevitMCP.Core
             var targets = new Dictionary<string, View3D>(StringComparer.Ordinal);
             foreach (ElementId id in cameraIds)
             {
-                if (doc.GetElement(id) is View3D v && !v.IsTemplate && v.IsPerspective) targets[v.UniqueId] = v;
+                if (doc.GetElement(id) is View3D v && !v.IsTemplate && v.IsPerspective && !IsSheetPerspectiveCopy(v)) targets[v.UniqueId] = v;
             }
             if (targets.Count == 0) return 0;
 
             var plans = new Dictionary<string, ViewPlan>(StringComparer.Ordinal);
             var sections = new Dictionary<string, ViewSection>(StringComparer.Ordinal);
+            var sheetCopies = new Dictionary<string, View3D>(StringComparer.Ordinal); // 2026-09-25：出圖用透視複本
             foreach (View v in new FilteredElementCollector(doc).OfClass(typeof(View)).Cast<View>())
             {
                 if (v.IsTemplate) continue;
                 if (!TryReadLink(v, out string cid, out string role) || cid == null || !targets.ContainsKey(cid)) continue;
                 if (role == "Plan" && v is ViewPlan vp) plans[cid] = vp;
                 else if (role == "Section" && v is ViewSection vs) sections[cid] = vs;
+                else if (role == SheetPerspectiveRole && v is View3D pc) sheetCopies[cid] = pc;
             }
             // 2026-09-25 Wave 2：有樓層總覽或 A 型標記時，沒有 Key Plan 的相機也要重畫（總覽標記／A 標記）。
             bool anyOverview = new FilteredElementCollector(doc).OfClass(typeof(ViewPlan)).Cast<ViewPlan>().Any(v => !v.IsTemplate && IsOverviewView(v));
             bool syncA = MarkerModeIncludesA() && FindAMarkerSymbol(doc) != null;
-            List<string> work = targets.Keys.Where(k => plans.ContainsKey(k) || sections.ContainsKey(k) || anyOverview || syncA).ToList();
+            List<string> work = targets.Keys.Where(k => plans.ContainsKey(k) || sections.ContainsKey(k) || sheetCopies.ContainsKey(k) || anyOverview || syncA).ToList();
             if (work.Count == 0) return 0;
 
             List<Level> levels = CameraMath.GetStoreyLevelsSorted(doc);
@@ -3058,6 +2970,12 @@ namespace RevitMCP.Core
                         foreach (string cid in work)
                         {
                             View3D cam = targets[cid];
+                            if (sheetCopies.TryGetValue(cid, out View3D sheetCopy))
+                            {
+                                string synced = null;
+                                DrawMarkerSafely(doc, "SyncSheetPerspectiveCopy", () => synced = SyncSheetPerspectiveCopy(cam, sheetCopy));
+                                Logger.Info($"相機 Key Plan：出圖用透視複本「{sheetCopy.Name}」已同步（{synced}）");
+                            }
                             CameraParams cp = ComputeCameraParams(cam, levels);
                             if (cp.Geom.LevelBelow == null)
                             {
@@ -3082,6 +3000,9 @@ namespace RevitMCP.Core
                             if (plan != null && sec != null)
                                 DrawMarkerSafely(doc, "UpdateHideOtherSections",
                                     () => HideOtherSectionMarkers(doc, plan, sec));
+                            if (sec != null)
+                                DrawMarkerSafely(doc, "UpdateHideForeignViewersSection",
+                                    () => HideForeignViewers(doc, sec, null, "剖面"));
                             done++;
                             Logger.Info($"相機 Key Plan：更新標記「{cam.Name}」hFOV={(cp.FovDeg.HasValue ? cp.FovDeg.Value.ToString("F1") : "?")}° " +
                                 $"vFOV={(cp.VFovDeg.HasValue ? cp.VFovDeg.Value.ToString("F1") : "?")}° edges[{cp.EdgesLog}] farClip={CameraMath.FeetToMm(cp.FarClipFeet):F0}mm " +

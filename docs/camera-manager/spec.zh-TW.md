@@ -25,7 +25,7 @@
 |---|---|
 | 相機 | 專案中 `IsPerspective = true`、非樣板的 `View3D` |
 | 建築樓層 | Level 的「建築樓層（Building Story）」＝是（`LEVEL_IS_BUILDING_STORY`）。一個都沒勾時退回全部 Level；略過非建築樓層時寫 log（`CameraMath.GetStoreyLevelsSorted`） |
-| 下方樓層 | 眼睛下方最近的建築樓層 |
+| 下方樓層 | 相機的樓層。**室內**（眼睛在房間內，§10.2）＝該房間的 Level（`room.LevelId`，可能不是建築樓層）；**室外**＝眼睛下方最近的建築樓層（2026-09-25 MCP 自測後修正，D-031） |
 | 離樓板高度 | 眼睛高度 − 下方樓層高程（cm） |
 | 平面 X／Y | 眼睛的模型座標，**內部原點座標系**（cm） |
 | 水平角 | 0° = 專案北（+Y），順時針為正 |
@@ -69,7 +69,7 @@
 | 欄位 | 行為 | 寬度 |
 |---|---|---|
 | 名稱 | 第一欄凍結；唯讀；超長橢圓＋ToolTip 全名。**單擊＝一鍵 4 視圖**（不進編輯） | 星號，最小 45px |
-| 樓層 | 下方建築樓層；常駐 `ComboBox`。**選另一個樓層＝複製相機到該樓層**（§11.1），原相機不動 | 依最長樓層名量字寬，64–140px |
+| 樓層 | 下方樓層（室內＝房間的 Level；該 Level 不是建築樓層時也補進下拉清單）；常駐 `ComboBox`。**選另一個樓層＝複製相機到該樓層**（§11.1），原相機不動 | 依最長樓層名量字寬，64–140px |
 | 離樓板 cm | 1 位小數、右對齊；< 120 或 > 200 時整列標色＋ToolTip | ~50px |
 | 水平角 ° | 右對齊 | ~50px |
 | 俯仰角 ° | 右對齊 | ~50px |
@@ -208,7 +208,14 @@
 
 ### 10.2 室內／室外判定
 
-`FindEyeRoom`：透視圖 `VIEW_PHASE` 下 `doc.GetRoomAtPoint`，依序試「眼睛高度」「樓層 +1m」「樓層 +0.3m」。找到＝室內，否則＝室外。房間輪廓＝邊界線段（取不到用 BoundingBox）；房間頂＝房間 BoundingBox Max.Z。
+`FindEyeRoom`（`MCP/Core/CameraKeyPlanService.EyeRoom.cs`，2026-09-25 MCP 自測後改寫，D-031）：
+
+1. 候選＝已放置房間（面積 > 0、與透視圖 `VIEW_PHASE` 同一個 Phase）中，BoundingBox XY 含眼睛者（前篩），再以房間邊界線段（`Tessellate`，所有迴圈奇偶規則）判定眼睛 XY 在多邊形內。
+2. 候選中垂直範圍 [底, 頂] 含眼睛高度者優先（多個取底最高者）；都不含 → 取垂直距離最近且 ≤ 2.0 m 者（例：眼睛比房間底低 150 mm、閣樓相機略高於房間上限）。底＝房間 Level 高程＋底部偏移；頂＝底＋`UnboundedHeight`（取不到用 BoundingBox 頂）。
+3. 同 Phase 沒有任何 XY 候選 → 不分 Phase 再找一次並記 log。
+4. 找到＝室內，否則＝室外。挑選結果（候選、垂直範圍、距離、判定方式）寫進 `Room.Log` 與 log（同一相機＋房間只記一次）。房間輪廓＝邊界線段（取不到用 BoundingBox）；房間頂＝房間 BoundingBox Max.Z。
+
+樓層：室內相機的「下方樓層」＝房間的 Level（`CameraMath.ComputeGeometry` 內套用，清單、③ 位置圖、Key Plan、樓層總覽分組、A 標記、人視高套用、複製相機都用同一個值），離樓板高度以該樓層計算；室外維持眼睛下方最近的建築樓層。`list_cameras` 回傳 `LevelSource`（room／elevation）與 `LevelByElevation`。
 
 ### 10.3 視野角與扇形
 
@@ -224,11 +231,13 @@
 
 - 從下方樓層的既有平面 `Duplicate`（樓層平面優先；已開啟 > 已裁剪 > 名稱排序）；沒有就用樓層平面類型新建。
 - 清除繼承的視圖樣板、確保 Sections 類別可見。
-- 裁剪框只改範圍、不旋轉（沿用來源平面座標系）：
+- **視圖整理（每次建立／更新都做，在設裁剪框之前，2026-09-25 MCP 自測後）**：`VIEWER_VOLUME_OF_INTEREST_CROP`＝無（解除 Scope Box；否則 CropBox 設定被忽略、裁剪停在 Scope Box 範圍、比例被迫 1:200）、方位（`PLAN_VIEW_NORTH`）＝專案北、移除非矩形裁剪、裁剪框若仍旋轉就轉正、圖紙上的標題（`VIEW_DESCRIPTION`）＝「Key Plan 平面」（不沿用來源平面的標題）。`CameraKeyPlanService.NormalizeDuplicatedPlan`。
+- 裁剪框設完一律讀回：寬／高或角點位移與預期差 > 1 % → log `WARNING` 並附可能原因（Scope Box 仍鎖定／非矩形／樣板／從屬視圖），同時放進 `run_camera_keyplan` 的 `Warnings`。
+- 裁剪框只改範圍（沿用來源平面座標系）：
   - 室內：眼睛所在房間 +0.6 m，必要時外擴包住完整扇形（弧上 16 點取樣，外留 0.5 m）。
   - 室外：非對稱扇形（眼睛＋兩緣＋弧上 16 點）外接框 +2 m。
   - 都算不出來：扇形特徵點 +2 m。
-- **只顯示本相機剖面**：找出本相機剖面的 viewer（依序 `GetDependentElements(OST_Viewers)` → viewer 名稱＝剖面名稱 → `VIEW_NAME` 參數；log 記比對依據），其他「對應到剖面視圖」的 viewer 逐元素隱藏；立面、詳圖索引不動；找不到本相機 viewer 時本次不隱藏任何剖面。
+- **只顯示本相機剖面**：找出本相機剖面的 viewer（依序 `GetDependentElements(OST_Viewers)` → viewer 名稱＝剖面名稱 → `VIEW_NAME` 參數；log 記比對依據），其他所有 viewer（剖面／立面／詳圖索引，2026-09-25 起不再只限剖面）與立面標記本體（`OST_Elev`）逐元素隱藏，並隱藏立面／詳圖索引類別；視圖自己的裁剪框元素（同名 viewer）不動；找不到本相機 viewer 時本次不隱藏任何標記。`HideForeignViewers`。
 - 確保本相機剖面線看得到：剖面「在比例粗於…時隱藏」設成可接受的最粗值（5000 → … → 200 依序嘗試）、Sections 類別可見、viewer 元素取代（非半色調、標記色、線寬 5）。
 
 ### 10.5 剖面 `Key Plan-<相機>-剖面`
@@ -255,7 +264,7 @@ ES `RevitMCP_CameraSectionStateV2` 記下上次程式產生剖面時的原點與
 
 #### 10.5.4 表現與標記
 
-見 §10.7、§10.8。視線、扇形邊線一律投影到剖面平面（斜交時自然縮短）；視線與剖面平面夾角 > 60° 記 log，接近 90° 只畫眼睛圓圈。
+見 §10.7、§10.8。剖面裡的其他剖面／立面／詳圖索引標記（例：穿過畫面、編號「-/---」的大剖面標頭）一律逐元素隱藏，立面／詳圖索引類別隱藏（2026-09-25 MCP 自測後；一鍵 4 視圖與「更新相機標記」都做）。視線、扇形邊線一律投影到剖面平面（斜交時自然縮短）；視線與剖面平面夾角 > 60° 記 log，接近 90° 只畫眼睛圓圈。
 
 #### 10.5.5 樓層（淡化樣式下）
 
@@ -320,8 +329,10 @@ Schema 在交易外先建；剖面狀態讀寫失敗只記 log，不中斷建立
 
 實作：`CameraKeyPlanService.CreateOrUpdateOverviews`（`MCP/Core/CameraKeyPlanService.Overview.cs`）。入口：④ ▾「更新樓層總覽」、MCP `run_camera_overview`、一鍵 4 視圖成功後自動更新該相機樓層（獨立交易，失敗只記 log，不影響 4 視圖）。
 
-- 一個建築樓層一張，只為「有相機」（下方建築樓層＝該層）的樓層建立。ES：Role＝`Overview`、`CameraUniqueId` 欄位存 Level UniqueId；重跑更新同一張，找不到 ES 才退回精確名稱比對。
-- 來源平面＝`BaseMapPlanChooser.Choose`（與 ③ 位置圖同一個挑法：該層相機的眼睛座標＋最多台共用的放置平面），候選排除本工具自建（有 ES 連結）的 Key Plan 視圖；`Duplicate(ViewDuplicateOption.Duplicate)`（不含詳圖）。挑不到 → 該層既有平面（同 §10.4）→ 新建樓層平面。拿掉視圖樣板、移除非矩形裁剪形狀。
+- 一個樓層一張，只為「有相機」（相機的下方樓層＝該層；室內相機＝房間的 Level，可能不是建築樓層，`all=true` 也會列入）的樓層建立。ES：Role＝`Overview`、`CameraUniqueId` 欄位存 Level UniqueId；重跑更新同一張，找不到 ES 才退回精確名稱比對。
+- 來源平面＝`BaseMapPlanChooser.Choose`（與 ③ 位置圖同一個挑法：該層相機的眼睛座標＋最多台共用的放置平面），候選排除本工具自建（有 ES 連結）的 Key Plan 視圖；`Duplicate(ViewDuplicateOption.Duplicate)`（不含詳圖）。挑不到 → 該層既有平面（同 §10.4）→ 新建樓層平面。拿掉視圖樣板、移除非矩形裁剪形狀；同 §10.4 做視圖整理（解除 Scope Box、專案北、圖紙上的標題＝「樓層總覽 <樓層名>」），之後才設裁剪框。
+- 回報的範圍（`ExtentsMm`）一律是**讀回視圖裁剪框**的實際值；程式計算的預期值另列 `IntendedMm`；兩者差 > 1 % 放進 `Warnings`（附可能原因）。
+- 其他剖面／立面／詳圖索引標記逐元素隱藏（同 §10.4，總覽沒有要保留的 viewer）。
 - 裁剪（只改範圍、不旋轉）：
   - 該層全部室內：每台相機扇形（室內扇形半徑、非對稱左右緣、弧上 16 點）外接框 **+3 m** 的聯集，另含每個眼睛 +3 m。
   - 有室外相機：再聯集底圖的裁剪框（＝建築範圍）；室外扇形（可達 60 m）不撐大總覽。
@@ -334,7 +345,7 @@ Schema 在交易外先建；剖面狀態讀寫失敗只記 log，不中斷建立
 實作：`MCP/Core/CameraKeyPlanService.MarkerA.cs`。開關：⋯ 更多 → 相機標記（`CameraManagerSettings.MarkerMode`：B／A／AB，本機設定，預設 B）。切換時立即排入：含 A → 確保族群並同步全部相機；不含 A → 刪除全部 A 實例與扇形（族群留在專案）；接著對全部相機跑一次「更新相機標記」，讓 B 標記依新設定重畫或刪除。
 
 - **族群「RevitMCP 相機標記」**：第一次需要時以程式建立——樣板路徑由執行中 Revit 版本組成：`%ProgramData%\Autodesk\RVT <版本>\Family Templates\English\Generic Model.rft`，找不到依序試 `English\Metric Generic Model.rft`、`English-Imperial\Generic Model.rft`、`English_I\Generic Model.rft`、`Application.FamilyTemplatePath` 下同名檔（本機 2024 只有 `English\Metric Generic Model.rft`）。都找不到 → 回報原因、A 略過、B 不受影響。族群內容：子類別「相機標記」（一般模型）、相機體擠出 200×120×120 mm（眼睛在前緣中心＝原點）、扁平視線箭頭擠出（長 350 mm）；實例參數 視野角左、視野角右、遠裁剪、俯仰角、相機名稱。存成 `%TEMP%\RevitMCP\RevitMCP 相機標記.rfa`，在交易「載入相機標記族群」內 `LoadFamily`。
-- **每台相機一個實例**：放在眼睛（樓層＝下方建築樓層），繞 Z 旋轉使族群 +Y＝相機水平前方向；非工作平面族群不能傾斜，一律水平，俯仰角只寫進參數。參數隨相機更新。
+- **每台相機一個實例**：放在眼睛（樓層＝相機的下方樓層，室內＝房間的 Level），繞 Z 旋轉使族群 +Y＝相機水平前方向；非工作平面族群不能傾斜，一律水平，俯仰角只寫進參數。參數隨相機更新。
 - **視野扇形**：參數驅動的族群扇形未實作（見 D-026）；改為每台相機一個 `DirectShape`（一般模型，幾何指定子類別「相機標記」的 GraphicsStyle、材料「RevitMCP 相機標記」70% 透明），水平扇形 10 mm 厚、左右緣＝非對稱邊界角、半徑＝與 Key Plan 相同的扇形半徑；釘選避免誤拖。
 - **透視圖不看到標記**：每次同步對所有透視圖 `SetCategoryHidden(子類別「相機標記」)`（已隱藏者不動）；視圖樣板控制 V/G 等失敗只記 log（列出視圖名）。Enscape 是否也排除＝使用者實測（roadmap）。
 - **淡化樣式**：相機標記含 A 時，Key Plan 淡化表現法不把「一般模型」類別半色調（否則 A 標記被淡化）。
@@ -358,8 +369,9 @@ Schema 在交易外先建；剖面狀態讀寫失敗只記 log，不中斷建立
 4. **可繪區**：圖框實例在圖紙上的外接框（`get_BoundingBox(sheet)`）四邊各內縮 `SheetMarginMm`（本機設定，預設 15 mm）；沒有圖框或讀不到＝A3 橫式 420×297 mm 內縮同樣邊界。**不**扣除圖框標題欄——標題欄在右側或下方的圖框，右欄視埠可能壓到標題欄（使用者實測項目）。
 5. **版面**：左格＝可繪區左側 60% 寬、全高，放透視圖；右欄＝其餘寬度，上下三等分，由上而下放平面、剖面、等角；格子之間留 6 mm（給視埠標題）。每個新視埠 `Viewport.Create` 在格子中心，再 `SetBoxCenter` 置中。
 6. **不改比例**：只調整視埠位置。平面／剖面比例沿用一鍵 4 視圖挑的比例；透視圖沒有比例，依裁剪框原樣放置。視埠外框比格子大時照放並回報 `Overflow`（狀態列與 MCP `Warnings` 列出尺寸），由使用者手動調整。
-7. **視埠類型**：沿用專案既有、「顯示標題」不是「否」的視埠類型中最常用者（`VIEWPORT_ATTR_SHOW_LABEL` 先讀顯示字串，取不到才以整數 0＝否判斷；整數對應未查證）；都沒有就沿用 Revit 預設類型、不新建。挑選紀錄寫 log 與 MCP 回傳 `ViewportTypeLog`。
+7. **視埠類型**：沿用專案既有、「顯示標題」不是「否」的視埠類型中最常用者（`VIEWPORT_ATTR_SHOW_LABEL` 先讀顯示字串，取不到才以整數 0＝否判斷；整數對應未查證）。候選＝Category＝Viewports、FamilyName＝Viewport／視埠／視口、既有視埠用到的類型的聯集（2026-09-25：舊版只看 Category，部分版本視埠類型 Category 為 null → 候選清單是空的，log 卻說「沒有顯示標題的類型」）；事前挑不到時，以第一個新視埠的 `GetValidTypes()` 再挑一次；都沒有就沿用 Revit 預設類型、不新建。`ViewportTypeLog`＝候選與挑選紀錄＋「實際使用：<類型名>」（讀回每個視埠的類型）。
 8. **一張視圖只能在一張圖紙上**：視圖已在本相機圖紙上＝保留原位（不移動，尊重手動調整）；在其他圖紙上＝略過並回報「已在其他圖紙「編號 - 名稱」上」；`Viewport.CanAddViewToSheet` 為 false 也略過並回報。
+   **透視圖例外（2026-09-25 MCP 自測後）**：實案常把相機放在自己的 3D 圖紙上。原相機已在「別張」圖紙上時，改放出圖用透視複本 `<相機名>-Key Plan 圖紙`（`View3D.Duplicate(ViewDuplicateOption.Duplicate)`，ES Role＝`PerspectiveForSheet`，已有就沿用）。選擇順序：原相機已在本相機圖紙上 → 原相機；已有複本 → 複本；原相機在別張圖紙上 → 建立複本；否則原相機。複本在每次 `create_camera_sheet` 與去抖「更新相機標記」時同步原相機的方向、裁剪框（含開關）、遠裁剪（值＋開關）。複本不是相機：清單、樓層總覽、A 標記、MCP 標記計數、DocumentChanged 新相機偵測都排除它。回傳 `Perspective.Placed`（原相機／透視複本（新建）／透視複本（沿用並同步））與說明。
 9. 單一交易「建立相機圖紙」（`DocumentChanged` 忽略這個交易名稱）；整體失敗回滾整筆並回報原因。
 
 ## 11. 其他功能
@@ -401,13 +413,13 @@ C#：`MCP/Core/Commands/CommandExecutor.CameraManager.cs`；TS：`MCP-Server/src
 | 工具 | 讀／寫 | 參數 | 呼叫的共用程式碼 |
 |---|---|---|---|
 | `list_cameras` | 唯讀 | `nameContains?` | `ReadSnapshot`／`BuildCameraRow`、`ComputePerspectiveFov`、`FindEyeRoom`、`BaseMapPlanChooser.Choose`、ES 連結查詢 |
-| `run_camera_keyplan` | 寫入 | `cameraId?`、`tile`（預設 false）、`sectionMode?`（room／sight）、`isoMode?`（full／current）、`resetSection`（預設 false） | `CreateOrUpdateFourViews`（單次覆寫設定，不寫回設定檔）、`tile=true` 時 `OpenAndTileFourViews` |
+| `run_camera_keyplan` | 寫入 | `cameraId?`、`tile`（預設 false）、`sectionMode?`（room／sight）、`isoMode?`（full／current）、`resetSection`（預設 false）、`markerMode?`（B／A／AB，2026-09-25） | `CreateOrUpdateFourViews`（單次覆寫設定，不寫回設定檔）、`tile=true` 時 `OpenAndTileFourViews`；另回傳 `MarkerModeUsed`、`Warnings`（裁剪框讀回不符）、`Plan.Extents.ScopeBox` |
 | `set_camera_pose` | 寫入 | `cameraId?`＋任一：`heightAboveLevelCm`、`yawDeg`、`pitchDeg`、`planXcm`、`planYcm`、`farClipCm` | `BuildEditRequestFromRow`＋`ApplyDetailEdit` |
 | `copy_camera_to_level` | 寫入 | `cameraId?`、`levelId` 或 `levelName` | `CopyCameraToLevels` |
 | `run_camera_overview` | 寫入（Wave 2） | `levelId` 或 `levelName`，或 `all=true`（所有有相機的樓層） | `CreateOrUpdateOverviews`（§10.10）；回傳每層視圖 id、名稱、是否新建、相機數與名稱、底圖來源與理由、範圍模式、裁剪外接框 mm、比例、依角色的標記元素數 |
 | `create_camera_sheet` | 寫入（Wave 3） | `cameraId?`、`titleBlockTypeId?`（省略＝面板設定→最常用） | `CreateOrUpdateCameraSheet`（§10.13）；回傳圖紙 id／編號／名稱、是否新建、是否先跑了一鍵 4 視圖、圖框與來源、可繪區、視埠類型挑選紀錄、每個視埠（角色、視圖、視埠 id、新放置／保留原位／略過、中心與尺寸 mm、格子、是否超出）、警告 |
 | `camera_version` | list 唯讀；save／restore／delete 寫入（Wave 3） | `cameraId?`、`action`（list 預設／save／restore／delete）、`name`（save／restore／delete 必填） | `SaveVersion`／`RestoreVersion`／`DeleteVersion`／`ReadVersions`（§11.5）；回傳目前姿態與全部版本（眼睛 mm、水平角、俯仰角、裁剪框尺寸、遠裁剪） |
-| `get_view_extents` | 唯讀（通用） | `viewId?` | 直接讀視圖：類型、比例、裁剪框、註解裁剪、Section Box、遠裁剪、Display Model、詳細等級、樣板、隱藏類別、連結顯示設定、視圖專屬元素計數 |
+| `get_view_extents` | 唯讀（通用） | `viewId?` | 直接讀視圖：類型、比例、裁剪框、註解裁剪、Section Box、遠裁剪、Display Model、詳細等級、樣板、隱藏類別、連結顯示設定、視圖專屬元素計數；2026-09-25 加 `ScopeBox`（id／名稱）、`Orientation`、`TitleOnSheet`、`VisibleViewers`（目前可見的剖面／立面／詳圖索引 viewer 與立面標記數） |
 
 `cameraId` 省略＝作用中透視圖；可給相機 View3D 或平面上的相機元件。沒有任何工具會刪除使用者元素（一鍵 4 視圖／樓層總覽只刪除自己先前畫的標記；`camera_version` delete 只移除 ES 裡的一筆版本資料）。MCP 標註：`create_camera_sheet`、`camera_version` 依 `annotations.ts` 預設規則為「寫入、非破壞性」（`camera_` 不是唯讀前綴；不在破壞性白名單）。A 型標記沒有獨立的 MCP 工具：相機標記設定含 A 時，`run_camera_keyplan` 會一併同步，回傳 `AMarker`（同步摘要，未啟用 A＝null）；`OverviewViewId`＝自動更新的樓層總覽 id。
 
@@ -422,7 +434,7 @@ C#：`MCP/Core/Commands/CommandExecutor.CameraManager.cs`；TS：`MCP-Server/src
 
 - 模型修改一律在 Transaction 內、每次操作一個中文復原名稱。
 - ElementId 用 `RevitCompatibility` 輔助（R24 Int32、R25+ Int64）。
-- `get_camera_info` 的輸出欄位不可改變（與面板共用 `MCP/Core/CameraMath.cs`）。
+- `get_camera_info` 的輸出欄位不可改變（與面板共用 `MCP/Core/CameraMath.cs`）。2026-09-25 起其 `LevelBelow`／`AboveLevelBelowMm` 的**值**對室內相機改為房間的 Level（欄位不變）。
 - 部署到 Revit 2024 前先關閉 Revit；部署後比對 DLL SHA256。
 - 不用 PowerShell `Get-Content`／`Set-Content` 改寫原始碼（`domain/lessons.md` L-032）。
 
@@ -438,6 +450,8 @@ C#：`MCP/Core/Commands/CommandExecutor.CameraManager.cs`；TS：`MCP-Server/src
 | `MCP/Core/CameraKeyPlanService.MarkerA.cs` | A 型族群建立／載入、A 標記同步、孤兒清理、拖標記 → 相機（§10.11–10.12） |
 | `MCP/Core/CameraKeyPlanService.Sheet.cs` | 一鍵出圖紙、圖框／視埠類型挑選（§10.13） |
 | `MCP/Core/CameraKeyPlanService.Versions.cs` | 視角版本 ES 讀寫、還原（§11.5） |
+| `MCP/Core/CameraKeyPlanService.EyeRoom.cs` | 眼睛所在房間搜尋、室內相機樓層＝房間 Level（§10.2） |
+| `MCP/Core/CameraKeyPlanService.ViewHygiene.cs` | 複製平面整理（Scope Box／專案北／圖紙標題）、裁剪讀回比對、其他視圖標記隱藏、出圖用透視複本、markerMode 單次覆寫 |
 | `MCP/Core/CameraMath.cs` | 樓層、角度、FOV、方向數學 |
 | `MCP/Core/CameraManagerModels.cs` | 資料模型、`BaseMapPlanChooser`、設定 |
 | `MCP/Core/CameraManagerEventQueue.cs`、`CameraManagerDiagnostics.cs`、`CameraViewZoomService.cs`、`CameraSourcePlanStore.cs`、`SectionBoxLevelHelper.cs` | 佇列、診斷、並排後縮放、放置平面、Section Box 共用 |

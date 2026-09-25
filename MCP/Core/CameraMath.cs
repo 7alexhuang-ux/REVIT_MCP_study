@@ -125,6 +125,14 @@ namespace RevitMCP.Core
             public Level LevelBelow;
             /// <summary>眼睛高於 LevelBelow 的高度（mm），LevelBelow 為 null 時為 null。</summary>
             public double? AboveLevelBelowMm;
+            /// <summary>2026-09-25：眼睛所在房間（CameraKeyPlanService 房間搜尋結果；透視相機才搜尋）。
+            /// EyeRoomResolved＝true 表示已搜尋過（EyeRoom 可能是 Room==null 的 RoomCtx），同一份 geom 不再重搜。</summary>
+            public CameraKeyPlanService.RoomCtx EyeRoom;
+            public bool EyeRoomResolved;
+            /// <summary>樓層來源：room＝室內相機取房間的 Level；elevation＝眼睛高程正下方的建築樓層（室外或找不到房間）。</summary>
+            public string StoreySource = "elevation";
+            /// <summary>依高程判定的建築樓層（改用房間樓層前的值，僅供 log／比對）。</summary>
+            public Level StoreyByElevation;
         }
 
         /// <summary>
@@ -147,7 +155,7 @@ namespace RevitMCP.Core
                 ? (double?)Math.Round(eyeZMm - FeetToMm(levelBelow.ProjectElevation), 1)
                 : null;
 
-            return new CameraGeometry
+            var geom = new CameraGeometry
             {
                 Eye = eye,
                 Forward = forward,
@@ -155,8 +163,18 @@ namespace RevitMCP.Core
                 EyeZMm = eyeZMm,
                 PitchDeg = pitchDeg,
                 LevelBelow = levelBelow,
-                AboveLevelBelowMm = above
+                AboveLevelBelowMm = above,
+                StoreyByElevation = levelBelow
             };
+
+            // 2026-09-25（MCP 自測：室內相機的樓層被判成女兒牆等 Building Story）：室內相機的樓層＝眼睛所在房間的 Level，
+            // 離樓板高度也改以該樓層計算。清單、位置圖、Key Plan、總覽分組、A 標記都經由這裡取得同一個樓層。
+            if (view != null && view.IsPerspective && !view.IsTemplate)
+            {
+                try { CameraKeyPlanService.ApplyIndoorStorey(view, geom); }
+                catch (Exception ex) { Logger.Error("相機管理：室內樓層判定失敗（沿用高程判定的樓層）", ex); }
+            }
+            return geom;
         }
 
         /// <summary>

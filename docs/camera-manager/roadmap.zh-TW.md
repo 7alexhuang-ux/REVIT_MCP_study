@@ -50,6 +50,19 @@
 - MCP 工具數 218 → 220（`create_camera_sheet`、`camera_version`）。
 - 版面比例（左 60%、右欄三等分）與圖紙邊界 15 mm 是常數／本機設定，沒有 UI；實測後再決定要不要開放。
 
+### MCP 自測第一輪修正　✅ 已編譯、待 MCP 複測（2026-09-25 22:20）
+
+主線以 MCP 在 Revit 2024（公開範例 Snowdon Towers）自測後回報 6 項，全部已改、已編譯；**新 DLL 尚未部署**（Revit 執行中），以下皆「待 MCP 複測」。
+
+| # | 問題 | 修正 | 複測方式 |
+|---|---|---|---|
+| 1 | 複製來的 Key Plan 平面／樓層總覽鎖在 Scope Box，裁剪停在 78.6×64.0 m、比例被迫 1:200、圖紙 Overflow；圖紙標題沿用來源 | 每次先解除 Scope Box、專案北、轉正、圖紙標題改自己的，再設裁剪；讀回比對 > 1 % 記 WARNING；總覽回報讀回值（spec §10.4、§10.10） | `run_camera_keyplan` → `get_view_extents(平面)`：`ScopeBox=null`、`TitleOnSheet`＝「Key Plan 平面」、裁剪≈房間 +0.6 m；`Warnings` 為空；`run_camera_overview`：`ExtentsMm`≈`IntendedMm` |
+| 2 | 室內相機（閣樓、廚房眼睛低於房間底、大廳）被判室外 | 房間搜尋改輪廓＋垂直範圍（≤ 2 m 容差）（D-031） | `list_cameras`：三台 `IndoorOutdoor`＝室內、`Room.Log` 的 `foundBy` |
+| 3 | 室內相機樓層被判成女兒牆 | 室內樓層＝房間的 Level（D-031） | `list_cameras`：`LevelSource=room`、`Level`＝房間樓層；`HeightAboveLevelCm` 以該樓層計算 |
+| 4 | 剖面 Key Plan 出現其他剖面標頭（「-/---」） | 平面／剖面／總覽逐元素隱藏其他 viewer，隱藏立面／詳圖索引類別 | `get_view_extents(剖面)`：`VisibleViewers` 全 0；平面：`Sections`＝1（本相機） |
+| 5 | 一鍵出圖紙略過已在 3D 圖紙上的透視圖；`ViewportTypeLog` 自相矛盾 | 出圖用透視複本並同步（D-032）；視埠類型候選改聯集、列「實際使用」 | `create_camera_sheet`：`Perspective.Placed`＝透視複本（新建）、4 個視埠「新放置」；重跑＝沿用並同步；`list_cameras` 不含複本 |
+| 6 | 測試工具不足 | `run_camera_keyplan` 加 `markerMode`；`get_view_extents` 加 Scope Box／方位／圖紙標題／可見 viewer 數（工具數仍 220） | `run_camera_keyplan(markerMode="A")`：`MarkerModeUsed=A`、`AMarker` 非 null |
+
 ### 下一步｜MCP 自測　⏳（Revit 重新啟動、面板按過「重新整理」、MCP 已連線後，由主線依序執行）
 
 前置：Revit 2024 開一個有透視相機、有圖框類型的測試模型（公開範例或「實測專案」的複本，**不**用正式檔）；確認 MCP 工具清單含本功能 8 支工具。每一步的「預期」不符就停下來記錄，不往下跑。
@@ -138,6 +151,19 @@
 | 視角版本還原：`VIEWER_BOUND_ACTIVE_FAR` 參數在透視相機上是否存在／可寫 | 失敗只列警告 |
 | 還原視角後 DocumentChanged → 標記去抖更新是否觸發 | 交易名稱「還原相機視角：…」不在忽略名單 |
 | 圖紙圖框下拉清單只在「重新整理」時更新 | 新載入的圖框要再按一次重新整理 |
+
+### 2026-09-25 22:20 MCP 自測第一輪修正（待 MCP 複測）
+
+| 項目 | 備註 |
+|---|---|
+| 解除 Scope Box 後 CropBox 是否照設定生效；`PLAN_VIEW_NORTH` 設 0 是否＝專案北 | 讀回比對有 WARNING；待複測 |
+| 旋轉裁剪框轉正（以 Identity Transform 設 CropBox）是否被 Revit 接受 | log 記「已轉正／未接受」 |
+| 新房間搜尋對三台相機（閣樓、廚房、大廳）的判定；`ROOM_PHASE_ID` 參數是否存在 | 同 Phase 無候選會不分 Phase 重找並記 log |
+| 室內樓層改房間 Level 後，清單樓層下拉（非建築樓層 Level）與 ③ 位置圖底圖挑選是否正常 | 待複測＋使用者實測 |
+| 逐元素隱藏 viewer 是否誤藏本相機剖面線或視圖自身裁剪框 | 以名稱排除自身裁剪框元素（依社群做法推斷） |
+| 出圖用透視複本的同步（方向／裁剪框／遠裁剪）與平面上多出的相機圖示 | 待複測 |
+| 視埠類型候選聯集後是否挑到有標題的類型 | 看 `ViewportTypeLog` 的「實際使用」 |
+| 大模型（數百房間）下每次幾何計算都跑房間搜尋的效能 | 未實測 |
 
 ## 已知限制（非本功能缺陷）
 

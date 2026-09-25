@@ -105,6 +105,19 @@ namespace RevitMCP.Core
             }
         }
 
+        private static CameraMarkerMode? ParseMarkerMode(JObject parameters)
+        {
+            string s = parameters?["markerMode"]?.Value<string>();
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            switch (s.Trim().ToUpperInvariant().Replace("+", ""))
+            {
+                case "A": return CameraMarkerMode.A;
+                case "B": return CameraMarkerMode.B;
+                case "AB": return CameraMarkerMode.AB;
+                default: throw new Exception($"markerMode「{s}」無效，請用 B、A 或 AB。");
+            }
+        }
+
         // ══════════════════════════════════════════════════════════
         // list_cameras（唯讀）
         // ══════════════════════════════════════════════════════════
@@ -167,6 +180,9 @@ namespace RevitMCP.Core
                     row.Name,
                     Level = row.LevelName,
                     LevelId = row.LevelId?.GetIdValue(),
+                    // 2026-09-25：room＝室內相機取房間的 Level；elevation＝眼睛正下方的建築樓層
+                    LevelSource = geom.StoreySource,
+                    LevelByElevation = geom.StoreyByElevation?.Name,
                     HeightAboveLevelCm = row.HeightAboveLevelCm,
                     HeightAboveLevelMm = geom.AboveLevelBelowMm.HasValue ? (double?)Math.Round(geom.AboveLevelBelowMm.Value, 1) : null,
                     HeightWarning = row.HeightWarning,
@@ -217,7 +233,7 @@ namespace RevitMCP.Core
                 Success = true,
                 snap.DocumentTitle,
                 Count = cameras.Count,
-                Note = "長度為內部原點座標系 mm；離樓板高度以建築樓層（Building Story）為基準；水平角 0°=+Y、順時針為正。",
+                Note = "長度為內部原點座標系 mm；樓層：室內相機＝眼睛所在房間的 Level（LevelSource=room），室外＝眼睛正下方的建築樓層（Building Story，LevelSource=elevation）；離樓板高度以該樓層計算；水平角 0°=+Y、順時針為正。",
                 StoreyLevels = snap.Levels.Select(l => new { Id = l.LevelId.GetIdValue(), l.Name, ElevationMm = CmMm(l.ProjectElevationFeet) }).ToList(),
                 Cameras = cameras
             };
@@ -236,7 +252,8 @@ namespace RevitMCP.Core
             var options = new CameraKeyPlanService.KeyPlanRunOptions
             {
                 SectionMode = ParseSectionMode(parameters),
-                IsoMode = ParseIsoMode(parameters)
+                IsoMode = ParseIsoMode(parameters),
+                MarkerMode = ParseMarkerMode(parameters)
             };
 
             CameraKeyPlanService.KeyPlanResult result =
@@ -276,9 +293,11 @@ namespace RevitMCP.Core
                 // 2026-09-25 Wave 2：一鍵 4 視圖後自動更新的樓層總覽，與（⋯ 相機標記含 A 時）A 型標記同步摘要
                 OverviewViewId = result.OverviewViewId?.GetIdValue(),
                 AMarker = result.AMarkerLog,
+                MarkerModeUsed = result.MarkerModeUsed,
+                Warnings = result.Warnings,
                 Tiled = tile && tileError == null,
                 TileError = tileError,
-                Plan = Describe(plan, () => plan == null ? null : new { plan.CropBoxActive, CropBox = CmBox(plan.CropBox) }),
+                Plan = Describe(plan, () => plan == null ? null : new { plan.CropBoxActive, CropBox = CmBox(plan.CropBox), ScopeBox = ScopeBoxOf(doc, plan) }),
                 Section = Describe(section, () => section == null ? null : new { CropBox = CmBox(section.CropBox) }),
                 Iso = Describe(iso, () => iso == null ? null : new
                 {
@@ -315,6 +334,20 @@ namespace RevitMCP.Core
                     KeyPlanStyle = d.FadedStyle ? "淡化背景" : "原始"
                 }
             };
+        }
+
+        /// <summary>視圖的 Scope Box（VIEWER_VOLUME_OF_INTEREST_CROP）；沒有＝null。</summary>
+        private static object ScopeBoxOf(Document doc, View v)
+        {
+            try
+            {
+                Parameter p = v?.get_Parameter(BuiltInParameter.VIEWER_VOLUME_OF_INTEREST_CROP);
+                if (p == null || p.StorageType != StorageType.ElementId) return null;
+                ElementId id = p.AsElementId();
+                if (id == null || id == ElementId.InvalidElementId) return null;
+                return new { Id = id.GetIdValue(), Name = doc.GetElement(id)?.Name };
+            }
+            catch { return null; }
         }
 
         private static int? SafeScale(View v)
@@ -482,11 +515,18 @@ namespace RevitMCP.Core
                     BasePlan = r.BasePlanName,
                     BasePlanReason = r.BasePlanReason,
                     r.ExtentsMode,
+                    // 2026-09-25：ExtentsMm＝讀回視圖裁剪框的實際值；IntendedMm＝程式計算的預期值（兩者差 > 1 % 會出現在 Warnings）
                     ExtentsMm = r.ViewId == null ? null : new
                     {
                         MinX = CmMm(r.MinX), MinY = CmMm(r.MinY), MaxX = CmMm(r.MaxX), MaxY = CmMm(r.MaxY),
                         Width = CmMm(r.MaxX - r.MinX), Height = CmMm(r.MaxY - r.MinY)
                     },
+                    IntendedMm = r.ViewId == null ? null : new
+                    {
+                        Width = CmMm(r.IntendedMaxX - r.IntendedMinX), Height = CmMm(r.IntendedMaxY - r.IntendedMinY)
+                    },
+                    ScopeBox = r.ViewId == null ? null : ScopeBoxOf(doc, doc.GetElement(r.ViewId) as View),
+                    r.Warnings,
                     r.Scale,
                     TaggedElements = r.ViewId == null ? null : CountAllTaggedInView(doc, r.ViewId),
                     r.Error
@@ -499,7 +539,7 @@ namespace RevitMCP.Core
             View v = doc.GetElement(viewId) as View;
             var total = new Dictionary<string, int>(StringComparer.Ordinal);
             if (v == null) return total;
-            foreach (View3D cam in new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>().Where(c => !c.IsTemplate && c.IsPerspective))
+            foreach (View3D cam in new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>().Where(c => !c.IsTemplate && c.IsPerspective && !CameraKeyPlanService.IsSheetPerspectiveCopy(c)))
                 foreach (var kv in CameraKeyPlanService.CountTaggedElementsByRole(doc, v, cam.UniqueId))
                     total[kv.Key] = total.TryGetValue(kv.Key, out int n) ? n + kv.Value : kv.Value;
             return total;
@@ -526,6 +566,8 @@ namespace RevitMCP.Core
                 Camera = new { Id = camera.Id.GetIdValue(), camera.Name },
                 Sheet = new { Id = r.SheetId?.GetIdValue(), Number = r.SheetNumber, Name = r.SheetName, r.Created },
                 r.RanFourViews,
+                // 2026-09-25：透視圖放的是原相機或出圖用透視複本
+                Perspective = new { Placed = r.PerspectivePlaced, ViewId = r.PerspectiveViewId?.GetIdValue(), Note = r.PerspectiveNote },
                 TitleBlock = new { TypeId = hasTb ? (long?)r.TitleBlockTypeId.GetIdValue() : null, Name = r.TitleBlockName, Source = r.TitleBlockSource },
                 DrawArea = new { MinMm = Mm2(r.DrawMinX, r.DrawMinY), MaxMm = Mm2(r.DrawMaxX, r.DrawMaxY), Source = r.DrawAreaSource },
                 r.ViewportTypeLog,
@@ -544,7 +586,7 @@ namespace RevitMCP.Core
                     ViewportType = v.ViewportTypeName
                 }).ToList(),
                 r.Warnings,
-                Note = "座標為圖紙座標 mm。只調整視埠位置、不改視圖比例；已在本相機圖紙上的視埠保留原位，在其他圖紙上的視圖略過。"
+                Note = "座標為圖紙座標 mm。只調整視埠位置、不改視圖比例；已在本相機圖紙上的視埠保留原位；透視圖已在其他圖紙上時改放出圖用透視複本；其他視圖在別張圖紙上則略過。"
             };
         }
 
@@ -807,6 +849,14 @@ namespace RevitMCP.Core
             }
             catch (Exception ex) { Logger.Error("get_view_extents：計數視圖專屬元素失敗", ex); }
 
+            // 2026-09-25：Scope Box／方位／圖紙上的標題／可見的視圖標記數（Key Plan 自測用）
+            string orientation = ParamText(BuiltInParameter.PLAN_VIEW_NORTH);
+            string titleOnSheet = null;
+            try { titleOnSheet = view.get_Parameter(BuiltInParameter.VIEW_DESCRIPTION)?.AsString(); } catch { }
+            Dictionary<string, int> visibleViewers = null;
+            try { visibleViewers = CameraKeyPlanService.CountVisibleViewers(doc, view); }
+            catch (Exception ex) { Logger.Error("get_view_extents：計數可見視圖標記失敗", ex); }
+
             string detailLevel = null, displayStyle = null;
             try { detailLevel = view.DetailLevel.ToString(); } catch { }
             try { displayStyle = view.DisplayStyle.ToString(); } catch { }
@@ -821,6 +871,10 @@ namespace RevitMCP.Core
                 IsTemplate = view.IsTemplate,
                 Note = "長度為內部原點座標系 mm；Box 的 Min/Max 是視圖自身座標（套 Transform 得世界座標）。",
                 CropBox = crop,
+                ScopeBox = ScopeBoxOf(doc, view),
+                Orientation = orientation,
+                TitleOnSheet = titleOnSheet,
+                VisibleViewers = visibleViewers,
                 AnnotationCrop = annotationCrop,
                 View3D = view3d,
                 FarClipping = farClipping,

@@ -280,7 +280,8 @@ namespace RevitMCP
                 if (!IsCameraManagerRelevantDocument(doc)) return;
                 System.Collections.Generic.List<ElementId> newCams = null;
                 foreach (ElementId id in e.GetAddedElementIds())
-                    if (doc.GetElement(id) is View3D v3 && v3.IsPerspective && !v3.IsTemplate)
+                    if (doc.GetElement(id) is View3D v3 && v3.IsPerspective && !v3.IsTemplate &&
+                        !RevitMCP.Core.CameraKeyPlanService.IsSheetPerspectiveCopy(v3)) // 2026-09-25：出圖用透視複本不是新相機
                         (newCams ?? (newCams = new System.Collections.Generic.List<ElementId>())).Add(id);
                 if (newCams == null) return;
 

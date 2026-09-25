@@ -25,6 +25,7 @@ namespace RevitMCP.Core
     ///   3. 只調整視埠「位置」（置中於格子），不改任何視圖比例；透視圖本來就沒有比例，原樣放置。放不進格子只回報 Overflow。
     ///   4. 視埠類型：沿用專案既有、會顯示標題的視埠類型（最常用者），不新建。
     ///   5. 一張視圖只能在一張圖紙上：已在「本相機的圖紙」（ES Role＝Sheet）上的視埠保留原位；在別張圖紙上的回報並略過。
+    ///      例外（2026-09-25）：透視圖已在別張圖紙上 → 改放出圖用透視複本（見 CameraKeyPlanService.ViewHygiene.cs）。
     ///   6. 相機還沒有 Key Plan 視圖時，先跑一鍵 4 視圖（不並排）。
     /// 單一交易「建立相機圖紙」；呼叫端須在 API context、交易外。
     /// </summary>
@@ -62,6 +63,10 @@ namespace RevitMCP.Core
             public string TitleBlockName;
             public string TitleBlockSource;
             public string ViewportTypeLog;
+            /// <summary>2026-09-25：圖紙上放的透視圖是「原相機」還是「透視複本（新建／沿用並同步）」。</summary>
+            public string PerspectivePlaced;
+            public string PerspectiveNote;
+            public ElementId PerspectiveViewId;
             public double DrawMinX, DrawMinY, DrawMaxX, DrawMaxY; // 可繪區（圖紙座標 feet）
             public string DrawAreaSource;
             public List<SheetViewportInfo> Viewports = new List<SheetViewportInfo>();
@@ -133,7 +138,36 @@ namespace RevitMCP.Core
 
         private static readonly string[] NoTitleTexts = { "No", "否", "無", "不", "不顯示", "Never" };
 
-        private static ElementId ChooseViewportType(Document doc, out string typeName, out string log)
+        /// <summary>視埠類型是否顯示標題（VIEWPORT_ATTR_SHOW_LABEL）；raw＝原始值（log 用）。</summary>
+        private static bool ViewportTypeShowsTitle(ElementType t, out string raw)
+        {
+            bool title = true;
+            raw = "(無參數)";
+            try
+            {
+                Parameter p = t.get_Parameter(BuiltInParameter.VIEWPORT_ATTR_SHOW_LABEL);
+                if (p != null)
+                {
+                    string vs = p.AsValueString();
+                    int iv = p.StorageType == StorageType.Integer ? p.AsInteger() : -1;
+                    raw = $"{vs ?? "?"}/{iv}";
+                    // 未查證：整數值與「是／否／多個視埠時」的對應。先看顯示字串，取不到才以 0＝否判斷。
+                    title = !string.IsNullOrWhiteSpace(vs)
+                        ? !NoTitleTexts.Any(x => string.Equals(vs.Trim(), x, StringComparison.OrdinalIgnoreCase))
+                        : iv != 0;
+                }
+            }
+            catch { }
+            return title;
+        }
+
+        /// <summary>
+        /// 2026-09-25（MCP 自測：log 說「沒有顯示標題的視埠類型」，實際卻套到 Title w Line）：候選不再只靠
+        /// ElementType.Category（視埠類型的 Category 在部分版本為 null，候選清單就是空的），改為聯集：
+        /// Category＝Viewports、FamilyName＝Viewport／視埠／視口、既有視埠用到的類型、呼叫端給的 extraIds
+        /// （新視埠的 GetValidTypes）。
+        /// </summary>
+        private static ElementId ChooseViewportType(Document doc, IEnumerable<ElementId> extraIds, out string typeName, out string log)
         {
             typeName = null;
             var usage = new Dictionary<long, int>();
@@ -144,31 +178,22 @@ namespace RevitMCP.Core
             }
 
             long vpCat = (long)(int)BuiltInCategory.OST_Viewports;
+            var familyNames = new HashSet<string>(new[] { "Viewport", "視埠", "視口" }, StringComparer.OrdinalIgnoreCase);
+            var extra = new HashSet<long>((extraIds ?? Enumerable.Empty<ElementId>()).Select(i => (long)i.GetIdValue()));
+            var seen = new HashSet<long>();
             var candidates = new List<(ElementType t, bool title, int used, string raw)>();
             foreach (ElementType t in new FilteredElementCollector(doc).OfClass(typeof(ElementType)).Cast<ElementType>())
             {
-                if (t.Category == null || t.Category.Id.GetIdValue() != vpCat) continue;
-                bool title = true;
-                string raw = "(無參數)";
-                try
-                {
-                    Parameter p = t.get_Parameter(BuiltInParameter.VIEWPORT_ATTR_SHOW_LABEL);
-                    if (p != null)
-                    {
-                        string vs = p.AsValueString();
-                        int iv = p.StorageType == StorageType.Integer ? p.AsInteger() : -1;
-                        raw = $"{vs ?? "?"}/{iv}";
-                        // 未查證：整數值與「是／否／多個視埠時」的對應。先看顯示字串，取不到才以 0＝否判斷。
-                        title = !string.IsNullOrWhiteSpace(vs)
-                            ? !NoTitleTexts.Any(x => string.Equals(vs.Trim(), x, StringComparison.OrdinalIgnoreCase))
-                            : iv != 0;
-                    }
-                }
-                catch { }
-                candidates.Add((t, title, usage.TryGetValue(t.Id.GetIdValue(), out int u) ? u : 0, raw));
+                long id = t.Id.GetIdValue();
+                bool isVp = (t.Category != null && t.Category.Id.GetIdValue() == vpCat)
+                            || familyNames.Contains(t.FamilyName ?? "")
+                            || usage.ContainsKey(id) || extra.Contains(id);
+                if (!isVp || !seen.Add(id)) continue;
+                bool title = ViewportTypeShowsTitle(t, out string raw);
+                candidates.Add((t, title, usage.TryGetValue(id, out int u) ? u : 0, raw));
             }
 
-            log = "視埠類型：" + string.Join("；", candidates.Select(c => $"{c.t.Name}[標題={c.raw}，用 {c.used} 次]"));
+            log = "視埠類型候選：" + (candidates.Count == 0 ? "(無)" : string.Join("；", candidates.Select(c => $"{c.t.Name}[標題={c.raw}，用 {c.used} 次]")));
             var pick = candidates.Where(c => c.title).OrderByDescending(c => c.used).ThenBy(c => c.t.Name, StringComparer.Ordinal).FirstOrDefault();
             if (pick.t != null)
             {
@@ -176,7 +201,9 @@ namespace RevitMCP.Core
                 log += $" → 採用「{pick.t.Name}」";
                 return pick.t.Id;
             }
-            log += " → 沒有顯示標題的視埠類型，沿用 Revit 預設（未新建類型）";
+            log += candidates.Count == 0
+                ? " → 找不到任何視埠類型候選，放置時由 Revit 套預設類型（見「實際使用」）"
+                : " → 候選都不顯示標題，放置時由 Revit 套預設類型（見「實際使用」）";
             return ElementId.InvalidElementId;
         }
 
@@ -220,7 +247,7 @@ namespace RevitMCP.Core
             try { tbType = ChooseTitleBlockType(doc, titleBlockTypeId, out res.TitleBlockName, out res.TitleBlockSource); }
             catch (Exception ex) { res.Error = ex.Message; return res; }
             res.TitleBlockTypeId = tbType;
-            ElementId vpType = ChooseViewportType(doc, out string vpTypeName, out string vpLog);
+            ElementId vpType = ChooseViewportType(doc, null, out string vpTypeName, out string vpLog);
             res.ViewportTypeLog = vpLog;
             Logger.Info("相機圖紙：" + vpLog);
 
@@ -229,9 +256,27 @@ namespace RevitMCP.Core
             foreach (Viewport vp in new FilteredElementCollector(doc).OfClass(typeof(Viewport)).Cast<Viewport>())
                 viewOnSheet[vp.ViewId.GetIdValue()] = vp;
 
+            // 2026-09-25（MCP 自測：透視圖已在別張圖紙上就被略過）：一張視圖只能放一張圖紙 → 原相機已在「別張」圖紙上時，
+            // 改放出圖用透視複本「<相機名>-Key Plan 圖紙」（ES Role＝PerspectiveForSheet，沿用既有複本）；複本跟著原相機同步。
+            // 選擇順序：原相機已在本相機圖紙上 → 原相機；已有複本 → 複本；原相機在別張圖紙上 → 建立複本；否則 → 原相機。
+            bool camOnOurSheet = false, camOnOtherSheet = false;
+            string camOtherSheetText = null;
+            if (viewOnSheet.TryGetValue(camera.Id.GetIdValue(), out Viewport camVp) && doc.GetElement(camVp.Id) != null)
+            {
+                if (sheet != null && camVp.SheetId == sheet.Id) camOnOurSheet = true;
+                else
+                {
+                    camOnOtherSheet = true;
+                    ViewSheet os = doc.GetElement(camVp.SheetId) as ViewSheet;
+                    camOtherSheetText = $"{os?.SheetNumber} - {os?.Name}";
+                }
+            }
+            View3D existingCopy = FindSheetPerspectiveCopy(doc, cid);
+            bool useCopy = !camOnOurSheet && (existingCopy != null || camOnOtherSheet);
+
             var items = new List<(string role, View view)>
             {
-                ("Perspective", camera), ("Plan", plan), ("Section", section), ("Iso", iso)
+                ("Perspective", useCopy ? null : camera), ("Plan", plan), ("Section", section), ("Iso", iso)
             };
 
             double marginFeet = CameraMath.MmToFeet(GetSheetMarginMm());
@@ -284,6 +329,19 @@ namespace RevitMCP.Core
                     }
                     res.DrawMinX = x0; res.DrawMinY = y0; res.DrawMaxX = x1; res.DrawMaxY = y1;
 
+                    if (useCopy)
+                    {
+                        View3D copy = GetOrCreateSheetPerspectiveCopy(doc, camera, out bool copyCreated);
+                        items[0] = ("Perspective", copy);
+                        res.PerspectivePlaced = copyCreated ? "透視複本（新建）" : "透視複本（沿用並同步）";
+                        res.PerspectiveNote = camOnOtherSheet
+                            ? $"原相機已在圖紙「{camOtherSheetText}」上，改放「{copy.Name}」（方向／裁剪／遠裁剪與原相機同步）"
+                            : $"沿用既有出圖複本「{copy.Name}」（已與原相機同步）";
+                        res.Warnings.Add(res.PerspectiveNote);
+                    }
+                    else res.PerspectivePlaced = "原相機";
+                    res.PerspectiveViewId = items[0].view?.Id;
+
                     // 4) 格子：左 60% 透視；右欄三等分（上→下：平面、剖面、等角）
                     double gap = CameraMath.MmToFeet(SheetCellGapMm);
                     double splitX = x0 + (x1 - x0) * SheetPerspectiveFraction;
@@ -296,6 +354,7 @@ namespace RevitMCP.Core
                         ["Iso"] = new[] { splitX + gap / 2, y0, x1, y1 - 2 * rowH - gap / 2 }
                     };
 
+                    bool retriedVpType = false;
                     foreach (var (role, view) in items)
                     {
                         var info = new SheetViewportInfo { Role = role, ViewId = view?.Id, ViewName = view?.Name };
@@ -329,6 +388,17 @@ namespace RevitMCP.Core
 
                         XYZ center = new XYZ((c[0] + c[2]) / 2, (c[1] + c[3]) / 2, 0);
                         Viewport vp = Viewport.Create(doc, sheet.Id, view.Id, center);
+                        if (vpType == ElementId.InvalidElementId && !retriedVpType)
+                        {
+                            // 事前找不到顯示標題的類型 → 用這個新視埠的 GetValidTypes 再挑一次（只試一次）。
+                            retriedVpType = true;
+                            try
+                            {
+                                vpType = ChooseViewportType(doc, vp.GetValidTypes(), out vpTypeName, out string retryLog);
+                                res.ViewportTypeLog += "｜以新視埠 GetValidTypes 重挑：" + retryLog;
+                            }
+                            catch (Exception ex) { Logger.Error("相機圖紙：以 GetValidTypes 重挑視埠類型失敗", ex); }
+                        }
                         if (vpType != ElementId.InvalidElementId)
                         {
                             try
@@ -356,6 +426,8 @@ namespace RevitMCP.Core
                 }
             }
 
+            List<string> usedTypes = res.Viewports.Where(v => v.ViewportTypeName != null).Select(v => v.ViewportTypeName).Distinct().ToList();
+            res.ViewportTypeLog += "｜實際使用：" + (usedTypes.Count == 0 ? "(無視埠)" : string.Join("、", usedTypes));
             res.SheetId = sheet.Id;
             res.SheetNumber = sheet.SheetNumber;
             res.SheetName = sheet.Name;

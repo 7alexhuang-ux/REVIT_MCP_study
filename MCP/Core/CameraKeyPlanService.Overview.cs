@@ -5,6 +5,13 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.ExtensibleStorage;
 using RevitMCP.Configuration;
 
+// Revit 2025+ ElementId: int → long
+#if REVIT2025_OR_GREATER
+using IdType = System.Int64;
+#else
+using IdType = System.Int32;
+#endif
+
 namespace RevitMCP.Core
 {
     /// <summary>
@@ -46,6 +53,9 @@ namespace RevitMCP.Core
             /// <summary>裁剪範圍（模型座標外接框，feet）。</summary>
             public double MinX, MinY, MaxX, MaxY;
             public int? Scale;
+            /// <summary>2026-09-25：計算出的預期範圍（模型座標 feet）；MinX…MaxY 改為讀回視圖裁剪框的實際值。</summary>
+            public double IntendedMinX, IntendedMinY, IntendedMaxX, IntendedMaxY;
+            public List<string> Warnings = new List<string>();
             public string Error;
         }
 
@@ -78,7 +88,7 @@ namespace RevitMCP.Core
             // 1) 交易外：每台相機的參數（與一鍵 4 視圖同一個 ComputeCameraParams），依下方樓層分組。
             var byLevel = new Dictionary<long, List<(View3D cam, CameraParams cp)>>();
             foreach (View3D cam in new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>()
-                         .Where(v => !v.IsTemplate && v.IsPerspective).OrderBy(v => v.Name, StringComparer.Ordinal))
+                         .Where(v => !v.IsTemplate && v.IsPerspective && !IsSheetPerspectiveCopy(v)).OrderBy(v => v.Name, StringComparer.Ordinal))
             {
                 CameraParams cp;
                 try { cp = ComputeCameraParams(cam, levels); }
@@ -89,9 +99,14 @@ namespace RevitMCP.Core
                 list.Add((cam, cp));
             }
 
+            // 2026-09-25：室內相機的樓層＝房間的 Level（可能不是建築樓層），all 時也要列入。
             List<ElementId> targets = levelIds != null && levelIds.Count > 0
                 ? levelIds.Where(i => i != null).ToList()
-                : levels.Where(l => byLevel.ContainsKey(l.Id.GetIdValue())).Select(l => l.Id).ToList();
+                : byLevel.Keys
+                    .Select(k => doc.GetElement(new ElementId((IdType)k)) as Level)
+                    .Where(l => l != null)
+                    .OrderBy(l => l.ProjectElevation)
+                    .Select(l => l.Id).ToList();
             if (targets.Count == 0) return results;
 
             // 2) 交易外：底圖候選（已裁剪平面，排除本工具自建的 Key Plan／總覽視圖）＋樓層清單。
@@ -107,7 +122,7 @@ namespace RevitMCP.Core
                 res.LevelName = level.Name;
                 if (!byLevel.TryGetValue(lid.GetIdValue(), out var cams) || cams.Count == 0)
                 {
-                    res.Error = $"樓層「{level.Name}」沒有相機（以建築樓層判定下方樓層），不建立總覽。";
+                    res.Error = $"樓層「{level.Name}」沒有相機（室內相機以房間所在樓層、室外以下方建築樓層判定），不建立總覽。";
                     continue;
                 }
                 var eyes = cams.Select(c => new[] { c.cp.Geom.Eye.X, c.cp.Geom.Eye.Y, c.cp.Geom.Eye.Z }).ToList();
@@ -249,6 +264,8 @@ namespace RevitMCP.Core
             res.ViewName = view.Name;
 
             try { if (view.ViewTemplateId != ElementId.InvalidElementId) view.ViewTemplateId = ElementId.InvalidElementId; } catch { }
+            // 2026-09-25：底圖常鎖在 Scope Box（CropBox 設定會被忽略）→ 先解除、專案北、圖紙標題改成自己的。
+            NormalizeDuplicatedPlan(view, "樓層總覽 " + level.Name);
 
             // 裁剪範圍（模型 XY）
             double m = CameraMath.MmToFeet(OverviewFanMarginMm);
@@ -283,7 +300,7 @@ namespace RevitMCP.Core
                 else res.ExtentsMode = "室內扇形 +3 m ∪ 眼睛 +3 m（有室外相機、但底圖沒有裁剪框可當建築範圍）";
             }
             else res.ExtentsMode = "室內扇形聯集 +3 m";
-            res.MinX = x0; res.MinY = y0; res.MaxX = x1; res.MaxY = y1;
+            res.IntendedMinX = x0; res.IntendedMinY = y0; res.IntendedMaxX = x1; res.IntendedMaxY = y1;
 
             try { view.GetCropRegionShapeManager()?.RemoveCropRegionShape(); } catch { /* 沒有非矩形裁剪時會丟例外，忽略 */ }
             view.CropBoxActive = true;
@@ -299,7 +316,13 @@ namespace RevitMCP.Core
             }
             box.Min = new XYZ(lx0, ly0, box.Min.Z);
             box.Max = new XYZ(lx1, ly1, box.Max.Z);
-            view.CropBox = box;
+            ResetCropWarnings();
+            SetCropAndVerify(view, box, "樓層總覽");
+            res.Warnings.AddRange(TakeCropWarnings());
+            // 回報值一律讀回視圖（不回報預期值）。
+            if (TryGetCropWorldXY(view, out double rx0, out double ry0, out double rx1, out double ry1))
+            { res.MinX = rx0; res.MinY = ry0; res.MaxX = rx1; res.MaxY = ry1; }
+            else { res.MinX = x0; res.MinY = y0; res.MaxX = x1; res.MaxY = y1; res.Warnings.Add("讀不到總覽裁剪框，範圍改報預期值。"); }
             EnsureSectionsVisible(view);
 
             // 表現法（同 Key Plan 平面）；總覽保留文字類別，改逐元素隱藏他人文字。
@@ -310,6 +333,7 @@ namespace RevitMCP.Core
             });
 
             // 先清掉這張視圖內所有相機標記（相機可能已刪除或移到別層），再逐台重畫。
+            DrawMarkerSafely(doc, "HideForeignViewersOverview", () => HideForeignViewers(doc, view, null, "樓層總覽"));
             int removed = DeleteMarkersInView(doc, view, null, "MarkerPlan", MarkerNameRole);
             double markerZ = view.GenLevel?.ProjectElevation ?? z;
             foreach (var c in cams)
@@ -323,7 +347,7 @@ namespace RevitMCP.Core
             if (faded) DrawMarkerSafely(doc, "HideForeignTextOverview", () => HideForeignTextNotes(view));
             try { res.Scale = view.Scale; } catch { }
             Logger.Info($"樓層總覽：「{view.Name}」(id={view.Id.GetIdValue()}) {(res.Created ? "新建" : "更新")}；底圖＝{res.BasePlanName ?? "(無)"}（{why}）；" +
-                        $"相機 {cams.Count} 台；範圍 {CameraMath.FeetToMm(x1 - x0):F0}×{CameraMath.FeetToMm(y1 - y0):F0}mm（{res.ExtentsMode}）；刪除舊標記 {removed} 個；比例 1:{res.Scale}");
+                        $"相機 {cams.Count} 台；範圍 預期 {CameraMath.FeetToMm(x1 - x0):F0}×{CameraMath.FeetToMm(y1 - y0):F0}mm／實際 {CameraMath.FeetToMm(res.MaxX - res.MinX):F0}×{CameraMath.FeetToMm(res.MaxY - res.MinY):F0}mm（{res.ExtentsMode}）；刪除舊標記 {removed} 個；比例 1:{res.Scale}");
         }
 
         /// <summary>總覽上一台相機的標記：B 型平面標記（不論 ⋯ 相機標記設定，總覽一律畫 B）＋名稱 TextNote。須在交易內。</summary>

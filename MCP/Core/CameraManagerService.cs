@@ -51,7 +51,7 @@ namespace RevitMCP.Core
                 List<View3D> cameraViews = new FilteredElementCollector(doc)
                     .OfClass(typeof(View3D))
                     .Cast<View3D>()
-                    .Where(v => !v.IsTemplate && v.IsPerspective)
+                    .Where(v => !v.IsTemplate && v.IsPerspective && !CameraKeyPlanService.IsSheetPerspectiveCopy(v)) // 2026-09-25：出圖用透視複本不是相機
                     .OrderBy(v => v.Name)
                     .ToList();
 
@@ -77,6 +77,16 @@ namespace RevitMCP.Core
                         levelCameraCount[row.LevelId] = levelCameraCount.TryGetValue(row.LevelId, out int c) ? c + 1 : 1;
                     }
                 }
+
+                // 2026-09-25：室內相機的樓層＝房間的 Level，可能不是建築樓層（例：房間放在非 Building Story 的 Level）；
+                // 補進樓層清單，讓清單「樓層」欄與位置圖樓層過濾找得到它（依高程排序）。
+                foreach (CameraRow r in snapshot.Cameras)
+                {
+                    if (r.LevelId == null || snapshot.Levels.Any(l => l.LevelId == r.LevelId)) continue;
+                    if (doc.GetElement(r.LevelId) is Level extra)
+                        snapshot.Levels.Add(new LevelOption { LevelId = extra.Id, Name = extra.Name, ProjectElevationFeet = extra.ProjectElevation });
+                }
+                snapshot.Levels.Sort((a, b) => a.ProjectElevationFeet.CompareTo(b.ProjectElevationFeet));
 
                 // 2026-09-25 Wave 3：圖框類型（④ ▾ 圖紙圖框 ▸）；失敗只記 log。
                 try { snapshot.TitleBlocks = CameraKeyPlanService.ListTitleBlockTypes(doc); }
@@ -727,8 +737,8 @@ namespace RevitMCP.Core
                         View3D v = doc.GetElement(id) as View3D;
                         if (v == null || v.IsTemplate || !v.IsPerspective) { skippedCount++; continue; }
 
-                        double eyeZFeet = v.GetOrientation().EyePosition.Z;
-                        Level levelBelow = CameraMath.FindLevelBelow(levels, eyeZFeet);
+                        // 2026-09-25：與清單同一個樓層規則（室內＝房間的 Level）。
+                        Level levelBelow = CameraMath.ComputeGeometry(v, levels).LevelBelow;
                         if (levelBelow == null) { skippedCount++; continue; }
 
                         v.SetOrientation(CameraMath.BuildOrientationForHeightAboveLevel(v, levelBelow, heightCm));
@@ -873,7 +883,7 @@ namespace RevitMCP.Core
                 List<Level> levels = CameraMath.GetStoreyLevelsSorted(doc);
                 ViewOrientation3D srcOrientation = source.GetOrientation();
                 double eyeZFeet = srcOrientation.EyePosition.Z;
-                Level srcLevelBelow = CameraMath.FindLevelBelow(levels, eyeZFeet);
+                Level srcLevelBelow = CameraMath.ComputeGeometry(source, levels).LevelBelow; // 2026-09-25：室內＝房間的 Level
                 double heightAboveLevelCm = srcLevelBelow != null
                     ? CameraMath.FeetToMm(eyeZFeet - srcLevelBelow.ProjectElevation) / 10.0
                     : 0.0;
