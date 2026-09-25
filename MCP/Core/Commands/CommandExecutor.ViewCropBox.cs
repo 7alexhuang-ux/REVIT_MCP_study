@@ -216,30 +216,12 @@ namespace RevitMCP.Core
             int supportingBeamCount = 0;
             if (includeSupportingBeams)
             {
-                var framing = new FilteredElementCollector(doc)
-                    .OfCategory(BuiltInCategory.OST_StructuralFraming)
-                    .WhereElementIsNotElementType();
-
-                foreach (Element beam in framing)
-                {
-                    double beamMinX, beamMinY, beamMinZ, beamMaxX, beamMaxY, beamMaxZ;
-                    if (!TryGetWorldBounds(beam, out beamMinX, out beamMinY, out beamMinZ, out beamMaxX, out beamMaxY, out beamMaxZ))
-                        continue;
-
-                    bool overlapsTargetXY =
-                        beamMaxX >= targetMinX - toleranceFeet && beamMinX <= targetMaxX + toleranceFeet &&
-                        beamMaxY >= targetMinY - toleranceFeet && beamMinY <= targetMaxY + toleranceFeet;
-                    bool supportsTargetBase = Math.Abs(beamMaxZ - targetMinZ) <= toleranceFeet;
-                    if (!overlapsTargetXY || !supportsTargetBase) continue;
-
-                    minX = Math.Min(minX, beamMinX);
-                    minY = Math.Min(minY, beamMinY);
-                    minZ = Math.Min(minZ, beamMinZ);
-                    maxX = Math.Max(maxX, beamMaxX);
-                    maxY = Math.Max(maxY, beamMaxY);
-                    // Deliberately do not raise maxZ above the target element top.
-                    supportingBeamCount++;
-                }
+                // Refactored into SectionBoxLevelHelper (Camera Manager Change 2 shares this
+                // loop with the camera iso Key Plan view). Behaviour/output unchanged: same
+                // XY-overlap + base-support filter, maxZ still deliberately left untouched.
+                supportingBeamCount = SectionBoxLevelHelper.IncludeSupportingBeams(doc,
+                    targetMinX, targetMinY, targetMaxX, targetMaxY, targetMinZ, toleranceFeet,
+                    ref minX, ref minY, ref minZ, ref maxX, ref maxY);
             }
 
             double paddingXYFeet = paddingXYMm / 304.8;
@@ -256,38 +238,11 @@ namespace RevitMCP.Core
             object upperStructure = null;
             if (upperStructureMode == "include_upper_structure_without_slab")
             {
-                Element upperSlab = null;
-                double slabBottomZ = double.PositiveInfinity;
-                double slabTopZ = double.NaN;
-                int slabCandidateCount = 0;
-
-                var floors = new FilteredElementCollector(doc)
-                    .OfCategory(BuiltInCategory.OST_Floors)
-                    .WhereElementIsNotElementType();
-
-                foreach (Element floor in floors)
-                {
-                    double fMinX, fMinY, fMinZ, fMaxX, fMaxY, fMaxZ;
-                    if (!TryGetWorldBounds(floor, out fMinX, out fMinY, out fMinZ, out fMaxX, out fMaxY, out fMaxZ))
-                        continue;
-
-                    bool overlapsTargetXY =
-                        fMaxX > targetMinX && fMinX < targetMaxX &&
-                        fMaxY > targetMinY && fMinY < targetMaxY;
-                    // Exclude the target's own slab (bottom below the target base)
-                    // and low platforms that do not reach the target top.
-                    bool isAboveTargetBase = fMinZ > targetMinZ + toleranceFeet;
-                    bool reachesTargetTop = fMaxZ >= targetMaxZ - toleranceFeet;
-                    if (!overlapsTargetXY || !isAboveTargetBase || !reachesTargetTop) continue;
-
-                    slabCandidateCount++;
-                    if (fMinZ < slabBottomZ)
-                    {
-                        slabBottomZ = fMinZ;
-                        slabTopZ = fMaxZ;
-                        upperSlab = floor;
-                    }
-                }
+                // Refactored into SectionBoxLevelHelper (shared with the camera iso Key Plan
+                // view, Camera Manager Change 2). Same filter/priority, output unchanged.
+                Element upperSlab = SectionBoxLevelHelper.FindNearestUpperSlab(doc,
+                    targetMinX, targetMinY, targetMaxX, targetMaxY, targetMinZ, targetMaxZ, toleranceFeet,
+                    out double slabBottomZ, out double slabTopZ, out int slabCandidateCount);
 
                 if (upperSlab == null)
                     throw new Exception(
@@ -300,21 +255,8 @@ namespace RevitMCP.Core
                 if (sectionMaxZ <= sectionMinZ)
                     throw new Exception($"上層樓板底 ({slabBottomZ * 304.8:F0} mm) 扣除 upperSlabClearance_mm 後低於 Section Box 底面，Section Box 未修改");
 
-                int upperBeamCount = 0;
-                var upperFraming = new FilteredElementCollector(doc)
-                    .OfCategory(BuiltInCategory.OST_StructuralFraming)
-                    .WhereElementIsNotElementType();
-                foreach (Element beam in upperFraming)
-                {
-                    double bMinX, bMinY, bMinZ, bMaxX, bMaxY, bMaxZ;
-                    if (!TryGetWorldBounds(beam, out bMinX, out bMinY, out bMinZ, out bMaxX, out bMaxY, out bMaxZ))
-                        continue;
-                    bool overlapsXY =
-                        bMaxX >= targetMinX - paddingXYFeet && bMinX <= targetMaxX + paddingXYFeet &&
-                        bMaxY >= targetMinY - paddingXYFeet && bMinY <= targetMaxY + paddingXYFeet;
-                    bool hangsIntoBox = bMinZ < sectionMaxZ && bMaxZ > targetMaxZ + toleranceFeet;
-                    if (overlapsXY && hangsIntoBox) upperBeamCount++;
-                }
+                int upperBeamCount = SectionBoxLevelHelper.CountUpperStructureBeams(doc,
+                    targetMinX, targetMinY, targetMaxX, targetMaxY, targetMaxZ, paddingXYFeet, sectionMaxZ, toleranceFeet);
 
                 upperStructure = new
                 {
@@ -390,37 +332,8 @@ namespace RevitMCP.Core
             };
         }
 
-        /// <summary>
-        /// 取得元素在模型座標中的軸向 BoundingBox（套用 BoundingBox Transform 後重算 8 角點）。
-        /// </summary>
-        private static bool TryGetWorldBounds(Element element,
-            out double minX, out double minY, out double minZ,
-            out double maxX, out double maxY, out double maxZ)
-        {
-            minX = minY = minZ = double.PositiveInfinity;
-            maxX = maxY = maxZ = double.NegativeInfinity;
-
-            BoundingBoxXYZ box = element.get_BoundingBox(null);
-            if (box == null) return false;
-
-            Transform transform = box.Transform ?? Transform.Identity;
-            for (int ix = 0; ix <= 1; ix++)
-            for (int iy = 0; iy <= 1; iy++)
-            for (int iz = 0; iz <= 1; iz++)
-            {
-                XYZ p = transform.OfPoint(new XYZ(
-                    ix == 0 ? box.Min.X : box.Max.X,
-                    iy == 0 ? box.Min.Y : box.Max.Y,
-                    iz == 0 ? box.Min.Z : box.Max.Z));
-                minX = Math.Min(minX, p.X);
-                minY = Math.Min(minY, p.Y);
-                minZ = Math.Min(minZ, p.Z);
-                maxX = Math.Max(maxX, p.X);
-                maxY = Math.Max(maxY, p.Y);
-                maxZ = Math.Max(maxZ, p.Z);
-            }
-            return true;
-        }
+        // TryGetWorldBounds 已抽到 SectionBoxLevelHelper.TryGetWorldBounds（Camera Manager
+        // Change 2 與相機管理面板的等角 Key Plan 視圖共用同一份），這裡不再保留本地版本。
 
         /// <summary>
         /// 平移指定視圖的 CropBox（在 CropBox 自身座標系中位移 dx, dy）

@@ -32,12 +32,13 @@ namespace RevitMCP.Core
             Document doc = _uiApp.ActiveUIDocument.Document;
             View3D view = ResolveCameraView(doc, parameters);
 
-            ViewOrientation3D orientation = view.GetOrientation();
-            XYZ eye = orientation.EyePosition;
-            XYZ forward = orientation.ForwardDirection;
+            List<Level> levels = CameraMath.GetLevelsSorted(doc);
+            CameraMath.CameraGeometry geometry = CameraMath.ComputeGeometry(view, levels);
+            XYZ eye = geometry.Eye;
+            XYZ forward = geometry.Forward;
 
-            double eyeZMm = CameraFeetToMm(eye.Z);
-            double pitchDeg = Math.Round(Math.Asin(Math.Max(-1.0, Math.Min(1.0, forward.Z))) * 180.0 / Math.PI, 2);
+            double eyeZMm = geometry.EyeZMm;
+            double pitchDeg = geometry.PitchDeg;
 
             // 候選基準高度（全部是內部原點座標系的 Z），用來辨認 Eye Elevation 參數的 0 點
             var datums = new List<KeyValuePair<string, double>>
@@ -52,17 +53,11 @@ namespace RevitMCP.Core
             if (surveyPoint != null)
                 datums.Add(new KeyValuePair<string, double>("測量點 (Survey Point)", CameraFeetToMm(surveyPoint.Position.Z)));
 
-            List<Level> levels = new FilteredElementCollector(doc)
-                .OfClass(typeof(Level))
-                .Cast<Level>()
-                .OrderBy(l => l.ProjectElevation)
-                .ToList();
-
             foreach (Level level in levels)
                 datums.Add(new KeyValuePair<string, double>("樓層 " + level.Name, CameraFeetToMm(level.ProjectElevation)));
 
             // 眼睛落在哪一層之上：取「樓層高程 ≤ 眼睛」的最高那層
-            Level levelBelowEye = levels.LastOrDefault(l => l.ProjectElevation <= eye.Z + 1e-9);
+            Level levelBelowEye = geometry.LevelBelow;
 
             var levelTable = levels.Select(l => (object)new
             {
@@ -183,9 +178,13 @@ namespace RevitMCP.Core
             throw new Exception($"元素 {requestedId.Value}（{element.Name}）不是 3D 視圖，也找不到同名的 3D 視圖。");
         }
 
+        /// <summary>
+        /// 保留原名稱／簽名以降低本次重構對這個檔案其他呼叫點的影響；實際運算已移到
+        /// <see cref="CameraMath.FeetToMm"/>（相機管理視窗與這裡共用同一份換算）。
+        /// </summary>
         private static double CameraFeetToMm(double feet)
         {
-            return UnitUtils.ConvertFromInternalUnits(feet, UnitTypeId.Millimeters);
+            return CameraMath.FeetToMm(feet);
         }
     }
 }
