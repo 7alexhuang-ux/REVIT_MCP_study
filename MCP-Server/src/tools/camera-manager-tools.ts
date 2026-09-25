@@ -126,5 +126,48 @@ export const cameraManagerTools: Tool[] = [
             },
             required: []
         }
+    },
+    {
+        name: "create_camera_sheet",
+        title: "相機一鍵出圖紙",
+        description: "為一台透視相機建立或更新圖紙「Key Plan-<相機名>」（與相機管理面板「一鍵出圖紙」同一段程式碼）：左側約 60% 放透視圖，右欄由上而下放 Key Plan 平面／剖面／等角；可繪區＝圖框在圖紙上的外接框內縮邊界。只調整視埠位置（置中於格子），不改任何視圖比例；視埠類型沿用專案既有、會顯示標題的類型，不新建。相機還沒有 Key Plan 視圖時先執行一鍵 4 視圖。已在本相機圖紙上的視埠保留原位；在其他圖紙上的視圖回報並略過。回傳圖紙 id／編號／名稱、圖框來源、可繪區與每個視埠的 id、狀態、中心與尺寸（圖紙座標 mm）、是否超出格子。寫入模型（交易「建立相機圖紙」），不刪除任何使用者元素。觸發條件：相機出圖、一鍵出圖紙、相機圖紙、camera sheet。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                cameraId: {
+                    type: "number",
+                    description: "相機 3D 視圖（或平面上的相機元件）的 ElementId；省略＝目前作用中的透視圖"
+                },
+                titleBlockTypeId: {
+                    type: "number",
+                    description: "圖框類型（FamilySymbol）的 ElementId；省略＝面板設定，未設定時用專案內最常用的圖框"
+                }
+            },
+            required: []
+        }
+    },
+    {
+        name: "camera_version",
+        title: "相機視角版本（列出／儲存／還原／刪除）",
+        description: "管理相機的具名「視角版本」（與相機管理面板右鍵「視角版本 ▸」同一段程式碼）。版本存在相機視圖的 Extensible Storage（JSON：眼睛位置、前方向、上方向、裁剪框與其 Transform、遠裁剪），同事開同一個 .rvt 也能切換。action=list 唯讀列出；save 以 name 儲存目前視角（同名覆蓋）；restore 以一個交易「還原相機視角：<名稱>」套回該版本（面板已載入時相機標記會自動更新）；delete 只移除該筆版本資料，不刪除任何模型元素。回傳目前相機姿態與全部版本（眼睛 mm、水平角、俯仰角、裁剪框尺寸、遠裁剪）。觸發條件：相機版本、儲存視角、還原視角、A 案 B 案視角、camera version。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                cameraId: {
+                    type: "number",
+                    description: "相機 3D 視圖（或相機元件）的 ElementId；省略＝目前作用中的透視圖"
+                },
+                action: {
+                    type: "string",
+                    enum: ["list", "save", "restore", "delete"],
+                    description: "list（預設，唯讀）／save／restore／delete"
+                },
+                name: {
+                    type: "string",
+                    description: "版本名稱（save／restore／delete 必填；最多 60 字，區分大小寫）"
+                }
+            },
+            required: []
+        }
     }
 ];

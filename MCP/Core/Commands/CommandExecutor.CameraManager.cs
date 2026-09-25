@@ -506,6 +506,132 @@ namespace RevitMCP.Core
         }
 
         // ══════════════════════════════════════════════════════════
+        // create_camera_sheet（寫入，2026-09-25 Wave 3）
+        // ══════════════════════════════════════════════════════════
+
+        private object CreateCameraSheet(JObject parameters)
+        {
+            Document doc = _uiApp.ActiveUIDocument.Document;
+            View3D camera = ResolvePerspectiveCamera(doc, parameters);
+            long? tb = parameters?["titleBlockTypeId"]?.Value<long?>();
+
+            CameraKeyPlanService.SheetResult r = CameraKeyPlanService.CreateOrUpdateCameraSheet(_uiApp, doc, camera.Id, tb);
+            if (r.Error != null) throw new Exception(r.Error);
+
+            object Mm2(double x, double y) => new { X = CmMm(x), Y = CmMm(y) };
+            bool hasTb = r.TitleBlockTypeId != null && r.TitleBlockTypeId != ElementId.InvalidElementId;
+            return new
+            {
+                Success = true,
+                Camera = new { Id = camera.Id.GetIdValue(), camera.Name },
+                Sheet = new { Id = r.SheetId?.GetIdValue(), Number = r.SheetNumber, Name = r.SheetName, r.Created },
+                r.RanFourViews,
+                TitleBlock = new { TypeId = hasTb ? (long?)r.TitleBlockTypeId.GetIdValue() : null, Name = r.TitleBlockName, Source = r.TitleBlockSource },
+                DrawArea = new { MinMm = Mm2(r.DrawMinX, r.DrawMinY), MaxMm = Mm2(r.DrawMaxX, r.DrawMaxY), Source = r.DrawAreaSource },
+                r.ViewportTypeLog,
+                Viewports = r.Viewports.Select(v => new
+                {
+                    v.Role,
+                    ViewId = v.ViewId?.GetIdValue(),
+                    v.ViewName,
+                    ViewportId = v.ViewportId?.GetIdValue(),
+                    v.Status,
+                    v.Note,
+                    CenterMm = v.ViewportId == null ? null : Mm2(v.CenterXFeet, v.CenterYFeet),
+                    SizeMm = v.ViewportId == null ? null : new { W = CmMm(v.WidthFeet), H = CmMm(v.HeightFeet) },
+                    CellMm = new { Min = Mm2(v.CellMinX, v.CellMinY), Max = Mm2(v.CellMaxX, v.CellMaxY) },
+                    v.Overflow,
+                    ViewportType = v.ViewportTypeName
+                }).ToList(),
+                r.Warnings,
+                Note = "座標為圖紙座標 mm。只調整視埠位置、不改視圖比例；已在本相機圖紙上的視埠保留原位，在其他圖紙上的視圖略過。"
+            };
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // camera_version（list 唯讀；save／restore／delete 寫入，2026-09-25 Wave 3）
+        // ══════════════════════════════════════════════════════════
+
+        private object CameraVersion(JObject parameters)
+        {
+            Document doc = _uiApp.ActiveUIDocument.Document;
+            View3D camera = ResolvePerspectiveCamera(doc, parameters);
+            string action = (parameters?["action"]?.Value<string>() ?? "list").Trim().ToLowerInvariant();
+            string name = parameters?["name"]?.Value<string>();
+            var warnings = new List<string>();
+            string message = null;
+
+            switch (action)
+            {
+                case "list":
+                    break;
+                case "save":
+                {
+                    if (string.IsNullOrWhiteSpace(name)) throw new Exception("action=save 需要 name。");
+                    string err = CameraKeyPlanService.SaveVersion(doc, camera.Id, name, out bool replaced);
+                    if (err != null) throw new Exception(err);
+                    message = replaced ? $"已覆蓋版本「{name.Trim()}」。" : $"已儲存版本「{name.Trim()}」。";
+                    break;
+                }
+                case "restore":
+                {
+                    if (string.IsNullOrWhiteSpace(name)) throw new Exception("action=restore 需要 name。");
+                    string err = CameraKeyPlanService.RestoreVersion(doc, camera.Id, name, warnings);
+                    if (err != null) throw new Exception(err);
+                    message = $"已還原版本「{name.Trim()}」（交易「{CameraKeyPlanService.VersionRestoreTransactionPrefix}{name.Trim()}」）。面板已載入時，相機標記會經去抖路徑自動更新。";
+                    break;
+                }
+                case "delete":
+                {
+                    if (string.IsNullOrWhiteSpace(name)) throw new Exception("action=delete 需要 name。");
+                    string err = CameraKeyPlanService.DeleteVersion(doc, camera.Id, name);
+                    if (err != null) throw new Exception(err);
+                    message = $"已刪除版本「{name.Trim()}」（只移除儲存的版本資料，不刪除任何模型元素）。";
+                    break;
+                }
+                default:
+                    throw new Exception($"action「{action}」無效，請用 list／save／restore／delete。");
+            }
+
+            List<Level> storeys = CameraMath.GetStoreyLevelsSorted(doc);
+            CameraRow now = CameraManagerService.BuildCameraRow(camera, storeys);
+            return new
+            {
+                Success = true,
+                Action = action,
+                Message = message,
+                Warnings = warnings,
+                Camera = new
+                {
+                    Id = camera.Id.GetIdValue(),
+                    camera.Name,
+                    Current = new
+                    {
+                        EyeMm = CmPoint(camera.GetOrientation().EyePosition),
+                        YawDeg = Math.Round(now.HorizontalAngleDeg, 2),
+                        PitchDeg = Math.Round(now.PitchDeg, 2),
+                        now.HeightAboveLevelCm,
+                        now.FarClipCm
+                    }
+                },
+                Versions = CameraKeyPlanService.ReadVersions(camera).Select(v => new
+                {
+                    v.Name,
+                    v.SavedAt,
+                    EyeMm = CmPoint(v.Eye),
+                    YawDeg = Math.Round(CameraMath.ComputeHorizontalAngleDeg(v.Forward), 2),
+                    PitchDeg = Math.Round(Math.Asin(Math.Max(-1.0, Math.Min(1.0, v.Forward.Normalize().Z))) * 180.0 / Math.PI, 2),
+                    Forward = CmVector(v.Forward),
+                    Up = CmVector(v.Up),
+                    CropBoxSizeMm = v.CropMin == null || v.CropMax == null ? null : new { X = CmMm(v.CropMax.X - v.CropMin.X), Y = CmMm(v.CropMax.Y - v.CropMin.Y), Z = CmMm(v.CropMax.Z - v.CropMin.Z) },
+                    v.CropActive,
+                    FarClipMm = v.FarClipFeet.HasValue ? (double?)CmMm(v.FarClipFeet.Value) : null,
+                    v.FarClipActive
+                }).ToList()
+            };
+        }
+
+        // ══════════════════════════════════════════════════════════
         // get_view_extents（唯讀，通用）
         // ══════════════════════════════════════════════════════════
 

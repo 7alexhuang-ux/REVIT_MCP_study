@@ -68,6 +68,8 @@ namespace RevitMCP.Core
                 {
                     CameraRow row = BuildCameraRow(view, levels);
                     row.HasKeyPlanSection = row.UniqueId != null && camerasWithSection.Contains(row.UniqueId);
+                    // 2026-09-25 Wave 3：視角版本名稱（右鍵「視角版本 ▸」用；讀取失敗＝空清單，不影響清單）
+                    row.VersionNames = CameraKeyPlanService.ReadVersionNames(view);
                     snapshot.Cameras.Add(row);
 
                     if (row.LevelId != null)
@@ -75,6 +77,10 @@ namespace RevitMCP.Core
                         levelCameraCount[row.LevelId] = levelCameraCount.TryGetValue(row.LevelId, out int c) ? c + 1 : 1;
                     }
                 }
+
+                // 2026-09-25 Wave 3：圖框類型（④ ▾ 圖紙圖框 ▸）；失敗只記 log。
+                try { snapshot.TitleBlocks = CameraKeyPlanService.ListTitleBlockTypes(doc); }
+                catch (Exception exTb) { Logger.Error("相機管理：讀取圖框類型失敗（略過）", exTb); }
 
                 // 4.8：底圖只提供「已啟用 CropBox」的平面（沒有的話面板改畫中性格線，見 HasCroppedPlan）。
                 List<ViewPlan> croppedPlanViews = new FilteredElementCollector(doc)

@@ -323,6 +323,9 @@ namespace RevitMCP
                                       n == RevitMCP.Core.CameraKeyPlanService.AMarkerTransactionName ||
                                       n == RevitMCP.Core.CameraKeyPlanService.AFamilyLoadTransactionName ||
                                       n == RevitMCP.Core.CameraKeyPlanService.OverviewTransactionName ||
+                                      n == RevitMCP.Core.CameraKeyPlanService.SheetTransactionName ||
+                                      n == RevitMCP.Core.CameraKeyPlanService.VersionSaveTransactionName ||
+                                      n == RevitMCP.Core.CameraKeyPlanService.VersionDeleteTransactionName ||
                                       n == RevitMCP.Core.CameraSourcePlanStore.TransactionName);
             }
             catch

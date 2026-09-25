@@ -280,6 +280,14 @@ namespace RevitMCP.Core
                         result = RunCameraOverview(parameters);
                         break;
 
+                    case "create_camera_sheet":
+                        result = CreateCameraSheet(parameters);
+                        break;
+
+                    case "camera_version":
+                        result = CameraVersion(parameters);
+                        break;
+
                     case "get_material_graphics":
                         result = GetMaterialGraphics(parameters);
                         break;

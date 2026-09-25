@@ -29,12 +29,12 @@ namespace RevitMCP.UI
             StackPanel sideBySidePanel = new StackPanel { Orientation = Orientation.Horizontal };
             _sideBySideButton = CameraManagerTheme.SecondaryButton("並排");
             _sideBySideButton.ToolTip = "④ 並排：開啟選取相機的透視圖＋所在樓層的既有平面視圖（先關閉其他視圖），並執行 Revit「並排視窗」";
-            _sideBySideButton.Margin = new Thickness(0, 0, 6, 0);
+            _sideBySideButton.Margin = new Thickness(0, 0, CameraManagerTheme.Spacing, 0);
             _sideBySideButton.Click += (s, e) => SideBySideRequested?.Invoke();
             sideBySidePanel.Children.Add(_sideBySideButton);
 
             _restoreButton = CameraManagerTheme.SecondaryButton("還原");
-            _restoreButton.ToolTip = "④ 還原：切回開 4 視圖前的作用視圖（已關閉的其他視圖不會重新打開）";
+            _restoreButton.ToolTip = "④ 還原：關閉並排時額外開啟的視圖、切回之前的作用視圖（並排前被關掉的其他視圖不會重新打開）";
             _restoreButton.IsEnabled = false;
             _restoreButton.Click += (s, e) => RestoreRequested?.Invoke();
             sideBySidePanel.Children.Add(_restoreButton);

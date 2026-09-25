@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tools 索引（218 個）· BIM_MCP</title>
-<meta property="og:title" content="RevitMCP Tools 索引：218 個執行層工具">
-<meta property="og:description" content="218 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
+<title>Tools 索引（220 個）· BIM_MCP</title>
+<meta property="og:title" content="RevitMCP Tools 索引：220 個執行層工具">
+<meta property="og:description" content="220 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@300;400;600;700;800&display=swap">
@@ -89,9 +89,9 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">218 個</span></div>
+  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">220 個</span></div>
   <h1 class="bim-hero-title">Tools · <span class="accent">執行層</span><br>模型上真正被動到的那一下</h1>
-  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 218 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
+  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 220 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
 </header>
 
 <section class="bim-section">
@@ -99,7 +99,7 @@
   <p>每張卡右上角的標記來自工具自己宣告的 <code>annotations</code>，不是這一頁另外標的——閘門 <code>9-1</code> 會驗證它們與程式碼一致。</p>
   <ul>
     <li><strong>唯讀</strong>（96 個）——只讀不寫。跑錯了不會留下痕跡，可以放心探索。</li>
-    <li><strong>會寫入</strong>（119 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
+    <li><strong>會寫入</strong>（121 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
     <li><strong>破壞性</strong>（3 個）——刪除或不可逆地取代既有內容：<code>curate_mep_sizes · dedup_detail_elements_in_view · delete_element</code>。這份名單是白名單，程式碼裡多一個就會被閘門擋下。</li>
   </ul>
   <p style="color:var(--text-muted);font-size:13px;">「唯讀」是工具作者的宣告，不是執行時的沙箱。它告訴你這支工具<em>設計上</em>不寫入，不是保證它<em>不可能</em>寫入。</p>
@@ -122,11 +122,11 @@
         <tr><td><strong>H</strong></td><td>視覺化</td><td class="num">30</td><td>上色、覆寫、隱藏顯示，也含材質與 Type 建構。</td></tr>
     </tbody>
   </table>
-  <p style="color:var(--text-muted);font-size:13px;">分類是 48 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 218。這一頁由 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
+  <p style="color:var(--text-muted);font-size:13px;">分類是 48 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 220。這一頁由 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
 </section>
 
 <section class="bim-section">
-  <h2 class="bim-section-title">218 個工具 · 依用途分組</h2>
+  <h2 class="bim-section-title">220 個工具 · 依用途分組</h2>
 
     <div class="cat-header">A · 基礎與查詢（31 個）</div>
     <p class="cat-blurb">讀模型、找元素、問參數，多數工作的第一步；也包含少數寫入型前置工具（如載入共用參數檔 load_shared_parameters）。</p>
@@ -1401,7 +1401,7 @@
         <div class="tool-desc">依照法規判定結果對偵煙探測器上色：綠=PASS、紅=FAIL、橙=WARN（出風口資料缺失）。</div>
       </div>
     </div>
-    <div class="cat-header">F · 視圖與圖紙（37 個）</div>
+    <div class="cat-header">F · 視圖與圖紙（39 個）</div>
     <p class="cat-blurb">建視圖、裁剪、圖紙配置、視埠定位、跨專案複製。</p>
     <div class="tool-card" id="align_titleblocks_on_sheets" data-tool="align_titleblocks_on_sheets">
       <div>
@@ -1473,6 +1473,16 @@
         <div class="tool-desc">計算給定 X 與 Y 網格範圍的邊界 BoundingBox 座標。可指定外擴偏移量 (offset_mm)。</div>
       </div>
     </div>
+    <div class="tool-card" id="camera_version" data-tool="camera_version">
+      <div>
+        <div class="tool-name">camera_version</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">camera-manager-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">管理相機的具名「視角版本」（與相機管理面板右鍵「視角版本 ▸」同一段程式碼）。版本存在相機視圖的 Extensible Storage（JSON：眼睛位置、前方向、上方向、裁剪框與其 Transform、遠裁剪），同事開同一個 .rvt 也能切換。action=list 唯讀列出；save 以 name 儲存目前視角（同名覆蓋）；restore 以一個交易「還原相機視角：&lt;名稱&gt;」套回該版本（面板已載入時相機標記會自動更新）；delete 只移除該筆版本資料，不刪除任何模型元素。回傳目前相機姿態與全部版本（眼睛 mm、水平角、俯仰角、裁剪框尺寸、遠裁剪）。</div>
+      </div>
+    </div>
     <div class="tool-card" id="capture_view_image" data-tool="capture_view_image">
       <div>
         <div class="tool-name">capture_view_image</div>
@@ -1501,6 +1511,16 @@
       </div>
       <div>
         <div class="tool-desc">從來源 .rvt 檔案複製圖紙到目前開啟的專案。讀取來源的 sheet/viewport/view metadata，在目標專案中重建 sheets、匹配或建立 views、放置 viewports 並同步設定。View 依四級分類處理：Tier 1（FloorPlan/CeilingPlan）可自動建立；Tier 2（Section/3D/DraftingView）可部分建立；Tier 3（Legend/Schedule）只匹配不建立；Tier 4（Elevation/Callout/AreaPlan）回報 manual_action_required。衝突項目必須在 conflictResolution 中指定處理方式。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="create_camera_sheet" data-tool="create_camera_sheet">
+      <div>
+        <div class="tool-name">create_camera_sheet</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">camera-manager-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">為一台透視相機建立或更新圖紙「Key Plan-&lt;相機名&gt;」（與相機管理面板「一鍵出圖紙」同一段程式碼）：左側約 60% 放透視圖，右欄由上而下放 Key Plan 平面／剖面／等角；可繪區＝圖框在圖紙上的外接框內縮邊界。只調整視埠位置（置中於格子），不改任何視圖比例；視埠類型沿用專案既有、會顯示標題的類型，不新建。相機還沒有 Key Plan 視圖時先執行一鍵 4 視圖。已在本相機圖紙上的視埠保留原位；在其他圖紙上的視圖回報並略過。回傳圖紙 id／編號／名稱、圖框來源、可繪區與每個視埠的 id、狀態、中心與尺寸（圖紙座標 mm）、是否超出格子。寫入模型（交易「建立相機圖紙」），不刪除任何使用者元素。</div>
       </div>
     </div>
     <div class="tool-card" id="create_dependent_views" data-tool="create_dependent_views">
@@ -2338,7 +2358,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / tools-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">218 個 MCP 工具完整索引，由 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">220 個 MCP 工具完整索引，由 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
 </footer>
 
 <script src="../shared.js"></script>

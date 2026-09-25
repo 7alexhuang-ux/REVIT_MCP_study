@@ -59,6 +59,9 @@ namespace RevitMCP.Core
         /// 不排讀剖面線的 ExternalEvent（2026-09-24 第三輪）。</summary>
         public bool HasKeyPlanSection { get; set; }
 
+        /// <summary>2026-09-25 Wave 3：這台相機已儲存的「視角版本」名稱（ES，依儲存順序）；右鍵「視角版本 ▸」用。</summary>
+        public List<string> VersionNames { get; set; } = new List<string>();
+
         /// <summary>2026-09-25 室內／室外判定（與一鍵 4 視圖同一套 FindEyeRoom）：true＝室外（眼睛不在任何房間），
         /// false＝室內，null＝判定失敗／找不到樓層。</summary>
         public bool? IsOutdoor { get; set; }
@@ -353,6 +356,14 @@ namespace RevitMCP.Core
     }
 
     /// <summary>「重新讀取相機清單＋平面視圖清單＋樓層清單」這一步驟（在 ExternalEvent 內執行）的結果。</summary>
+    /// <summary>2026-09-25 Wave 3：圖框類型（攤平成純資料給 WPF）。</summary>
+    internal class TitleBlockOption
+    {
+        public long Id { get; set; }
+        public string Name { get; set; }
+        public int UseCount { get; set; }
+    }
+
     internal class CameraManagerSnapshot
     {
         public List<CameraRow> Cameras { get; set; } = new List<CameraRow>();
@@ -364,6 +375,8 @@ namespace RevitMCP.Core
         public ElementId ActiveViewId { get; set; }
         /// <summary>目前文件內是否存在任何「已啟用 CropBox」的平面視圖；false 時底圖改用中性格線（4.8）。</summary>
         public bool HasCroppedPlan { get; set; }
+        /// <summary>2026-09-25 Wave 3：專案內的圖框類型（④ ▾ 圖紙圖框 ▸ 下拉用；UseCount＝已放在圖紙上的次數）。</summary>
+        public List<TitleBlockOption> TitleBlocks { get; set; } = new List<TitleBlockOption>();
         public string ErrorMessage { get; set; }
         public string DocumentTitle { get; set; }
     }
@@ -546,5 +559,10 @@ namespace RevitMCP.Core
         public bool ShowOtherLevelCamerasOnMap { get; set; } = false;
         /// <summary>2026-09-25：③ 底圖清單「顯示全部平面」。false（預設）＝只列有相機的樓層、每層一張偏好平面。</summary>
         public bool ShowAllPlansInBaseMap { get; set; } = false;
+
+        /// <summary>2026-09-25 Wave 3：一鍵出圖紙使用的圖框類型 ElementId（0＝自動：專案內最常用的圖框）。</summary>
+        public long SheetTitleBlockTypeId { get; set; } = 0;
+        /// <summary>2026-09-25 Wave 3：一鍵出圖紙時，圖框外接框向內留的邊界（mm）。</summary>
+        public double SheetMarginMm { get; set; } = 15.0;
     }
 }

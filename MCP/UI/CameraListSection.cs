@@ -114,8 +114,9 @@ namespace RevitMCP.UI
             {
                 // 2026-09-25：改樓層＝複製（不再就地改樓層）。字數比舊版短；300px 下估算放得下（未經實機像素驗證），
                 // 仍加省略號＋工具提示作為保險。
-                Text = "點名稱開 4 視圖・點數字直接修改・改樓層＝複製・右鍵更多",
-                ToolTip = "點名稱開 4 視圖・點數字直接修改（Enter 確定）・改樓層＝在同位置複製一台相機到該樓層・右鍵更多",
+                // 2026-09-25 Wave 3：縮短到約 20 字（11 px 字約 220 px），300 px 面板扣掉邊框仍放得下；完整說明在 ToolTip。
+                Text = "點名稱開 4 視圖・數字可直接改・右鍵更多",
+                ToolTip = "② 相機清單：點名稱＝一鍵 4 視圖・點數字直接修改（Enter 確定、Esc 還原）・改樓層＝在同位置複製一台相機到該樓層・右鍵＝出圖紙、視角版本、重新命名、複製等",
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 Foreground = CameraManagerTheme.SecondaryText,
                 FontFamily = CameraManagerTheme.UiFont,

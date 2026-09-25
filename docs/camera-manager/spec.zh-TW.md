@@ -1,6 +1,6 @@
 # 相機管理面板 規格書（現行行為）
 
-> 狀態：2026-09-25 現行版｜適用：Revit 2024（程式碼可編譯 R24–R26；R22/R23 有既有的 `CommandExecutor.LinkDisplay.cs` 編譯錯誤，與本功能無關）
+> 狀態：2026-09-25 現行版（Wave 3）｜適用：Revit 2024（程式碼可編譯 R24–R26；R22/R23 有既有的 `CommandExecutor.LinkDisplay.cs` 編譯錯誤，與本功能無關）
 > 本檔只寫「現在做什麼」。為什麼這樣決定 → [adr.zh-TW.md](adr.zh-TW.md)；何時改了什麼 → [changelog.zh-TW.md](changelog.zh-TW.md)；接下來做什麼、哪些還沒驗證 → [roadmap.zh-TW.md](roadmap.zh-TW.md)。
 > 除非另外註明，本檔描述的行為都**尚未經 Revit 實機完整驗證**（見 roadmap「未驗證清單」）。
 
@@ -10,13 +10,14 @@
 
 相機管理是 Revit 原生外掛功能：一個停靠面板（Dockable Pane）＋「一鍵 4 視圖」產生的 Key Plan 視圖。目標是讓使用者看得懂每台相機在哪、多高、朝哪，能直接調整、複製、出圖。
 
-它**不是** MCP App。為了自動測試，另外提供 6 個 MCP 工具呼叫同一套服務程式碼（§12）。
+它**不是** MCP App。為了自動測試，另外提供 8 個 MCP 工具呼叫同一套服務程式碼（§12）。
 
 | 問題 | 面板的回答 |
 |---|---|
 | 性質面板的 Eye Elevation 從內部原點量起，看不出離樓板多高 | 面板所有高度一律用「離樓板高度」；Eye Elevation 原始值只唯讀顯示 |
 | 相機平常在平面上看不到、不能列印 | Key Plan 平面／剖面上畫相機標記（真的 Revit 詳圖元素，可列印） |
 | 沒有總覽 | 清單＋③ 位置圖一次看到所有相機；每層一張「樓層總覽」平面把該層所有相機畫在一起（§10.10） |
+| 每台相機要手動排圖紙、試不同角度要另開相機 | 一鍵出圖紙（§10.13）；具名「視角版本」存在 .rvt、可切回（§11.5） |
 
 ## 2. 名詞
 
@@ -33,6 +34,8 @@
 | 相機標記 | B 型＝Key Plan 平面／剖面／樓層總覽上的註解標記（詳圖線＋填滿區域）；A 型＝一般模型族群「RevitMCP 相機標記」＋視野扇形（§10.11） |
 | 樓層總覽 | `Key Plan-總覽-<樓層名>`：一個建築樓層一張、畫該層所有相機的平面（§10.10） |
 | 室內／室外 | 眼睛在某個房間內＝室內，否則＝室外（§10.2） |
+| 相機圖紙 | `Key Plan-<相機名>`：一台相機一張、放透視＋Key Plan 三視圖的圖紙（§10.13） |
+| 視角版本 | 存在相機上的具名視角快照（例「A 案」），可還原（§11.5） |
 
 ## 3. 面板整體
 
@@ -43,6 +46,7 @@
 - 每個按鈕／下拉／勾選框的 ToolTip 都以「區號＋名稱」開頭（例：「④ 一鍵 4 視圖：…」）。
 - ② 與 ③ 之間有 `GridSplitter`；② 預設佔「清單＋位置圖」高度的 1/3（`CameraManagerSettings.CameraListFractionV3`），拖曳後記住。面板太矮時 ③ 先縮（最小 120px），② 其次（最小約 140px）。
 - 色彩、字型、圓角、間距集中在 `MCP/UI/CameraManagerTheme.cs`（palette B：背景 `#F3F7FC`、卡片 `#FFFFFF`、邊框 `#DCE6F2`、文字 `#1C2B3A`、accent `#3B82C4`，10px 圓角、8px 間距）。所有容器都有顯式背景。
+- 間距規則（2026-09-25 Wave 3）：區與區之間、④ 動作列按鈕之間、Popup 按鈕之間一律 8 px（`CameraManagerTheme.Spacing`）；① 工具列的小圖示按鈕群組內 4 px（300 px 寬時放得下）；卡片內距 8 px。
 - 選單與 Popup 一律主題色、點外面即關閉；每個選單只建立一次重複使用；從選單開 Popup 一律延到選單關閉後（Dispatcher Background）。所有處理器 try/catch＋log；不套任何 WPF `Style` 到型別不符的元素。
 
 ### 3.1 載入與執行緒模型
@@ -70,7 +74,7 @@
 | 水平角 ° | 右對齊 | ~50px |
 | 俯仰角 ° | 右對齊 | ~50px |
 
-清單下方一行次要色提示：「點名稱開 4 視圖・點數字直接修改・改樓層＝複製・右鍵更多」（省略號＋ToolTip 保險）。
+清單下方一行次要色提示：「點名稱開 4 視圖・數字可直接改・右鍵更多」（2026-09-25 Wave 3 縮短到約 20 字，11 px 約 220 px，300 px 寬放得下；省略號＋完整 ToolTip 保險，ToolTip 另說明改樓層＝複製與右鍵選單內容）。
 列 ToolTip 前綴顯示「室內／室外」，室外另附扇形半徑。
 
 ### 5.2 選用欄位（右鍵欄標題勾選；本機記憶；預設全部隱藏）
@@ -93,7 +97,7 @@
 
 ### 5.4 右鍵選單（清單列與地圖標記共用）
 
-一鍵 4 視圖／僅打開透視圖／重新命名…（主題化輸入 Popup，拒絕重名）／複製到其他樓層…／重設剖面位置。
+一鍵 4 視圖／僅打開透視圖／**一鍵出圖紙**（§10.13）／**視角版本 ▸**（§11.5）／重新命名…（主題化輸入 Popup，拒絕重名）／複製到其他樓層…／重設剖面位置。每個項目都有 ToolTip。
 
 ### 5.5 預設選取
 
@@ -163,7 +167,7 @@
 | 控制項 | 行為 |
 |---|---|
 | 一鍵 4 視圖（主鈕） | §10 |
-| ▾ 選單 | 等角範圍（整層（見上層樑）／只到當層（不含上層））、剖面方向（對齊房間長邊（預設）／沿視線）、室外範圍半徑… (m)（預設 60，有效 5–1000）、重設剖面位置、全部符合畫面、**更新樓層總覽**（有選取相機＝該相機的樓層；沒有選取＝所有有相機的樓層；只更新一張時自動開啟它，§10.10） |
+| ▾ 選單 | 等角範圍（整層（見上層樑）／只到當層（不含上層））、剖面方向（對齊房間長邊（預設）／沿視線）、室外範圍半徑… (m)（預設 60，有效 5–1000）、重設剖面位置、全部符合畫面、**更新樓層總覽**（有選取相機＝該相機的樓層；沒有選取＝所有有相機的樓層；只更新一張時自動開啟它，§10.10）、**一鍵出圖紙**（§10.13）、**圖紙圖框 ▸**（自動（最常用）＋專案內每個圖框類型，附已使用張數；本機設定 `SheetTitleBlockTypeId`，0＝自動；清單在「重新整理」時讀取） |
 | 並排 | 開啟選取相機的透視圖＋下方樓層一張**既有**平面（已開啟 > 已裁剪 > 名稱排序；找不到就報錯，不新建），先關閉其他視圖，再 `PostCommand(TileViews)` |
 | 還原 | 關閉並排額外開的視圖、切回之前的作用視圖；已被關掉的其他視圖不會重新打開 |
 | ⋯ 更多 | 複製到其他樓層…、**相機標記 ▸（B 詳圖（預設）／A 模型／A+B，§10.11）**、標記顏色 ▸（藍 `#3B82C4` 預設／紅 `#D9534F`／橘 `#E8A33D`／綠 `#4CAF7A`／紫 `#8E6BBF`／黑 `#1C2B3A`／自訂…）、Key Plan 樣式 ▸（淡化背景（預設）／原始）、⑤ 人視高預設值…、匯出 Excel、開啟預覽視窗 |
@@ -179,12 +183,12 @@
 
 ## 9. ⑥ 狀態列與雙向連動
 
-- ⑥ 顯示最近一次動作的結果或錯誤。
+- ⑥ 顯示最近一次動作的結果或錯誤，前面加 `HH:mm`；ToolTip＝全文。live sync 的輕量清單刷新**不**覆寫狀態列（只有「重新整理」或換文件時顯示「共 N 個透視相機」），所以動作結果會一直留著直到下一個動作（2026-09-25 Wave 3）。
 - 面板改數值 → 相機立即更新；Revit 內改相機（平面拖曳、改性質）→ `DocumentChanged` → 下一次 Idling 輕量刷新清單與 ③ 標記。自己的修改以抑制旗標避免迴圈。
 - **標記即時更新**：`DocumentChanged` 收集被修改的透視 `View3D`（只在 live sync 已啟用時；事件內不改模型）→ 面板 `DispatcherTimer` 去抖 500ms、同相機合併 → 佇列工作 `CameraKeyPlanService.UpdateMarkersForCameras`：單一交易「更新相機標記」只重畫該相機 Key Plan 平面／剖面的標記（含只留本相機剖面、樓層記號），**不動**裁剪框、剖面範圍、等角 Section Box，也不並排。一鍵 4 視圖進行中時延後再試。
 - 同一個去抖交易（2026-09-25 Wave 2）也重畫這些相機在**樓層總覽**上的標記（先從每張總覽刪除、再畫到目前樓層的總覽；該層沒有總覽不新建），並在相機標記含 A 時同步 **A 型標記**（§10.11）。總覽／A 標記存在時，沒有 Key Plan 的相機也會處理。
 - **拖 A 標記 → 相機**（§10.12）與**刪除後清孤兒標記**也排進同一個 500ms 去抖計時器。
-- 回饋迴圈防護：`IsUpdatingMarkers` 旗標＋交易名稱比對（忽略「更新相機標記」「更新 Key Plan 樓層線」「更新相機 A 標記」「載入相機標記族群」「更新樓層總覽」「記錄相機放置平面」；**不**忽略「由標記更新相機」，因為相機改了之後 B 標記要跟著重畫）。
+- 回饋迴圈防護：`IsUpdatingMarkers` 旗標＋交易名稱比對（忽略「更新相機標記」「更新 Key Plan 樓層線」「更新相機 A 標記」「載入相機標記族群」「更新樓層總覽」「記錄相機放置平面」「建立相機圖紙」「儲存相機視角版本」「刪除相機視角版本」；**不**忽略「由標記更新相機」與「還原相機視角：<名稱>」，因為相機改了之後標記要跟著重畫）。
 - **樓層記號同步**：主體 Level 改高程／改名 → 去抖排入交易「更新 Key Plan 樓層線」，依目前 Level 值重畫剖面的簡化樓層記號（§10.5.5）。
 - 透視圖內純滑鼠導覽是否觸發通知仍未證實，所以保留「從透視圖同步」按鈕。
 
@@ -305,9 +309,10 @@ ES `RevitMCP_CameraSectionStateV2` 記下上次程式產生剖面時的原點與
 
 | Schema | GUID | 欄位 | 貼在 |
 |---|---|---|---|
-| `RevitMCP_CameraKeyPlanLink` | `6C9E2F0A-6E2C-4E7C-9C8B-2F6E9B0F1A2D` | `CameraUniqueId`、`Role`（Plan／Section／Iso／MarkerPlan／MarkerSection／MarkerName／MarkerA／MarkerAFan／Overview） | Key Plan 視圖、標記元素、A 型族群實例與扇形、樓層總覽（Role＝Overview 時 `CameraUniqueId` 欄位存的是**樓層** UniqueId） |
+| `RevitMCP_CameraKeyPlanLink` | `6C9E2F0A-6E2C-4E7C-9C8B-2F6E9B0F1A2D` | `CameraUniqueId`、`Role`（Plan／Section／Iso／MarkerPlan／MarkerSection／MarkerName／MarkerA／MarkerAFan／Overview／Sheet） | Key Plan 視圖、標記元素、A 型族群實例與扇形、樓層總覽（Role＝Overview 時 `CameraUniqueId` 欄位存的是**樓層** UniqueId）、相機圖紙（Role＝Sheet） |
 | `RevitMCP_CameraSectionStateV2` | `5B2D8E61-3C4A-4F7B-A1D9-7E0C6B3F2A58` | `OriginX/Y/Z`（Length/Feet）、`ForwardX/Y`（Number/General） | Key Plan 剖面 |
 | `RevitMCP_CameraSourcePlan` | 見 `CameraSourcePlanStore.cs` | 單一 string（放置平面） | 相機 View3D |
+| `RevitMCP_CameraViewVersions` | `A8D12364-5CAE-46E8-9548-41728EC43746` | 單一 string `VersionsJson`（JSON 陣列，§11.5） | 相機 View3D |
 
 Schema 在交易外先建；剖面狀態讀寫失敗只記 log，不中斷建立視圖。已發佈的 GUID 與欄位定義不可再改。
 
@@ -343,6 +348,20 @@ Schema 在交易外先建；剖面狀態讀寫失敗只記 log，不中斷建立
 - 迴圈防護：相機改了會照常觸發 B 標記／A 標記重畫（「更新相機標記」交易），那次 A 實例已在正確位置，不會再動；即使動了也是自己的交易名稱，`DocumentChanged` 會忽略。
 - 面板沒按過「重新整理」（live sync 未啟用）時不做反向同步。
 
+### 10.13 一鍵出圖紙 `Key Plan-<相機名>`（2026-09-25 Wave 3）
+
+實作：`CameraKeyPlanService.CreateOrUpdateCameraSheet`（`MCP/Core/CameraKeyPlanService.Sheet.cs`）。入口：④ ▾「一鍵出圖紙」、清單列／地圖標記右鍵「一鍵出圖紙」、MCP `create_camera_sheet`。完成後面板自動開啟該圖紙。
+
+1. **先確保有 Key Plan**：相機缺平面／剖面／等角任一張 → 先跑一鍵 4 視圖（不並排，獨立交易「建立相機 Key Plan」）。
+2. **圖框類型**：MCP 參數 `titleBlockTypeId` → 面板設定「圖紙圖框」→ 專案內**已放置次數最多**的圖框類型 → 第一個圖框類型（名稱排序）→ 專案沒有圖框＝不放圖框。既有相機圖紙的圖框類型與選擇不同時換類型（不動位置）。
+3. **圖紙**：以 ES（`CameraKeyPlanLink`，`CameraUniqueId`＝相機、Role＝`Sheet`）找本相機的圖紙；沒有就 `ViewSheet.Create`（圖紙編號由 Revit 自動給），名稱 `Key Plan-<相機名>`（相機改名後重跑會跟著改）。不以名稱比對找既有圖紙（避免接管使用者自己的同名圖紙）。
+4. **可繪區**：圖框實例在圖紙上的外接框（`get_BoundingBox(sheet)`）四邊各內縮 `SheetMarginMm`（本機設定，預設 15 mm）；沒有圖框或讀不到＝A3 橫式 420×297 mm 內縮同樣邊界。**不**扣除圖框標題欄——標題欄在右側或下方的圖框，右欄視埠可能壓到標題欄（使用者實測項目）。
+5. **版面**：左格＝可繪區左側 60% 寬、全高，放透視圖；右欄＝其餘寬度，上下三等分，由上而下放平面、剖面、等角；格子之間留 6 mm（給視埠標題）。每個新視埠 `Viewport.Create` 在格子中心，再 `SetBoxCenter` 置中。
+6. **不改比例**：只調整視埠位置。平面／剖面比例沿用一鍵 4 視圖挑的比例；透視圖沒有比例，依裁剪框原樣放置。視埠外框比格子大時照放並回報 `Overflow`（狀態列與 MCP `Warnings` 列出尺寸），由使用者手動調整。
+7. **視埠類型**：沿用專案既有、「顯示標題」不是「否」的視埠類型中最常用者（`VIEWPORT_ATTR_SHOW_LABEL` 先讀顯示字串，取不到才以整數 0＝否判斷；整數對應未查證）；都沒有就沿用 Revit 預設類型、不新建。挑選紀錄寫 log 與 MCP 回傳 `ViewportTypeLog`。
+8. **一張視圖只能在一張圖紙上**：視圖已在本相機圖紙上＝保留原位（不移動，尊重手動調整）；在其他圖紙上＝略過並回報「已在其他圖紙「編號 - 名稱」上」；`Viewport.CanAddViewToSheet` 為 false 也略過並回報。
+9. 單一交易「建立相機圖紙」（`DocumentChanged` 忽略這個交易名稱）；整體失敗回滾整筆並回報原因。
+
 ## 11. 其他功能
 
 ### 11.1 複製相機到其他樓層
@@ -359,13 +378,23 @@ ClosedXML；欄位：名稱、樓層、離樓板高度、X/Y、水平角、俯�
 
 獨立無模式視窗（`MCP/UI/CameraPreviewWindow.cs`），兩個 `PreviewControl`（透視圖＋所在樓層平面）；關閉時 `Dispose()`。文件關閉與 Revit 關閉時集中強制關閉所有預覽視窗。
 
+### 11.5 視角版本（2026-09-25 Wave 3）
+
+實作：`MCP/Core/CameraKeyPlanService.Versions.cs`。入口：清單列／地圖標記右鍵「視角版本 ▸」、MCP `camera_version`。
+
+- **內容**：名稱、儲存時間、眼睛 XYZ、前方向、上方向、裁剪框啟用、裁剪框 Min/Max＋Transform（原點與三軸）、遠裁剪距離與「遠裁剪啟用」參數值。長度一律 feet（Revit 內部單位）。
+- **儲存位置**：相機 View3D 上的 ES `RevitMCP_CameraViewVersions`（單一 string 欄位 `VersionsJson`，JSON 陣列，依儲存順序）。存在 .rvt，同事開檔也能切換（D-030）。
+- **右鍵選單**：`視角版本 ▸` → 「儲存目前視角…」（主題化名稱 Popup，預設建議「A 案」「B 案」…；1–60 字；同名＝覆蓋）／每個版本名稱一項（點一下＝還原）／「刪除版本 ▸」逐一列出。選單每次開啟時依該列的版本名稱重建（版本名稱在清單快照時讀取）。
+- **儲存**：交易「儲存相機視角版本」，只寫 ES。**刪除**：交易「刪除相機視角版本」，只移除 ES 裡那一筆，不動任何模型元素。兩者都在 `DocumentChanged` 忽略名單內，完成後面板自己輕量刷新清單。
+- **還原**：單一交易「還原相機視角：<名稱>」——`SetOrientation`（眼睛／上方向／前方向）→ 裁剪框啟用與 `CropBox`（Transform＋Min/Max）→ 遠裁剪啟用與距離。裁剪框或遠裁剪還原失敗只列為警告（眼睛與方向照常套用）；相機視圖被鎖定時拒絕並提示。相機被修改後照常經 `DocumentChanged` → 500 ms 去抖 → 「更新相機標記」（B／A 型標記、樓層總覽標記；§9）。Key Plan 的裁剪框／剖面範圍**不**自動重算（同 §11.4），要重算再按一鍵 4 視圖。
+
 ### 11.4 不做的事
 
 - Project Browser「顯示相機」在平面上的對應功能：查無公開 API／Postable Command，不以暫時元素假裝。
 - Key Plan 不隨相機移動自動重算範圍（只重畫標記，§9）；要重算請再按一鍵 4 視圖。樓層總覽的裁剪也只在「更新樓層總覽」／一鍵 4 視圖時重算。
 - 拖 B 型詳圖標記不會移動相機（§10.12）。
 
-## 12. MCP 測試工具（Wave 1＋Wave 2）
+## 12. MCP 測試工具（Wave 1–3）
 
 C#：`MCP/Core/Commands/CommandExecutor.CameraManager.cs`；TS：`MCP-Server/src/tools/camera-manager-tools.ts`（`full`、`architect` profile）。走既有 MCP ExternalEvent 路徑，不經面板佇列；呼叫的服務方法不含 WPF 型別。長度輸出為內部原點座標 mm。
 
@@ -376,16 +405,18 @@ C#：`MCP/Core/Commands/CommandExecutor.CameraManager.cs`；TS：`MCP-Server/src
 | `set_camera_pose` | 寫入 | `cameraId?`＋任一：`heightAboveLevelCm`、`yawDeg`、`pitchDeg`、`planXcm`、`planYcm`、`farClipCm` | `BuildEditRequestFromRow`＋`ApplyDetailEdit` |
 | `copy_camera_to_level` | 寫入 | `cameraId?`、`levelId` 或 `levelName` | `CopyCameraToLevels` |
 | `run_camera_overview` | 寫入（Wave 2） | `levelId` 或 `levelName`，或 `all=true`（所有有相機的樓層） | `CreateOrUpdateOverviews`（§10.10）；回傳每層視圖 id、名稱、是否新建、相機數與名稱、底圖來源與理由、範圍模式、裁剪外接框 mm、比例、依角色的標記元素數 |
+| `create_camera_sheet` | 寫入（Wave 3） | `cameraId?`、`titleBlockTypeId?`（省略＝面板設定→最常用） | `CreateOrUpdateCameraSheet`（§10.13）；回傳圖紙 id／編號／名稱、是否新建、是否先跑了一鍵 4 視圖、圖框與來源、可繪區、視埠類型挑選紀錄、每個視埠（角色、視圖、視埠 id、新放置／保留原位／略過、中心與尺寸 mm、格子、是否超出）、警告 |
+| `camera_version` | list 唯讀；save／restore／delete 寫入（Wave 3） | `cameraId?`、`action`（list 預設／save／restore／delete）、`name`（save／restore／delete 必填） | `SaveVersion`／`RestoreVersion`／`DeleteVersion`／`ReadVersions`（§11.5）；回傳目前姿態與全部版本（眼睛 mm、水平角、俯仰角、裁剪框尺寸、遠裁剪） |
 | `get_view_extents` | 唯讀（通用） | `viewId?` | 直接讀視圖：類型、比例、裁剪框、註解裁剪、Section Box、遠裁剪、Display Model、詳細等級、樣板、隱藏類別、連結顯示設定、視圖專屬元素計數 |
 
-`cameraId` 省略＝作用中透視圖；可給相機 View3D 或平面上的相機元件。沒有任何工具會刪除使用者元素（一鍵 4 視圖／樓層總覽只刪除自己先前畫的標記）。A 型標記沒有獨立的 MCP 工具：相機標記設定含 A 時，`run_camera_keyplan` 會一併同步，回傳 `AMarker`（同步摘要，未啟用 A＝null）；`OverviewViewId`＝自動更新的樓層總覽 id。
+`cameraId` 省略＝作用中透視圖；可給相機 View3D 或平面上的相機元件。沒有任何工具會刪除使用者元素（一鍵 4 視圖／樓層總覽只刪除自己先前畫的標記；`camera_version` delete 只移除 ES 裡的一筆版本資料）。MCP 標註：`create_camera_sheet`、`camera_version` 依 `annotations.ts` 預設規則為「寫入、非破壞性」（`camera_` 不是唯讀前綴；不在破壞性白名單）。A 型標記沒有獨立的 MCP 工具：相機標記設定含 A 時，`run_camera_keyplan` 會一併同步，回傳 `AMarker`（同步摘要，未啟用 A＝null）；`OverviewViewId`＝自動更新的樓層總覽 id。
 
 ## 13. 儲存位置
 
 | 資料 | 存在哪 | 誰看得到 |
 |---|---|---|
-| 相機、Key Plan 視圖、樓層總覽、標記、樓層記號、A 型族群與實例、ES 連結 | .rvt | 所有開這個檔的人 |
-| 面板設定（人視高、欄位顯示、分割比例、等角範圍、剖面方向、室外半徑、標記顏色、Key Plan 樣式、相機標記型式、底圖清單模式…） | `ServiceSettings.CameraManager`（本機 JSON） | 只有本機 |
+| 相機、Key Plan 視圖、樓層總覽、相機圖紙、標記、樓層記號、A 型族群與實例、視角版本、ES 連結 | .rvt | 所有開這個檔的人 |
+| 面板設定（人視高、欄位顯示、分割比例、等角範圍、剖面方向、室外半徑、標記顏色、Key Plan 樣式、相機標記型式、底圖清單模式、圖紙圖框、圖紙邊界…） | `ServiceSettings.CameraManager`（本機 JSON） | 只有本機 |
 
 ## 14. 技術約束
 
@@ -405,6 +436,8 @@ C#：`MCP/Core/Commands/CommandExecutor.CameraManager.cs`；TS：`MCP-Server/src
 | `MCP/Core/CameraKeyPlanService.cs` | 一鍵 4 視圖、標記、表現法、ES |
 | `MCP/Core/CameraKeyPlanService.Overview.cs` | 樓層總覽（§10.10） |
 | `MCP/Core/CameraKeyPlanService.MarkerA.cs` | A 型族群建立／載入、A 標記同步、孤兒清理、拖標記 → 相機（§10.11–10.12） |
+| `MCP/Core/CameraKeyPlanService.Sheet.cs` | 一鍵出圖紙、圖框／視埠類型挑選（§10.13） |
+| `MCP/Core/CameraKeyPlanService.Versions.cs` | 視角版本 ES 讀寫、還原（§11.5） |
 | `MCP/Core/CameraMath.cs` | 樓層、角度、FOV、方向數學 |
 | `MCP/Core/CameraManagerModels.cs` | 資料模型、`BaseMapPlanChooser`、設定 |
 | `MCP/Core/CameraManagerEventQueue.cs`、`CameraManagerDiagnostics.cs`、`CameraViewZoomService.cs`、`CameraSourcePlanStore.cs`、`SectionBoxLevelHelper.cs` | 佇列、診斷、並排後縮放、放置平面、Section Box 共用 |

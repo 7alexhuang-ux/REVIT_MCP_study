@@ -151,7 +151,7 @@ namespace RevitMCP.UI
                 Background = CameraManagerTheme.PaneTitleBackground,
                 BorderBrush = CameraManagerTheme.BorderBrush,
                 BorderThickness = new Thickness(0, 0, 0, 1),
-                Padding = new Thickness(CameraManagerTheme.Spacing, 4, CameraManagerTheme.Spacing, 6)
+                Padding = new Thickness(CameraManagerTheme.Spacing, CameraManagerTheme.Spacing / 2, CameraManagerTheme.Spacing, CameraManagerTheme.Spacing)
             };
             DockPanel headerRow = new DockPanel { LastChildFill = true };
 
@@ -168,7 +168,7 @@ namespace RevitMCP.UI
             DockPanel.SetDock(syncButton, Dock.Right);
             headerRow.Children.Add(syncButton);
 
-            Button refreshButton = CameraManagerTheme.IconButton("重新整理", "① 重新整理：重新讀取目前文件的相機清單");
+            Button refreshButton = CameraManagerTheme.IconButton("重新整理", "① 重新整理：重新讀取目前文件的相機清單並重新匯出 ③ 位置圖底圖");
             refreshButton.Margin = new Thickness(4, 0, 0, 0);
             refreshButton.Click += (s, e) => SafeUiAction(RefreshAll, "Refresh");
             DockPanel.SetDock(refreshButton, Dock.Right);
@@ -195,7 +195,7 @@ namespace RevitMCP.UI
             _listSection.Height = double.NaN;
             Border gridCard = CameraManagerTheme.CardWrap(_listSection, new Thickness(0, 0, 0, 2));
             gridCard.Padding = new Thickness(0); // DataGrid 自己有 CellStyle 內距，卡片不用再加一層
-            WpfGrid listArea = WrapWithAreaTitle("② 相機清單", gridCard, new Thickness(0, 4, 0, 0));
+            WpfGrid listArea = WrapWithAreaTitle("② 相機清單", gridCard, new Thickness(0, CameraManagerTheme.Spacing, 0, 0));
             WpfGrid.SetRow(listArea, 1);
             _rootGrid.Children.Add(listArea);
 
@@ -216,24 +216,24 @@ namespace RevitMCP.UI
             _rootGrid.Children.Add(splitter);
 
             // ── 3：③ 位置圖（吃掉剩下所有高度） ──
-            Border mapCard = CameraManagerTheme.CardWrap(_keyPlanSection, new Thickness(0, 2, 0, 4));
+            Border mapCard = CameraManagerTheme.CardWrap(_keyPlanSection, new Thickness(0, 2, 0, CameraManagerTheme.Spacing));
             mapCard.Padding = new Thickness(2);
             WpfGrid mapArea = WrapWithAreaTitle("③ 位置圖", mapCard, new Thickness(0, 2, 0, 0));
             WpfGrid.SetRow(mapArea, 3);
             _rootGrid.Children.Add(mapArea);
 
             // ── 4：④ 視圖操作（單列） ──
-            DockPanel actionRow = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 4) };
+            DockPanel actionRow = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, CameraManagerTheme.Spacing) };
 
-            StackPanel splitButton = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 6, 0) };
+            StackPanel splitButton = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, CameraManagerTheme.Spacing, 0) };
             _oneClickFourViewsButton = CameraManagerTheme.PrimaryButton("一鍵 4 視圖");
-            _oneClickFourViewsButton.ToolTip = "④ 一鍵 4 視圖：建立或更新 Key Plan 平面／剖面／等角並與透視圖並排（會先關閉其他已開啟的視圖）";
+            _oneClickFourViewsButton.ToolTip = "④ 一鍵 4 視圖：建立或更新選取相機的 Key Plan 平面／剖面／等角，與透視圖並排（會先關閉其他已開啟的視圖）；同時更新該樓層的樓層總覽";
             _oneClickFourViewsButton.Click += (s, e) => SafeUiAction(DoOneClickFourViews, "OneClickFourViews");
             splitButton.Children.Add(_oneClickFourViewsButton);
             _oneClickDropButton = CameraManagerTheme.PrimaryButton("▾");
             _oneClickDropButton.Padding = new Thickness(6, 5, 6, 5);
             _oneClickDropButton.Margin = new Thickness(1, 0, 0, 0);
-            _oneClickDropButton.ToolTip = "④ 一鍵 4 視圖選項：等角範圍、剖面方向、重設剖面位置、全部符合畫面";
+            _oneClickDropButton.ToolTip = "④ 一鍵 4 視圖選項：等角範圍、剖面方向、室外範圍半徑、重設剖面位置、全部符合畫面、更新樓層總覽、一鍵出圖紙、圖紙圖框";
             _oneClickDropButton.Click += (s, e) => SafeUiAction(() => OpenMenu(EnsureFourViewsMenu(), _oneClickFourViewsButton), "FourViewsDrop");
             splitButton.Children.Add(_oneClickDropButton);
             DockPanel.SetDock(splitButton, Dock.Left);
@@ -244,8 +244,8 @@ namespace RevitMCP.UI
             actionRow.Children.Add(sideBySide);
 
             _moreButton = CameraManagerTheme.SecondaryButton("⋯ 更多");
-            _moreButton.ToolTip = "④ 更多：複製到其他樓層、標記顏色、⑤ 人視高預設值、匯出 Excel、開啟預覽視窗";
-            _moreButton.Margin = new Thickness(6, 0, 0, 0);
+            _moreButton.ToolTip = "④ 更多：複製到其他樓層、相機標記（B／A／A+B）、標記顏色、Key Plan 樣式、⑤ 人視高預設值、匯出 Excel、開啟預覽視窗";
+            _moreButton.Margin = new Thickness(CameraManagerTheme.Spacing, 0, 0, 0);
             _moreButton.Click += (s, e) => SafeUiAction(() => OpenMenu(EnsureMoreMenu(), _moreButton), "More");
             DockPanel.SetDock(_moreButton, Dock.Left);
             actionRow.Children.Add(_moreButton);
@@ -266,7 +266,7 @@ namespace RevitMCP.UI
                 Background = CameraManagerTheme.StatusBarBackground,
                 BorderBrush = CameraManagerTheme.BorderBrush,
                 BorderThickness = new Thickness(0, 1, 0, 0),
-                Padding = new Thickness(CameraManagerTheme.Spacing, 6, CameraManagerTheme.Spacing, 6)
+                Padding = new Thickness(CameraManagerTheme.Spacing, CameraManagerTheme.Spacing / 2, CameraManagerTheme.Spacing, CameraManagerTheme.Spacing / 2)
             };
             _statusText = new TextBlock
             {
@@ -425,7 +425,7 @@ namespace RevitMCP.UI
         {
             if (_fourViewsMenu != null) return _fourViewsMenu;
             _fourViewsMenu = NewThemedMenu();
-            const string isoTip = "④ 等角範圍：整層（見上層樑）＝切在上層樓板底 −10mm；只到當層（不含上層）＝切在上層樓板底與上層樑底較低者 −10mm";
+            const string isoTip = "④ 等角範圍（室內相機）：整層（見上層樑）＝頂切在 min(房間頂 +0.3 m, 上層樓板底 −10 mm)；只到當層（不含上層）＝再與上層樑底 −10 mm 取小。室外相機不做樓層切（下次一鍵 4 視圖套用）";
             _isoFullItem = NewMenuItem("等角：整層（見上層樑）", isoTip, () => SetIsoExtentMode(CameraIsoExtentMode.FullWithUpperBeams), "IsoFull");
             _isoLevelItem = NewMenuItem("等角：只到當層（不含上層）", isoTip, () => SetIsoExtentMode(CameraIsoExtentMode.CurrentLevelTopOnly), "IsoLevel");
             _isoFullItem.IsCheckable = false; _isoLevelItem.IsCheckable = false; // 自行維護單選勾號
@@ -433,7 +433,7 @@ namespace RevitMCP.UI
             _fourViewsMenu.Items.Add(_isoLevelItem);
             _fourViewsMenu.Items.Add(new Separator());
             // 2026-09-25（使用者拍板）：剖面方向單選（存在相機設定，下次一鍵 4 視圖／重設剖面位置套用）
-            const string secTip = "④ 剖面方向：對齊房間長邊＝剖面沿眼睛所在房間的長軸、通過眼睛（預設）；沿視線＝剖面包含水平視線（側視）";
+            const string secTip = "④ 剖面方向：對齊房間長邊（預設）＝剖面沿眼睛所在房間的長軸、通過畫面中心（中心線上半個扇形半徑處）；沿視線＝剖面包含畫面中心線（側視）。室外相機一律沿視線（下次一鍵 4 視圖／重設剖面位置套用）";
             _secRoomAxisItem = NewMenuItem("剖面方向：對齊房間長邊（預設）", secTip, () => SetSectionOrientationMode(CameraSectionOrientationMode.AlongRoomLongAxis), "SectionRoomAxis");
             _secSightItem = NewMenuItem("剖面方向：沿視線", secTip, () => SetSectionOrientationMode(CameraSectionOrientationMode.AlongSightLine), "SectionSightLine");
             _secRoomAxisItem.IsCheckable = false; _secSightItem.IsCheckable = false;
@@ -456,6 +456,13 @@ namespace RevitMCP.UI
             _fourViewsMenu.Items.Add(NewMenuItem("更新樓層總覽",
                 "④ 更新樓層總覽：建立／更新「Key Plan-總覽-<樓層名>」——該層所有相機的標記畫在同一張淡化平面上；有選取相機＝只更新該相機的樓層，沒有選取＝所有有相機的樓層",
                 DoUpdateOverview, "UpdateOverview"));
+            _fourViewsMenu.Items.Add(new Separator());
+            // 2026-09-25 Wave 3：一鍵出圖紙＋圖紙圖框（本機設定）
+            _fourViewsMenu.Items.Add(NewMenuItem("一鍵出圖紙", SheetTip, DoCreateSheet, "CreateSheet"));
+            _titleBlockRoot = NewMenuItem("圖紙圖框", TitleBlockTip, null, "TitleBlock");
+            _fourViewsMenu.Items.Add(_titleBlockRoot);
+            _fourViewsMenu.Opened += (s, e) => SafeUiAction(RebuildTitleBlockMenu, "TitleBlockMenuOpened");
+            RebuildTitleBlockMenu();
             _fourViewsMenu.Opened += (s, e) => SafeUiAction(UpdateIsoMenuChecks, "IsoMenuOpened");
             UpdateIsoMenuChecks();
             return _fourViewsMenu;
@@ -509,7 +516,7 @@ namespace RevitMCP.UI
             _moreMenu.Items.Add(NewMenuItem("複製到其他樓層…", "④ 複製到其他樓層：把選取相機複製到勾選的樓層",
                 () => OpenPopupAfterMenu(() => _presetsSection.OpenCopyToLevelsPopup(_moreButton), "CopyToLevelsPopup"), "CopyToLevels"));
 
-            const string colorTip = "④ 標記顏色：改變 Key Plan 平面／剖面上相機標記線的顏色（也可在 物件型式 → 線 → 相機標記線 修改）";
+            const string colorTip = "④ 標記顏色：改變 B 型相機標記（Key Plan 平面／剖面、樓層總覽）的線與扇形／楔形填滿顏色（線色也可在 物件型式 → 線 → 相機標記線 修改）";
             WpfMenuItem colorRoot = NewMenuItem("標記顏色", colorTip, null, "MarkerColor");
             foreach (var preset in MarkerColorPresets)
             {
@@ -559,7 +566,7 @@ namespace RevitMCP.UI
             _moreMenu.Items.Add(modeRoot);
 
             // 2026-09-25：Key Plan 樣式 ▸ 淡化背景（預設）／原始（存在相機設定，下次一鍵 4 視圖套用）
-            const string styleTip = "④ Key Plan 樣式：淡化背景＝模型半色調＋隱藏軸線/樓層/尺寸/標籤等雜項註解＋自動比例；原始＝還原（下次一鍵 4 視圖套用）";
+            const string styleTip = "④ Key Plan 樣式：淡化背景＝主要構件剖切線黑、投影線中灰，其他模型類別半色調，外牆加粗（類別／元素取代，不用 Display Model 半色調）＋隱藏軸線／尺寸／標籤等雜項註解＋剖面樓層改畫簡化記號＋自動比例；原始＝還原（下次一鍵 4 視圖套用）";
             WpfMenuItem styleRoot = NewMenuItem("Key Plan 樣式", styleTip, null, "KeyPlanStyle");
             _keyPlanFadedItem = NewMenuItem("淡化背景（預設）", styleTip, () => SetKeyPlanFadedStyle(true), "KeyPlanStyleFaded");
             _keyPlanOriginalItem = NewMenuItem("原始", styleTip, () => SetKeyPlanFadedStyle(false), "KeyPlanStyleOriginal");
@@ -835,23 +842,30 @@ namespace RevitMCP.UI
             {
                 // 2026-09-24 第四輪：只建立一次、重複使用（過去每次右鍵都 new 一個 ContextMenu）。
                 _cameraMenu = NewThemedMenu();
-                _cameraMenu.Items.Add(NewMenuItem("一鍵 4 視圖", null, () => RunConfiguredOpenAction(_cameraMenuRow), "CtxFourViews"));
-                _cameraMenu.Items.Add(NewMenuItem("僅打開透視圖", null, () =>
+                _cameraMenu.Items.Add(NewMenuItem("一鍵 4 視圖", "一鍵 4 視圖：建立或更新這台相機的 Key Plan 平面／剖面／等角並並排", () => RunConfiguredOpenAction(_cameraMenuRow), "CtxFourViews"));
+                _cameraMenu.Items.Add(NewMenuItem("僅打開透視圖", "僅打開透視圖：切換到這台相機的透視圖，不建立 Key Plan", () =>
                 {
                     CameraRow r = _cameraMenuRow; if (r == null) return;
                     _listSection.SelectByViewId(r.ViewId); JumpToView(r.ViewId);
                 }, "CtxOpenOnly"));
+                _cameraMenu.Items.Add(NewMenuItem("一鍵出圖紙", SheetTip, () =>
+                {
+                    CameraRow r = _cameraMenuRow; if (r == null) return;
+                    _listSection.SelectByViewId(r.ViewId); DoCreateSheet();
+                }, "CtxSheet"));
+                _versionRoot = NewMenuItem("視角版本", "視角版本：把目前視角存成具名版本（存在 .rvt，同事也看得到），之後可一鍵切回", null, "CtxVersions");
+                _cameraMenu.Items.Add(_versionRoot);
                 _cameraMenu.Items.Add(new Separator());
-                _cameraMenu.Items.Add(NewMenuItem("重新命名…", null,
+                _cameraMenu.Items.Add(NewMenuItem("重新命名…", "重新命名：改相機視圖名稱（拒絕重名）",
                     () => OpenPopupAfterMenu(() => ShowRenamePopup(_cameraMenuRow, _cameraMenuTarget), "RenamePopup"), "CtxRename"));
-                _cameraMenu.Items.Add(NewMenuItem("複製到其他樓層…", null, () =>
+                _cameraMenu.Items.Add(NewMenuItem("複製到其他樓層…", "複製到其他樓層：同位置、同離樓板高度與方向，複製到勾選的樓層（原相機不動）", () =>
                 {
                     CameraRow r = _cameraMenuRow; if (r == null) return;
                     _listSection.SelectByViewId(r.ViewId);
                     UIElement t = _cameraMenuTarget;
                     OpenPopupAfterMenu(() => _presetsSection.OpenCopyToLevelsPopup(t), "CopyToLevelsPopup");
                 }, "CtxCopy"));
-                _cameraMenu.Items.Add(NewMenuItem("重設剖面位置", null, () =>
+                _cameraMenu.Items.Add(NewMenuItem("重設剖面位置", "重設剖面位置：依目前剖面方向設定重算並覆蓋 Key Plan 剖面（會蓋掉手動調整）", () =>
                 {
                     CameraRow r = _cameraMenuRow; if (r == null) return;
                     _listSection.SelectByViewId(r.ViewId); DoResetSectionToSightLine();
@@ -860,6 +874,7 @@ namespace RevitMCP.UI
                 _cameraMenu.Closed += (s, e) => SafeUiAction(() => { _cameraMenu.PlacementTarget = null; }, "CtxClosed");
             }
 
+            RebuildVersionMenu(row);
             if (_cameraMenu.IsOpen) _cameraMenu.IsOpen = false;
             _cameraMenu.PlacementTarget = placementTarget;
             _cameraMenu.Placement = PlacementMode.MousePoint;
@@ -1029,6 +1044,290 @@ namespace RevitMCP.UI
 
             WpfGrid.SetRow(_outdoorRadiusPopup, 0);
             _rootGrid.Children.Add(_outdoorRadiusPopup);
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // 2026-09-25 Wave 3：一鍵出圖紙、圖紙圖框、視角版本
+        // ══════════════════════════════════════════════════════════
+
+        private const string SheetTip = "一鍵出圖紙：建立或更新圖紙「Key Plan-<相機名>」——左側約 60% 放透視圖，右欄由上而下放 Key Plan 平面／剖面／等角；只移動視埠位置、不改比例；相機還沒有 Key Plan 時先跑一鍵 4 視圖；已在其他圖紙上的視圖會略過並在 ⑥ 說明";
+        private const string TitleBlockTip = "④ 圖紙圖框：一鍵出圖紙使用的圖框類型（本機記憶）；自動＝專案內最常用的圖框。改了之後再按一鍵出圖紙，既有相機圖紙的圖框也會換成這個類型";
+        private List<TitleBlockOption> _titleBlocks = new List<TitleBlockOption>();
+        private WpfMenuItem _titleBlockRoot, _versionRoot;
+        private bool _sheetInFlight;
+
+        private void RebuildTitleBlockMenu()
+        {
+            if (_titleBlockRoot == null) return;
+            _titleBlockRoot.Items.Clear();
+            long cur = ConfigManager.Instance.Settings.CameraManager.SheetTitleBlockTypeId;
+            bool curExists = cur > 0 && _titleBlocks.Any(t => t.Id == cur);
+            WpfMenuItem auto = NewMenuItem("自動（最常用）", TitleBlockTip, () => SetSheetTitleBlock(0, "自動（最常用）"), "TitleBlockAuto");
+            auto.IsChecked = !curExists;
+            _titleBlockRoot.Items.Add(auto);
+            if (_titleBlocks.Count == 0)
+            {
+                WpfMenuItem none = NewMenuItem(_armed ? "（專案內沒有圖框類型）" : "（按「重新整理」後列出）", TitleBlockTip, null, "TitleBlockNone");
+                none.IsEnabled = false;
+                _titleBlockRoot.Items.Add(none);
+                return;
+            }
+            _titleBlockRoot.Items.Add(new Separator());
+            foreach (TitleBlockOption tb in _titleBlocks)
+            {
+                long id = tb.Id;
+                string name = tb.Name;
+                WpfMenuItem item = NewMenuItem(name + (tb.UseCount > 0 ? $"（{tb.UseCount} 張）" : ""), TitleBlockTip, () => SetSheetTitleBlock(id, name), "TitleBlockPick");
+                item.IsChecked = curExists && id == cur;
+                _titleBlockRoot.Items.Add(item);
+            }
+        }
+
+        private void SetSheetTitleBlock(long id, string name)
+        {
+            ConfigManager.Instance.Settings.CameraManager.SheetTitleBlockTypeId = id;
+            ConfigManager.Instance.SaveSettings();
+            Logger.Info($"相機管理面板：圖紙圖框 → {name}（id={id}）");
+            SetStatus($"圖紙圖框：{name}——下次一鍵出圖紙套用。");
+        }
+
+        private void DoCreateSheet()
+        {
+            CameraRow row = GetPrimarySelectedRow();
+            if (row == null) { SetStatus("請先在清單選取一個相機。"); return; }
+            if (_sheetInFlight || _fourViewsInFlight) { SetStatus("正在處理中，請稍候..."); return; }
+            _sheetInFlight = true;
+            ElementId camId = row.ViewId;
+            string camName = row.Name;
+            SetStatus($"為「{camName}」建立圖紙中...");
+            EnqueueRevit(uiApp =>
+            {
+                string msg;
+                try
+                {
+                    Document doc = uiApp?.ActiveUIDocument?.Document;
+                    if (doc == null) msg = "目前沒有開啟中的文件。";
+                    else
+                    {
+                        CameraKeyPlanService.SheetResult r = CameraKeyPlanService.CreateOrUpdateCameraSheet(uiApp, doc, camId, null);
+                        if (r.Error != null) msg = r.Error;
+                        else
+                        {
+                            int placed = r.Viewports.Count(v => v.Status == "新放置");
+                            int kept = r.Viewports.Count(v => v.Status == "保留原位");
+                            int skipped = r.Viewports.Count(v => v.Status == "略過");
+                            msg = $"{(r.Created ? "已建立" : "已更新")}圖紙 {r.SheetNumber} {r.SheetName}（圖框：{r.TitleBlockName ?? "無"}；新放置 {placed}、保留 {kept}" +
+                                  (skipped > 0 ? $"、略過 {skipped}" : "") + "）" + (r.RanFourViews ? "；已先建立 Key Plan" : "") +
+                                  (r.Warnings.Count > 0 ? "。注意：" + string.Join("；", r.Warnings) : "。");
+                            try { uiApp.ActiveUIDocument.RequestViewChange(doc.GetElement(r.SheetId) as View); }
+                            catch (Exception exOpen) { Logger.Error("相機管理面板：開啟相機圖紙失敗", exOpen); }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("相機管理面板：一鍵出圖紙失敗", ex);
+                    CameraManagerDiagnostics.RecordCaught("CreateOrUpdateCameraSheet", ex);
+                    msg = "一鍵出圖紙失敗：" + ex.Message;
+                }
+                RunOnUiThread(() => { _sheetInFlight = false; SetStatus(msg); RefreshListOnly(); });
+            });
+        }
+
+        /// <summary>右鍵「視角版本 ▸」：每次開選單依這一列的版本名稱重建子項目。</summary>
+        private void RebuildVersionMenu(CameraRow row)
+        {
+            if (_versionRoot == null) return;
+            _versionRoot.Items.Clear();
+            _versionRoot.Items.Add(NewMenuItem("儲存目前視角…", "儲存目前視角：以名稱記下眼睛位置、方向、裁剪框與遠裁剪（同名＝覆蓋）", () =>
+            {
+                CameraRow r = _cameraMenuRow; if (r == null) return;
+                UIElement t = _cameraMenuTarget;
+                OpenPopupAfterMenu(() => ShowTextInputPopup("儲存視角版本", SuggestVersionName(r), "名稱最多 60 字；同名會覆蓋", t, name => DoSaveVersion(r, name)), "VersionNamePopup");
+            }, "VersionSave"));
+
+            List<string> names = row?.VersionNames ?? new List<string>();
+            if (names.Count == 0)
+            {
+                WpfMenuItem none = NewMenuItem("（尚無版本）", null, null, "VersionNone");
+                none.IsEnabled = false;
+                _versionRoot.Items.Add(none);
+                return;
+            }
+            _versionRoot.Items.Add(new Separator());
+            foreach (string n in names)
+            {
+                string nn = n;
+                _versionRoot.Items.Add(NewMenuItem(nn, $"還原到版本「{nn}」（一個交易「還原相機視角：{nn}」，可復原）", () => DoRestoreVersion(_cameraMenuRow, nn), "VersionRestore"));
+            }
+            _versionRoot.Items.Add(new Separator());
+            WpfMenuItem del = NewMenuItem("刪除版本", "刪除版本：只移除儲存的版本資料，相機本身不動", null, "VersionDeleteRoot");
+            foreach (string n in names)
+            {
+                string nn = n;
+                del.Items.Add(NewMenuItem(nn, $"刪除版本「{nn}」", () => DoDeleteVersion(_cameraMenuRow, nn), "VersionDelete"));
+            }
+            _versionRoot.Items.Add(del);
+        }
+
+        private static string SuggestVersionName(CameraRow row)
+        {
+            int n = row?.VersionNames?.Count ?? 0;
+            var existing = new HashSet<string>(row?.VersionNames ?? new List<string>());
+            for (int i = n; i < n + 26; i++)
+            {
+                string s = i < 26 ? ((char)('A' + i)) + " 案" : "版本 " + (i + 1);
+                if (!existing.Contains(s)) return s;
+            }
+            return "版本 " + (n + 1);
+        }
+
+        private void DoSaveVersion(CameraRow row, string name)
+        {
+            if (row == null) return;
+            ElementId camId = row.ViewId;
+            SetStatus("儲存視角版本中...");
+            EnqueueRevit(uiApp =>
+            {
+                string msg;
+                try
+                {
+                    string err = CameraKeyPlanService.SaveVersion(uiApp?.ActiveUIDocument?.Document, camId, name, out bool replaced);
+                    msg = err ?? $"「{row.Name}」已{(replaced ? "覆蓋" : "儲存")}視角版本「{name.Trim()}」。";
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("相機管理面板：儲存視角版本失敗", ex);
+                    msg = "儲存視角版本失敗：" + ex.Message;
+                }
+                RunOnUiThread(() => { SetStatus(msg); RefreshListOnly(); });
+            });
+        }
+
+        private void DoRestoreVersion(CameraRow row, string name)
+        {
+            if (row == null) return;
+            ElementId camId = row.ViewId;
+            SetStatus($"還原視角「{name}」中...");
+            EnqueueRevit(uiApp =>
+            {
+                string msg;
+                try
+                {
+                    var warnings = new List<string>();
+                    string err = CameraKeyPlanService.RestoreVersion(uiApp?.ActiveUIDocument?.Document, camId, name, warnings);
+                    msg = err ?? ($"「{row.Name}」已還原視角「{name}」（Key Plan 標記會自動更新；範圍要重算請再按一鍵 4 視圖）" +
+                                  (warnings.Count > 0 ? "。注意：" + string.Join("；", warnings) : "。"));
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("相機管理面板：還原視角版本失敗", ex);
+                    msg = "還原視角版本失敗：" + ex.Message;
+                }
+                RunOnUiThread(() => { SetStatus(msg); RefreshListOnly(); });
+            });
+        }
+
+        private void DoDeleteVersion(CameraRow row, string name)
+        {
+            if (row == null) return;
+            ElementId camId = row.ViewId;
+            SetStatus($"刪除視角版本「{name}」中...");
+            EnqueueRevit(uiApp =>
+            {
+                string msg;
+                try
+                {
+                    string err = CameraKeyPlanService.DeleteVersion(uiApp?.ActiveUIDocument?.Document, camId, name);
+                    msg = err ?? $"「{row.Name}」已刪除視角版本「{name}」。";
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("相機管理面板：刪除視角版本失敗", ex);
+                    msg = "刪除視角版本失敗：" + ex.Message;
+                }
+                RunOnUiThread(() => { SetStatus(msg); RefreshListOnly(); });
+            });
+        }
+
+        // ── 通用小型文字輸入 Popup（只建立一次、重複使用） ──
+        private Popup _inputPopup;
+        private WpfTextBox _inputTextBox;
+        private TextBlock _inputTitle, _inputHint;
+        private Action<string> _inputConfirm;
+
+        private void ShowTextInputPopup(string title, string initial, string hint, UIElement placementTarget, Action<string> onConfirm)
+        {
+            EnsureInputPopupBuilt();
+            _inputTitle.Text = title;
+            _inputHint.Text = hint ?? "";
+            _inputHint.Foreground = CameraManagerTheme.SecondaryText;
+            _inputTextBox.Text = initial ?? "";
+            _inputConfirm = onConfirm;
+            _inputPopup.PlacementTarget = placementTarget ?? (UIElement)_oneClickFourViewsButton;
+            _inputPopup.IsOpen = true;
+            RunOnUiThread(() => { _inputTextBox.Focus(); _inputTextBox.SelectAll(); });
+        }
+
+        private void EnsureInputPopupBuilt()
+        {
+            if (_inputPopup != null) return;
+            _inputTextBox = new WpfTextBox { Width = 180, Margin = new Thickness(0, 0, 0, 4) };
+            CameraManagerTheme.StyleTextBox(_inputTextBox);
+            _inputTitle = CameraManagerTheme.SectionTitle("");
+            _inputHint = new TextBlock
+            {
+                FontFamily = CameraManagerTheme.UiFont,
+                FontSize = CameraManagerTheme.SecondaryFontSize,
+                Foreground = CameraManagerTheme.SecondaryText,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 200,
+                Margin = new Thickness(0, 0, 0, CameraManagerTheme.Spacing)
+            };
+            Border card = new Border
+            {
+                Background = CameraManagerTheme.Surface,
+                BorderBrush = CameraManagerTheme.BorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(CameraManagerTheme.CornerRadiusPx),
+                Padding = new Thickness(CameraManagerTheme.Spacing),
+                Effect = CameraManagerTheme.CardShadow()
+            };
+            StackPanel panel = new StackPanel();
+            panel.Children.Add(_inputTitle);
+            panel.Children.Add(_inputTextBox);
+            panel.Children.Add(_inputHint);
+            StackPanel buttonRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            Button cancel = CameraManagerTheme.SecondaryButton("取消");
+            cancel.Margin = new Thickness(0, 0, CameraManagerTheme.Spacing, 0);
+            Button confirm = CameraManagerTheme.PrimaryButton("確定");
+            buttonRow.Children.Add(cancel);
+            buttonRow.Children.Add(confirm);
+            panel.Children.Add(buttonRow);
+            card.Child = panel;
+            _inputPopup = new Popup { StaysOpen = false, Placement = PlacementMode.Bottom, Child = card };
+
+            Action confirmAction = () => SafeUiAction(() =>
+            {
+                string text = _inputTextBox.Text?.Trim() ?? "";
+                if (text.Length == 0 || text.Length > 60)
+                {
+                    _inputHint.Text = "請輸入 1～60 字的名稱";
+                    _inputHint.Foreground = CameraManagerTheme.Error;
+                    return;
+                }
+                _inputPopup.IsOpen = false;
+                _inputConfirm?.Invoke(text);
+            }, "InputPopupConfirm");
+            confirm.Click += (s, e) => confirmAction();
+            cancel.Click += (s, e) => _inputPopup.IsOpen = false;
+            _inputTextBox.KeyDown += (s, e) =>
+            {
+                if (e.Key == Key.Enter) confirmAction();
+                else if (e.Key == Key.Escape) _inputPopup.IsOpen = false;
+            };
+            WpfGrid.SetRow(_inputPopup, 0);
+            _rootGrid.Children.Add(_inputPopup);
         }
 
         private CameraRow GetPrimarySelectedRow() => _listSection.GetSelectedRows().FirstOrDefault();
@@ -1354,6 +1653,7 @@ namespace RevitMCP.UI
             _rows = snapshot.Cameras ?? new List<CameraRow>();
             _levels = snapshot.Levels ?? new List<LevelOption>();
             _hasCroppedPlan = snapshot.HasCroppedPlan;
+            _titleBlocks = snapshot.TitleBlocks ?? new List<TitleBlockOption>();
 
             _listSection.SetLevels(_levels);
             _listSection.SetRows(_rows);
@@ -1380,7 +1680,8 @@ namespace RevitMCP.UI
             string summary = _rows.Count == 0
                 ? "目前文件沒有任何透視相機視圖（View3D.IsPerspective）。"
                 : $"共 {_rows.Count} 個透視相機。";
-            SetStatus(summary);
+            // 2026-09-25 Wave 3：⑥ 保留「最近一次動作」——live sync 的輕量刷新不再用「共 N 個相機」蓋掉動作結果。
+            if (exportBaseMap || !sameDocument) SetStatus(summary);
             if (_statusAfterSnapshot != null) { SetStatus(_statusAfterSnapshot); _statusAfterSnapshot = null; }
 
             if (exportBaseMap)
@@ -2356,7 +2657,12 @@ namespace RevitMCP.UI
 
         private void EndSuppressed() => _suppressLiveSync = false;
 
-        private void SetStatus(string text) => RunOnUiThread(() => _statusText.Text = text);
+        /// <summary>⑥ 狀態列：顯示最近一次動作的結果，前面加時間（2026-09-25 Wave 3）。</summary>
+        private void SetStatus(string text) => RunOnUiThread(() =>
+        {
+            _statusText.Text = string.IsNullOrEmpty(text) ? "" : DateTime.Now.ToString("HH:mm") + "  " + text;
+            _statusText.ToolTip = _statusText.Text;
+        });
 
         /// <summary>
         /// 2026-09-24 崩潰修復：所有從 ExternalEventManager／Application.cs Idling 回呼marshal
