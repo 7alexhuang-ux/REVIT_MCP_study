@@ -276,6 +276,10 @@ namespace RevitMCP.Core
                         result = GetViewExtents(parameters);
                         break;
 
+                    case "run_camera_overview":
+                        result = RunCameraOverview(parameters);
+                        break;
+
                     case "get_material_graphics":
                         result = GetMaterialGraphics(parameters);
                         break;

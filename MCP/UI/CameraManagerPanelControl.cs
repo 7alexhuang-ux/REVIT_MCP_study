@@ -451,6 +451,11 @@ namespace RevitMCP.UI
             _fourViewsMenu.Items.Add(NewMenuItem("全部符合畫面",
                 "④ 全部符合畫面：把選取相機已開啟的 4 張視圖（透視、Key Plan 平面／剖面／等角）各自縮放到符合視窗",
                 DoZoomAllFourViews, "ZoomAll"));
+            _fourViewsMenu.Items.Add(new Separator());
+            // 2026-09-25 Wave 2：每層總覽平面（Key Plan-總覽-<樓層名>）；一鍵 4 視圖也會自動更新該相機樓層的總覽。
+            _fourViewsMenu.Items.Add(NewMenuItem("更新樓層總覽",
+                "④ 更新樓層總覽：建立／更新「Key Plan-總覽-<樓層名>」——該層所有相機的標記畫在同一張淡化平面上；有選取相機＝只更新該相機的樓層，沒有選取＝所有有相機的樓層",
+                DoUpdateOverview, "UpdateOverview"));
             _fourViewsMenu.Opened += (s, e) => SafeUiAction(UpdateIsoMenuChecks, "IsoMenuOpened");
             UpdateIsoMenuChecks();
             return _fourViewsMenu;
@@ -542,6 +547,17 @@ namespace RevitMCP.UI
             }, "MarkerColorCustom"));
             _moreMenu.Items.Add(colorRoot);
 
+            // 2026-09-25 Wave 2：相機標記 ▸ B 詳圖（預設）／A 模型／A+B（本機設定，切換後立即同步）
+            const string modeTip = "④ 相機標記：B 詳圖＝只在 Key Plan 平面／剖面／總覽畫詳圖標記（預設）；A 模型＝一般模型族群「RevitMCP 相機標記」＋視野扇形，平面／剖面／3D 都看得到、所有透視圖自動隱藏；A+B＝兩者都畫";
+            WpfMenuItem modeRoot = NewMenuItem("相機標記", modeTip, null, "MarkerMode");
+            _markerModeBItem = NewMenuItem("B 詳圖（預設）", modeTip, () => SetMarkerMode(CameraMarkerMode.B), "MarkerModeB");
+            _markerModeAItem = NewMenuItem("A 模型", modeTip, () => SetMarkerMode(CameraMarkerMode.A), "MarkerModeA");
+            _markerModeABItem = NewMenuItem("A+B", modeTip, () => SetMarkerMode(CameraMarkerMode.AB), "MarkerModeAB");
+            modeRoot.Items.Add(_markerModeBItem);
+            modeRoot.Items.Add(_markerModeAItem);
+            modeRoot.Items.Add(_markerModeABItem);
+            _moreMenu.Items.Add(modeRoot);
+
             // 2026-09-25：Key Plan 樣式 ▸ 淡化背景（預設）／原始（存在相機設定，下次一鍵 4 視圖套用）
             const string styleTip = "④ Key Plan 樣式：淡化背景＝模型半色調＋隱藏軸線/樓層/尺寸/標籤等雜項註解＋自動比例；原始＝還原（下次一鍵 4 視圖套用）";
             WpfMenuItem styleRoot = NewMenuItem("Key Plan 樣式", styleTip, null, "KeyPlanStyle");
@@ -570,9 +586,75 @@ namespace RevitMCP.UI
             bool faded = ConfigManager.Instance.Settings.CameraManager.KeyPlanFadedStyle;
             if (_keyPlanFadedItem != null) _keyPlanFadedItem.IsChecked = faded;
             if (_keyPlanOriginalItem != null) _keyPlanOriginalItem.IsChecked = !faded;
+            CameraMarkerMode mode = ConfigManager.Instance.Settings.CameraManager.MarkerMode;
+            if (_markerModeBItem != null) _markerModeBItem.IsChecked = mode == CameraMarkerMode.B;
+            if (_markerModeAItem != null) _markerModeAItem.IsChecked = mode == CameraMarkerMode.A;
+            if (_markerModeABItem != null) _markerModeABItem.IsChecked = mode == CameraMarkerMode.AB;
         }
 
         private WpfMenuItem _keyPlanFadedItem, _keyPlanOriginalItem;
+        private WpfMenuItem _markerModeBItem, _markerModeAItem, _markerModeABItem;
+
+        /// <summary>2026-09-25 Wave 2：⋯ 相機標記型式。存本機設定；面板已載入時立即排入同步（A 放置／刪除＋全部 Key Plan／總覽 B 標記重畫）。</summary>
+        private void SetMarkerMode(CameraMarkerMode mode)
+        {
+            ConfigManager.Instance.Settings.CameraManager.MarkerMode = mode;
+            ConfigManager.Instance.SaveSettings();
+            UpdateMarkerColorChecks();
+            Logger.Info("相機管理面板：相機標記 → " + mode);
+            if (!_armed) { SetStatus("已記住相機標記設定（下次一鍵 4 視圖時套用）。"); return; }
+            SetStatus("套用相機標記設定中...");
+            EnqueueRevit(uiApp =>
+            {
+                string msg;
+                try { msg = CameraKeyPlanService.ApplyMarkerModeChange(uiApp?.ActiveUIDocument?.Document); }
+                catch (Exception ex)
+                {
+                    Logger.Error("相機管理面板：套用相機標記設定失敗", ex);
+                    CameraManagerDiagnostics.RecordCaught("ApplyMarkerModeChange", ex);
+                    msg = "套用相機標記設定失敗：" + ex.Message;
+                }
+                RunOnUiThread(() => SetStatus(msg));
+            });
+        }
+
+        /// <summary>2026-09-25 Wave 2：④ ▾ 更新樓層總覽。有選取相機＝該相機樓層；沒有＝所有有相機的樓層。</summary>
+        private void DoUpdateOverview()
+        {
+            CameraRow row = GetPrimarySelectedRow();
+            ElementId levelId = row?.LevelId;
+            SetStatus("更新樓層總覽中...");
+            EnqueueRevit(uiApp =>
+            {
+                string msg;
+                try
+                {
+                    Document doc = uiApp?.ActiveUIDocument?.Document;
+                    if (doc == null) msg = "目前沒有開啟中的文件。";
+                    else
+                    {
+                        var results = CameraKeyPlanService.CreateOrUpdateOverviews(doc, levelId != null ? new List<ElementId> { levelId } : null);
+                        var ok = results.Where(r => r.Error == null && r.ViewId != null).ToList();
+                        var bad = results.Where(r => r.Error != null).ToList();
+                        msg = results.Count == 0 ? "沒有任何樓層有相機，未建立總覽。"
+                            : $"已更新樓層總覽 {ok.Count} 張（{string.Join("、", ok.Select(r => $"{r.ViewName}：{r.CameraCount} 台"))}）" +
+                              (bad.Count > 0 ? $"；失敗 {bad.Count}：{string.Join("；", bad.Select(r => r.Error))}" : "") + "。";
+                        if (ok.Count == 1)
+                        {
+                            try { uiApp.ActiveUIDocument.RequestViewChange(doc.GetElement(ok[0].ViewId) as View); }
+                            catch (Exception exOpen) { Logger.Error("相機管理面板：開啟樓層總覽失敗", exOpen); }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("相機管理面板：更新樓層總覽失敗", ex);
+                    CameraManagerDiagnostics.RecordCaught("CreateOrUpdateOverviews", ex);
+                    msg = "更新樓層總覽失敗：" + ex.Message;
+                }
+                RunOnUiThread(() => { SetStatus(msg); RefreshListOnly(); });
+            });
+        }
 
         private void SetKeyPlanFadedStyle(bool faded)
         {
@@ -2048,6 +2130,46 @@ namespace RevitMCP.UI
         /// <summary>2026-09-25（§5.1）：主體 Level 改高程／改名 → 同一個去抖計時器，重畫所有簡化樓層記號。</summary>
         private bool _levelMarkRefreshPending;
 
+        /// <summary>2026-09-25 Wave 2：使用者移動／旋轉的 A 型標記實例（反向更新相機），與相機標記共用 500ms 去抖。</summary>
+        private readonly HashSet<ElementId> _markerToCameraPending = new HashSet<ElementId>();
+        /// <summary>2026-09-25 Wave 2：有元素被刪除 → 清掉相機已不存在的標記。</summary>
+        private bool _orphanCleanupPending;
+
+        /// <summary>由 Application.cs 的 DocumentChanged 呼叫（A 型標記實例被使用者修改時）。</summary>
+        public void QueueMarkerToCameraSync(IEnumerable<ElementId> instanceIds)
+        {
+            try
+            {
+                List<ElementId> ids = instanceIds?.Where(i => i != null).ToList();
+                if (ids == null || ids.Count == 0 || !_armed) return;
+                RunOnUiThread(() =>
+                {
+                    foreach (ElementId id in ids) _markerToCameraPending.Add(id);
+                    EnsureMarkerRefreshTimer();
+                    _markerRefreshTimer.Stop();
+                    _markerRefreshTimer.Start();
+                });
+            }
+            catch (Exception ex) { Logger.Error("相機管理面板：排入「由標記更新相機」失敗", ex); }
+        }
+
+        /// <summary>由 Application.cs 的 DocumentChanged 呼叫（有元素被刪除時）。</summary>
+        public void QueueOrphanMarkerCleanup()
+        {
+            try
+            {
+                if (!_armed) return;
+                RunOnUiThread(() =>
+                {
+                    _orphanCleanupPending = true;
+                    EnsureMarkerRefreshTimer();
+                    _markerRefreshTimer.Stop();
+                    _markerRefreshTimer.Start();
+                });
+            }
+            catch (Exception ex) { Logger.Error("相機管理面板：排入孤兒標記清理失敗", ex); }
+        }
+
         /// <summary>由 Application.cs 的 DocumentChanged 呼叫（有主體 Level 被修改時）。與相機標記共用 500ms 去抖。</summary>
         public void QueueLevelMarkRefresh()
         {
@@ -2099,7 +2221,11 @@ namespace RevitMCP.UI
             try
             {
                 _markerRefreshTimer?.Stop();
-                if ((_markerRefreshPending.Count == 0 && !_levelMarkRefreshPending) || !_armed) { _markerRefreshPending.Clear(); _levelMarkRefreshPending = false; return; }
+                if ((_markerRefreshPending.Count == 0 && !_levelMarkRefreshPending && _markerToCameraPending.Count == 0 && !_orphanCleanupPending) || !_armed)
+                {
+                    _markerRefreshPending.Clear(); _levelMarkRefreshPending = false; _markerToCameraPending.Clear(); _orphanCleanupPending = false;
+                    return;
+                }
                 if (_markerRefreshInFlight || _fourViewsInFlight)
                 {
                     // 上一批或一鍵 4 視圖還在跑：稍後再試（一鍵 4 視圖本身就會重畫標記）。
@@ -2110,6 +2236,10 @@ namespace RevitMCP.UI
                 _markerRefreshPending.Clear();
                 bool levelMarks = _levelMarkRefreshPending;
                 _levelMarkRefreshPending = false;
+                List<ElementId> aMarkers = _markerToCameraPending.ToList();
+                _markerToCameraPending.Clear();
+                bool orphans = _orphanCleanupPending;
+                _orphanCleanupPending = false;
                 _markerRefreshInFlight = true;
                 Logger.Info($"相機管理面板：排入「更新相機標記」（{batch.Count} 台相機{(levelMarks ? "＋簡化樓層記號" : "")}，去抖 500ms）。");
                 int gen = _generation;
@@ -2121,6 +2251,25 @@ namespace RevitMCP.UI
                         Document doc = uiApp?.ActiveUIDocument?.Document;
                         if (doc != null && GetDocumentKey(doc) == _loadedDocKey)
                         {
+                            // 2026-09-25 Wave 2：先做「由標記更新相機」（相機改動會再經 DocumentChanged 排入標記重畫）、再清孤兒標記。
+                            if (aMarkers.Count > 0)
+                            {
+                                try
+                                {
+                                    List<ElementId> moved = CameraKeyPlanService.SyncCamerasFromAMarkers(doc, aMarkers, out string syncLog);
+                                    if (moved.Count > 0) RunOnUiThread(() => SetStatus("已由相機標記更新 " + moved.Count + " 台相機：" + syncLog));
+                                }
+                                catch (Exception exA)
+                                {
+                                    Logger.Error("相機管理面板：由標記更新相機失敗", exA);
+                                    CameraManagerDiagnostics.RecordCaught("SyncCamerasFromAMarkers", exA);
+                                }
+                            }
+                            if (orphans)
+                            {
+                                try { CameraKeyPlanService.CleanupOrphanMarkers(doc); }
+                                catch (Exception exO) { Logger.Error("相機管理面板：清除孤兒標記失敗", exO); }
+                            }
                             if (batch.Count > 0) n = CameraKeyPlanService.UpdateMarkersForCameras(doc, batch);
                             if (levelMarks)
                             {
@@ -2151,7 +2300,7 @@ namespace RevitMCP.UI
                                 CameraRow primary = GetPrimarySelectedRow();
                                 if (primary != null && batch.Contains(primary.ViewId)) RefreshSelectedSectionLine(primary);
                             }
-                            if (_markerRefreshPending.Count > 0 || _levelMarkRefreshPending) _markerRefreshTimer?.Start();
+                            if (_markerRefreshPending.Count > 0 || _levelMarkRefreshPending || _markerToCameraPending.Count > 0 || _orphanCleanupPending) _markerRefreshTimer?.Start();
                         });
                     }
                 }, "UpdateCameraMarkers");

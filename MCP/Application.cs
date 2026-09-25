@@ -231,6 +231,7 @@ namespace RevitMCP
                 try
                 {
                     System.Collections.Generic.List<ElementId> perspIds = null;
+                    System.Collections.Generic.List<ElementId> aMarkerIds = null;
                     bool levelChanged = false;
                     foreach (ElementId id in e.GetModifiedElementIds())
                     {
@@ -238,9 +239,15 @@ namespace RevitMCP
                         if (el is View3D v3 && v3.IsPerspective && !v3.IsTemplate)
                             (perspIds ?? (perspIds = new System.Collections.Generic.List<ElementId>())).Add(id);
                         else if (el is Level) levelChanged = true; // 主體 Level（高程／名稱）→ 重畫 Key Plan 剖面的簡化樓層記號
+                        // 2026-09-25 Wave 2（§10.12）：使用者移動／旋轉 A 型相機標記 → 反向更新相機（去抖）。
+                        else if (el is FamilyInstance && RevitMCP.Core.CameraKeyPlanService.IsAMarkerInstance(el, out _))
+                            (aMarkerIds ?? (aMarkerIds = new System.Collections.Generic.List<ElementId>())).Add(id);
                     }
                     if (perspIds != null) _cameraManagerPanel.QueueCameraMarkerRefresh(perspIds);
                     if (levelChanged) _cameraManagerPanel.QueueLevelMarkRefresh();
+                    if (aMarkerIds != null) _cameraManagerPanel.QueueMarkerToCameraSync(aMarkerIds);
+                    // 2026-09-25 Wave 2：有元素被刪除（可能是相機）→ 去抖後清掉「相機已不存在」的標記（A／總覽）。
+                    if (e.GetDeletedElementIds().Count > 0) _cameraManagerPanel.QueueOrphanMarkerCleanup();
                 }
                 catch (Exception exMarker)
                 {
@@ -313,6 +320,9 @@ namespace RevitMCP
                 return names != null && names.Count > 0 &&
                        names.All(n => n == RevitMCP.Core.CameraKeyPlanService.MarkerUpdateTransactionName ||
                                       n == RevitMCP.Core.CameraKeyPlanService.LevelMarkUpdateTransactionName ||
+                                      n == RevitMCP.Core.CameraKeyPlanService.AMarkerTransactionName ||
+                                      n == RevitMCP.Core.CameraKeyPlanService.AFamilyLoadTransactionName ||
+                                      n == RevitMCP.Core.CameraKeyPlanService.OverviewTransactionName ||
                                       n == RevitMCP.Core.CameraSourcePlanStore.TransactionName);
             }
             catch

@@ -470,6 +470,19 @@ namespace RevitMCP.Core
         AlongSightLine = 1
     }
 
+    /// <summary>
+    /// 2026-09-25（Wave 2）：相機標記型式（⋯ 更多 → 相機標記）。
+    ///   B（預設）＝Key Plan 平面／剖面／樓層總覽上的詳圖標記（只在該視圖、可列印、不進算圖）；
+    ///   A＝模型族群「RevitMCP 相機標記」（平面／剖面／3D 都看得到，透視圖一律隱藏子類別「相機標記」）＋視野扇形（DirectShape）；
+    ///   AB＝兩者都畫。
+    /// </summary>
+    public enum CameraMarkerMode
+    {
+        B = 0,
+        A = 1,
+        AB = 2
+    }
+
     /// <summary>人視高預設值等，存在外掛設定檔（本機）。public：<see cref="RevitMCP.Configuration.ServiceSettings.CameraManager"/>
     /// 是 public 屬性，屬性型別的存取範圍不能比屬性窄（CS0053）。</summary>
     public class CameraManagerSettings
@@ -501,6 +514,9 @@ namespace RevitMCP.Core
         /// 隱藏雜項註解類別、房間標籤半色調、自動挑 1:50/100/200 比例）；false＝「原始」（下次一鍵
         /// 4 視圖時還原 Display Model 為一般、取消隱藏這些類別、清掉房間標籤半色調）。</summary>
         public bool KeyPlanFadedStyle { get; set; } = true;
+
+        /// <summary>2026-09-25（Wave 2）：相機標記型式，見 <see cref="CameraMarkerMode"/>；預設 B（詳圖）。</summary>
+        public CameraMarkerMode MarkerMode { get; set; } = CameraMarkerMode.B;
 
         /// <summary>2026-09-25：室外相機（眼睛不在任何房間內）的扇形／Key Plan 範圍半徑（m），實際半徑＝
         /// min(遠裁剪, 本值)。「一鍵 4 視圖 ▾ → 室外範圍半徑…」可改；有效範圍 5～1000 m（超出以預設 60 m 處理）。</summary>

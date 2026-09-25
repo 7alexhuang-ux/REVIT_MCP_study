@@ -3,7 +3,7 @@ import { Tool } from "@modelcontextprotocol/sdk/types.js";
 /**
  * 相機管理（Camera Manager）MCP 測試工具（2026-09-25 Wave 1）。
  *
- * 這五個工具呼叫的是 Revit 相機管理停靠面板背後「同一套」服務程式碼
+ * 這些工具呼叫的是 Revit 相機管理停靠面板背後「同一套」服務程式碼
  * （CameraManagerService / CameraKeyPlanService），用途是讓 AI 自動測試面板的行為，
  * 不必每次都靠人工點面板。C# 實作：MCP/Core/Commands/CommandExecutor.CameraManager.cs。
  * 規格：docs/camera-manager/spec.zh-TW.md。
@@ -105,6 +105,23 @@ export const cameraManagerTools: Tool[] = [
                 viewId: {
                     type: "number",
                     description: "視圖 ElementId（省略＝目前作用中視圖）"
+                }
+            },
+            required: []
+        }
+    },
+    {
+        name: "run_camera_overview",
+        title: "建立／更新樓層相機總覽平面",
+        description: "建立或更新相機管理的每層總覽平面「Key Plan-總覽-<樓層名>」（與面板「一鍵 4 視圖 ▾ → 更新樓層總覽」同一段程式碼）：複製該樓層由底圖挑選器選出的平面、套淡化表現法，裁剪＝該層室內相機視野扇形聯集 +3 m（有室外相機時再聯集底圖的建築範圍），把該層每台相機的 B 型標記（眼睛圓圈、視線、扇形、眼睛楔形）與名稱文字畫在同一張平面上；重跑更新同一張、不重複。回傳每層的視圖 id、名稱、相機數與名稱、底圖來源、裁剪範圍（mm）與比例。寫入模型（一個交易「更新樓層總覽」），不刪除任何使用者元素。觸發條件：樓層總覽、相機總覽平面、所有相機畫在一張平面、camera overview。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                levelId: { type: "number", description: "樓層 ElementId（與 levelName 擇一）" },
+                levelName: { type: "string", description: "樓層名稱（完全相符、不分大小寫；與 levelId 擇一）" },
+                all: {
+                    type: "boolean",
+                    description: "true＝所有有相機的建築樓層各建立／更新一張（忽略 levelId／levelName）；預設 false"
                 }
             },
             required: []

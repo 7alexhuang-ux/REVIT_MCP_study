@@ -273,6 +273,9 @@ namespace RevitMCP.Core
                 Success = true,
                 Camera = new { Id = camera.Id.GetIdValue(), camera.Name },
                 SectionPreserved = result.SectionPreserved,
+                // 2026-09-25 Wave 2：一鍵 4 視圖後自動更新的樓層總覽，與（⋯ 相機標記含 A 時）A 型標記同步摘要
+                OverviewViewId = result.OverviewViewId?.GetIdValue(),
+                AMarker = result.AMarkerLog,
                 Tiled = tile && tileError == null,
                 TileError = tileError,
                 Plan = Describe(plan, () => plan == null ? null : new { plan.CropBoxActive, CropBox = CmBox(plan.CropBox) }),
@@ -422,6 +425,84 @@ namespace RevitMCP.Core
                 NewCamera = new { Id = created[0].id.GetIdValue(), Name = created[0].name },
                 Note = "原相機與其 Key Plan 視圖不變；新相機沒有 Key Plan 視圖（需要時跑 run_camera_keyplan）。"
             };
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // run_camera_overview（寫入，2026-09-25 Wave 2）
+        // ══════════════════════════════════════════════════════════
+
+        private object RunCameraOverview(JObject parameters)
+        {
+            Document doc = _uiApp.ActiveUIDocument.Document;
+            bool all = parameters?["all"]?.Value<bool?>() ?? false;
+            List<ElementId> levelIds = null;
+            if (!all)
+            {
+                IdType? levelId = parameters?["levelId"]?.Value<IdType?>();
+                string levelName = parameters?["levelName"]?.Value<string>();
+                Level target;
+                if (levelId.HasValue)
+                {
+                    target = doc.GetElement(new ElementId(levelId.Value)) as Level;
+                    if (target == null) throw new Exception($"levelId {levelId.Value} 不是樓層。");
+                }
+                else if (!string.IsNullOrWhiteSpace(levelName))
+                {
+                    List<Level> matches = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
+                        .Where(l => string.Equals(l.Name, levelName.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+                    if (matches.Count != 1)
+                    {
+                        string storeys = string.Join("、", CameraMath.GetStoreyLevelsSorted(doc).Select(l => l.Name));
+                        throw new Exception(matches.Count == 0
+                            ? $"找不到名稱為「{levelName}」的樓層。建築樓層：{storeys}"
+                            : $"名稱「{levelName}」對應到 {matches.Count} 個樓層，請改用 levelId。");
+                    }
+                    target = matches[0];
+                }
+                else throw new Exception("請給 levelId 或 levelName，或設 all=true。");
+                levelIds = new List<ElementId> { target.Id };
+            }
+
+            List<CameraKeyPlanService.OverviewResult> results = CameraKeyPlanService.CreateOrUpdateOverviews(doc, levelIds);
+            if (results.Count == 0) throw new Exception("沒有任何建築樓層有相機，未建立總覽。");
+
+            return new
+            {
+                Success = results.Any(r => r.Error == null && r.ViewId != null),
+                Note = "範圍為內部原點座標系 mm（模型座標外接框）；總覽一律畫 B 型標記＋名稱，與 ⋯ 相機標記設定無關。",
+                Overviews = results.Select(r => new
+                {
+                    Level = r.LevelName,
+                    LevelId = r.LevelId?.GetIdValue(),
+                    ViewId = r.ViewId?.GetIdValue(),
+                    r.ViewName,
+                    r.Created,
+                    r.CameraCount,
+                    Cameras = r.CameraNames,
+                    BasePlan = r.BasePlanName,
+                    BasePlanReason = r.BasePlanReason,
+                    r.ExtentsMode,
+                    ExtentsMm = r.ViewId == null ? null : new
+                    {
+                        MinX = CmMm(r.MinX), MinY = CmMm(r.MinY), MaxX = CmMm(r.MaxX), MaxY = CmMm(r.MaxY),
+                        Width = CmMm(r.MaxX - r.MinX), Height = CmMm(r.MaxY - r.MinY)
+                    },
+                    r.Scale,
+                    TaggedElements = r.ViewId == null ? null : CountAllTaggedInView(doc, r.ViewId),
+                    r.Error
+                }).ToList()
+            };
+        }
+
+        private static Dictionary<string, int> CountAllTaggedInView(Document doc, ElementId viewId)
+        {
+            View v = doc.GetElement(viewId) as View;
+            var total = new Dictionary<string, int>(StringComparer.Ordinal);
+            if (v == null) return total;
+            foreach (View3D cam in new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>().Where(c => !c.IsTemplate && c.IsPerspective))
+                foreach (var kv in CameraKeyPlanService.CountTaggedElementsByRole(doc, v, cam.UniqueId))
+                    total[kv.Key] = total.TryGetValue(kv.Key, out int n) ? n + kv.Value : kv.Value;
+            return total;
         }
 
         // ══════════════════════════════════════════════════════════

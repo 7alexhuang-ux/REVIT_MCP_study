@@ -23,7 +23,7 @@ namespace RevitMCP.Core
     ///   3. 版面尺寸（margin、剖面深度、遠裁剪預設值…）是有註記依據的假設值，不是查證過
     ///      的規格——都寫在下面對應的常數旁的註解。
     /// </summary>
-    internal static class CameraKeyPlanService
+    internal static partial class CameraKeyPlanService
     {
         // ── 假設值（未經使用者驗收，之後可視需要調整） ──
         private const double PlanMarginCm = 200.0;           // 平面裁剪框在相機/視野範圍外再留的邊界
@@ -301,6 +301,10 @@ namespace RevitMCP.Core
             /// <summary>2026-09-25（MCP 測試工具 run_camera_keyplan）：這次執行的關鍵判定，純資料（交易外算好的值）。
             /// 面板不使用；只是把原本只寫進 log 的判定也放進回傳值，邏輯不變。</summary>
             public KeyPlanDecisions Decisions = new KeyPlanDecisions();
+            /// <summary>2026-09-25 Wave 2：一鍵 4 視圖後自動更新的樓層總覽（失敗或未建立＝null）。</summary>
+            public ElementId OverviewViewId;
+            /// <summary>2026-09-25 Wave 2：A 型標記同步結果（null＝未啟用 A）。</summary>
+            public string AMarkerLog;
         }
 
         /// <summary>一鍵 4 視圖的關鍵判定（feet／度），供 MCP 自動測試讀取；與 log 內容同源。</summary>
@@ -478,6 +482,21 @@ namespace RevitMCP.Core
                     result.Error = "建立 Key Plan 失敗（已復原，模型未變更）：" + ex.Message;
                     Logger.Error("相機 Key Plan：CreateOrUpdateFourViews 失敗，交易已回滾", ex);
                     CameraManagerDiagnostics.RecordCaught("CreateOrUpdateFourViews", ex);
+                }
+            }
+
+            if (result.Error == null)
+            {
+                // 2026-09-25 Wave 2：自動更新本層總覽＋（A 啟用時）A 型標記；各自獨立交易，失敗只記 log，不影響 4 視圖。
+                result.OverviewViewId = TryUpdateOverviewForCamera(doc, geom.LevelBelow);
+                if (MarkerModeIncludesA())
+                {
+                    try { result.AMarkerLog = SyncAMarkers(doc, new List<ElementId> { camera.Id }, placeMissing: true); }
+                    catch (Exception ex)
+                    {
+                        result.AMarkerLog = "A 型標記同步失敗：" + ex.Message;
+                        Logger.Error("一鍵 4 視圖：A 型標記同步失敗（4 視圖不受影響）", ex);
+                    }
                 }
             }
 
@@ -1779,6 +1798,7 @@ namespace RevitMCP.Core
                 Document doc = view.Document;
                 List<ElementId> ids = new FilteredElementCollector(doc, view.Id).OfClass(typeof(TextNote))
                     .Where(e => !TryReadLevelMark(e, out _, out _))
+                    .Where(e => !(TryReadLink(e, out _, out string r) && r == MarkerNameRole)) // 2026-09-25 Wave 2：樓層總覽的相機名稱
                     .Where(e => { try { return !e.IsHidden(view) && e.CanBeHidden(view); } catch { return false; } })
                     .Select(e => e.Id).ToList();
                 if (ids.Count > 0) view.HideElements(ids);
@@ -2202,6 +2222,12 @@ namespace RevitMCP.Core
                     bool isLink = bn == "OST_RvtLinks";
                     if (!isEmphasis && !isLink && c.CategoryType != CategoryType.Model) continue;
                     if (never.Contains(bn)) continue;
+                    // 2026-09-25 Wave 2：A 型相機標記是一般模型族群；A 啟用時一般模型不半色調，否則標記會被淡化。
+                    if (faded && bn == "OST_GenericModel" && MarkerModeIncludesA())
+                    {
+                        try { view.SetCategoryOverrides(c.Id, new OverrideGraphicSettings()); } catch { }
+                        continue;
+                    }
                     if (!view.IsCategoryOverridable(c.Id)) { skippedNotOverridable++; continue; }
 
                     if (!faded)
@@ -3012,10 +3038,14 @@ namespace RevitMCP.Core
                 if (role == "Plan" && v is ViewPlan vp) plans[cid] = vp;
                 else if (role == "Section" && v is ViewSection vs) sections[cid] = vs;
             }
-            List<string> work = targets.Keys.Where(k => plans.ContainsKey(k) || sections.ContainsKey(k)).ToList();
+            // 2026-09-25 Wave 2：有樓層總覽或 A 型標記時，沒有 Key Plan 的相機也要重畫（總覽標記／A 標記）。
+            bool anyOverview = new FilteredElementCollector(doc).OfClass(typeof(ViewPlan)).Cast<ViewPlan>().Any(v => !v.IsTemplate && IsOverviewView(v));
+            bool syncA = MarkerModeIncludesA() && FindAMarkerSymbol(doc) != null;
+            List<string> work = targets.Keys.Where(k => plans.ContainsKey(k) || sections.ContainsKey(k) || anyOverview || syncA).ToList();
             if (work.Count == 0) return 0;
 
             List<Level> levels = CameraMath.GetStoreyLevelsSorted(doc);
+            var overviewCams = new List<(View3D cam, CameraParams cp)>();
             int done = 0;
             IsUpdatingMarkers = true;
             try
@@ -3034,10 +3064,13 @@ namespace RevitMCP.Core
                                 Logger.Info($"相機 Key Plan：更新標記略過「{cam.Name}」（找不到下方樓層）。");
                                 continue;
                             }
-                            if (plans.TryGetValue(cid, out ViewPlan plan))
+                            overviewCams.Add((cam, cp));
+                            plans.TryGetValue(cid, out ViewPlan plan);
+                            if (plan != null)
                                 DrawMarkerSafely(doc, "UpdatePlanMarker",
                                     () => DrawPlanMarker(doc, plan, cp.Geom, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, cp.FanRadiusFeet, cid));
-                            if (sections.TryGetValue(cid, out ViewSection sec))
+                            sections.TryGetValue(cid, out ViewSection sec);
+                            if (sec != null)
                             {
                                 DrawMarkerSafely(doc, "UpdateSectionMarker",
                                     () => DrawSectionMarker(doc, sec, cp.Geom, cp.CenterHoriz ?? cp.ForwardHoriz, cp.FanRadiusFeet, cp.DownRad, cp.UpRad, cid));
@@ -3054,6 +3087,18 @@ namespace RevitMCP.Core
                                 $"vFOV={(cp.VFovDeg.HasValue ? cp.VFovDeg.Value.ToString("F1") : "?")}° edges[{cp.EdgesLog}] farClip={CameraMath.FeetToMm(cp.FarClipFeet):F0}mm " +
                                 $"fanR={CameraMath.FeetToMm(cp.FanRadiusFeet):F0}mm ({cp.FanLog}) room={(cp.Room?.Room != null ? cp.Room.Room.Id.GetIdValue().ToString() : "none")} " +
                                 $"plan={(plan != null ? plan.Id.GetIdValue().ToString() : "-")} section={(sec != null ? sec.Id.GetIdValue().ToString() : "-")} | FOV[{cp.FovLog}]");
+                        }
+                        if (anyOverview)
+                        {
+                            int ov = 0;
+                            DrawMarkerSafely(doc, "UpdateOverviewMarkers", () => ov = RedrawCamerasInOverviews(doc, overviewCams));
+                            if (ov > 0) Logger.Info($"相機 Key Plan：更新樓層總覽上 {ov} 台相機的標記");
+                        }
+                        if (syncA)
+                        {
+                            string aLog = null;
+                            DrawMarkerSafely(doc, "UpdateAMarkers", () => aLog = SyncAMarkersInTransaction(doc, overviewCams, placeMissing: true));
+                            if (aLog != null) Logger.Info("相機 Key Plan：更新 A 型標記 " + aLog);
                         }
                         t.Commit();
                     }
@@ -3516,16 +3561,22 @@ namespace RevitMCP.Core
         }
 
         private static void DrawPlanMarker(Document doc, ViewPlan planView, CameraMath.CameraGeometry geom,
-            XYZ forwardHoriz, double leftRad, double rightRad, double farClipFeet, string cid)
+            XYZ forwardHoriz, double leftRad, double rightRad, double farClipFeet, string cid, double? zOverride = null, bool forceB = false)
         {
             // 2026-09-25：farClipFeet 參數現在傳入的是「扇形半徑」（視線離開房間 +0.6m，夾 [1.5m, 遠裁剪]），名稱沿用。
             // 2026-09-25（非對稱視錐）：扇形從相機左緣 leftRad 到右緣 rightRad（相對正前方帶號角，相機右為正），
             // 不再是 ±h/2；中央視線仍沿相機正前方。原本的朝前三角形箭頭改成「眼睛處的實心楔形」。
             DeleteOldMarkers(doc, planView, cid, "MarkerPlan");
+            // 2026-09-25 Wave 2：⋯ 相機標記＝「A 模型」時 Key Plan 不畫 B 型詳圖標記（舊的照刪）；樓層總覽一律畫（forceB）。
+            if (!forceB && !MarkerModeIncludesB())
+            {
+                Logger.Info("相機 Key Plan：相機標記＝A 模型，平面不畫 B 型標記（已刪除舊標記）");
+                return;
+            }
             BeginMarkerDrawOrder();
             GraphicsStyle style = GetOrCreateMarkerLineStyle(doc);
 
-            double levelZ = geom.LevelBelow.ProjectElevation;
+            double levelZ = zOverride ?? geom.LevelBelow.ProjectElevation;
             XYZ eyeFlat = new XYZ(geom.Eye.X, geom.Eye.Y, levelZ);
             // NewDetailCurve(view, curve) 不需要顯式 SketchPlane 參數，Revit 依 view 本身的
             // 平面（平面視圖＝任意水平面）自動判定；這裡只要保證每條 curve 的 Z 一致落在
@@ -3607,6 +3658,11 @@ namespace RevitMCP.Core
             XYZ forwardHoriz, double fanRadiusFeet, double downRad, double upRad, string cid)
         {
             DeleteOldMarkers(doc, sectionView, cid, "MarkerSection");
+            if (!MarkerModeIncludesB())
+            {
+                Logger.Info("相機 Key Plan：相機標記＝A 模型，剖面不畫 B 型標記（已刪除舊標記）");
+                return;
+            }
             BeginMarkerDrawOrder();
             GraphicsStyle style = GetOrCreateMarkerLineStyle(doc);
 
