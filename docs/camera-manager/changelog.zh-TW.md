@@ -6,6 +6,10 @@
 
 ## 2026-09-26
 
+### 07:56｜主線 MCP 自測全項複測（四輪修正，Snowdon Towers Sample Architectural）
+- 主線在 Revit 2024（公開範例 Snowdon Towers Sample Architectural）以 MCP 對四輪修正（commit `afeddfb`、`c541423`、`8cc721d`、`325e215`）逐項實機複測。**已驗證**：8 個 MCP 工具皆回傳正確資料（含 `camera_version` restore 還原出與存檔時完全相同的姿態 162.9 cm／200.67°）；FOV 候選 C 正確（新放相機 h=50.2°，拖曳後不對稱邊界 L −44°／R +25°）；拖曳透視裁剪框觸發標記更新；複製出的 Key Plan／樓層總覽已解除 Scope Box（裁剪讀回 11.5×12.2 m @1:50，總覽讀回＝預期）；室內判定含最近房間 fallback（Loft Unit d=36 mm）且樓層＝room.Level；剖面更新走移動路徑（旋轉180°＋移動5.2 m＋深度1.5 m，世界範圍偏差 0 mm；全新建立偏差亦 0 mm）；平面／剖面只顯示本相機剖面線；相機標記子類別在透視圖（含套用視圖樣板）全部隱藏、0 失敗；markerMode=B 移除 A 標記，A 型族群可在 R24 用 `Metric Generic Model.rft` 建立；不再誤判「手動移過」；圖紙出圖用透視複本、不 Overflow、視埠類型挑到「Title w Line」、版面「上二下一」（1:50／1:25／1:75）；淡化 Key Plan 樣式、真標準等角、簡化樓層記號皆截圖確認正確；樓層總覽 4 台相機皆標名稱且裁剪自動外擴。詳見 `roadmap.zh-TW.md`「MCP 自測已驗證（2026-09-26）」表。
+- **仍待處理**：A 扇形視覺已確認隱藏，但 `AMarkerLog` 診斷字串仍讀到「讀不到扇形幾何」（字串來源待查，不影響實際效果）；圖框 margin fallback（4% 寬度退路）邏輯已生效，但「E1 30 x 42 Horizontal_Snowdon」尚未重新截圖確認版面；刪除重建剖面路徑本輪移動路徑全部成功、未被觸發，仍待專門測試。
+
 ### 01:54｜MCP 自測第四輪修正（3 項，已編譯、待 MCP 複測；Revit 執行中未部署）
 - **移動路徑的剖面深度偏差（實測 2374 mm）**：剖切面＝CropBox 區域 Max.Z，無法像新建時設在 viewer 原點前方 → 旋轉／移動後，再沿深度軸把 viewer 移到意圖前緣（位移量與正負號由讀回座標系算：意圖角點 Z 上界 − 目前剖切面 Max.Z），區域 Min.Z＝dMin−dMax、Max.Z≈0，遠裁剪偏移＝深度；後檢仍超過 5 mm 時再依讀回值校正一次。
 - **刪除重建後 `InvalidObjectException`，整筆交易回滾**：`GetOrCreateSectionView` 在重建後仍讀已刪除舊剖面的 `.Id`；改為先記下舊 Id、重建後只用新視圖（重掛 ES 連結 role Section、存 ES 狀態，後續樣式／標記／隱藏他剖面／`Result.SectionViewId` 全用新視圖；舊視圖的標記隨視圖刪除）。重建失敗時明確丟錯回滾，不再回傳已刪除物件。重建仍只在剖面不在圖紙上時發生。

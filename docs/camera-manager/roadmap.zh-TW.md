@@ -27,7 +27,7 @@
 
 - ✅ 面板內「開啟並排」「編輯請求組裝」移到服務層共用。
 - ✅ 規格書拆成四份文件。
-- ⚠️ 工具本身尚未在 Revit 內實際呼叫過（見未驗證清單）。
+- ✅ 工具已於 2026-09-26 由主線以 MCP 實際呼叫並複測，見「MCP 自測已驗證（2026-09-26）」。
 
 ### Wave 2｜Key Plan 完整版　✅ 完成（2026-09-25，已編譯、未實機驗證）
 
@@ -50,27 +50,27 @@
 - MCP 工具數 218 → 220（`create_camera_sheet`、`camera_version`）。
 - 版面比例（左 60%、右欄三等分）與圖紙邊界 15 mm 是常數／本機設定，沒有 UI；實測後再決定要不要開放。
 
-### MCP 自測第四輪修正　✅ 已編譯、待 MCP 複測（2026-09-26 01:54）
+### MCP 自測第四輪修正　✅ 已由 MCP 複測（2026-09-26；a 通過，b 本輪未觸發，c 待重新截圖）
 
-第三輪實測：移動路徑方向／原點正確但深度偏差 2374 mm → 退到刪除重建 → `InvalidObjectException` 整筆回滾。第四輪 3 項已改、已編譯；**新 DLL 尚未部署**（Revit 執行中）。
+第三輪實測：移動路徑方向／原點正確但深度偏差 2374 mm → 退到刪除重建 → `InvalidObjectException` 整筆回滾。第四輪 3 項已改、已編譯，並於 2026-09-26 由主線以 MCP 複測。
 
-| # | 情境 | 複測方式 |
-|---|---|---|
-| a | 相機移 1 m＋轉 180°（移動路徑） | 用 `set_camera_pose` 把相機水平移 1 m、yaw 轉 180° → `run_camera_keyplan`：`Decisions.SectionApplyLog` 含「已旋轉／已移動／已沿深度移動」、**不含「移動路徑失敗」「刪除重建」**；`SectionExtentDeviationMm` ≤ 5（深度偏差 0）；剖面 Id 不變 |
-| b | 刪除重建路徑（不得加除錯旗標） | 觸發方式：讓移動路徑失敗且剖面不在圖紙上——在 Key Plan 平面選取該剖面標記按「釘選（Pin）」（被釘選的元素 Rotate/MoveElement 會失敗；此行為未實測，若沒失敗請記下 log 回報），再移動／旋轉相機並 `run_camera_keyplan`（**不要**用刪除剖面標記來觸發——那會把剖面視圖一起刪掉）：`SectionApplyLog` 含「已刪除舊剖面 … 並重建為 …」、**沒有 `InvalidObjectException`、沒有回滾**；`Result.SectionViewId`＝新 Id；新剖面有 ES 連結（再跑一次會走移動路徑而非新建第二張）、B 標記畫在新剖面上 |
-| c | 圖框線讀不到的圖紙 | `create_camera_sheet`（E1 30 x 42）：`DrawAreaSource` 含「未偵測到圖框線 → 四邊內縮改為 … ≈43 mm」；截圖透視圖不壓左側內框 |
-
-### MCP 自測第三輪修正　✅ 已編譯、第四輪修正中（2026-09-26 01:45）
-
-第二輪已由主線 MCP 驗證通過：最近房間 fallback、樣板層隱藏子類別、B 模式刪 A、不再誤判「手動移過」、圖紙不 Overflow、標題欄 20 % 退路、透視複本無標記、總覽裁剪讀回＝預期。第三輪 5 項已改、已編譯；**新 DLL 尚未部署**（Revit 執行中）。
-
-| # | 問題 | 修正 | 複測方式 |
+| # | 情境 | 複測方式 | 複測結果 |
 |---|---|---|---|
-| 1 | （回歸）更新既有剖面：CropBox 保留舊 Transform、只換範圍 → 內容跑到樓梯核／下層 | 旋轉／移動 viewer → 讀回座標系設範圍 → 後檢 5 mm；做不到且不在圖紙上才刪除重建（D-037） | 對「Unit 304 - Toward Core」連跑兩次 `run_camera_keyplan`（第二次換 `sectionMode`）：`Decisions.SectionApplyLog` 含「已旋轉／已移動」或「新建」、`SectionExtentDeviationMm` ≤ 5；`Section.Extents.CropBox` 的 Transform 原點＝新原點；`capture_view_image` 看不到鄰近樓梯核與下層 |
-| 2 | 圖框幾何 0 條線 | 三組 Options、SymbolGeometry 退路、實體邊、類型統計 | `create_camera_sheet`：`DrawAreaSource` 的「圖框幾何線 N 條」N > 0，且列出採用的 Options 與幾何類型；N 仍為 0 時記下類型統計回報 |
-| 3 | 圖紙約 40 % 空白、Key Plan 被迫 1:75 | 透視格＝實際視埠寬；右側自動版面（D-035） | `create_camera_sheet`：`DrawAreaSource` 含「透視格寬」與「右側版面＝…（試過 …）」；Key Plan 比例比 1:75 細或版面空白明顯減少；`Overflow=false`；截圖檢查 |
-| 4 | 總覽裁剪切到「Unit 302 - Toward Interior」扇形 | 共用半徑函式＋讀回標記外接框外擴（D-036） | `run_camera_overview(L3)`：`ExtentsMode` 列每台半徑與「標記讀回外接框…皆在裁剪內」或「已外擴」；截圖扇形完整 |
-| 5 | A 扇形子類別讀回「讀不到扇形幾何」 | Regenerate 後讀、Fine＋NonVisible、展開實例 | `run_camera_keyplan(markerMode="A")`：`AMarkerLog`「不符 0」、沒有「讀不到扇形幾何」 |
+| a | 相機移 1 m＋轉 180°（移動路徑） | 用 `set_camera_pose` 把相機水平移 1 m、yaw 轉 180° → `run_camera_keyplan`：`Decisions.SectionApplyLog` 含「已旋轉／已移動／已沿深度移動」、**不含「移動路徑失敗」「刪除重建」**；`SectionExtentDeviationMm` ≤ 5（深度偏差 0）；剖面 Id 不變 | ✅ 通過：旋轉 180°＋水平移動 5.2 m＋深度移動 1.5 m，世界範圍偏差 0 mm；另以全新相機建立剖面，偏差亦為 0 mm |
+| b | 刪除重建路徑（不得加除錯旗標） | 觸發方式：讓移動路徑失敗且剖面不在圖紙上——在 Key Plan 平面選取該剖面標記按「釘選（Pin）」（被釘選的元素 Rotate/MoveElement 會失敗；此行為未實測，若沒失敗請記下 log 回報），再移動／旋轉相機並 `run_camera_keyplan`（**不要**用刪除剖面標記來觸發——那會把剖面視圖一起刪掉）：`SectionApplyLog` 含「已刪除舊剖面 … 並重建為 …」、**沒有 `InvalidObjectException`、沒有回滾**；`Result.SectionViewId`＝新 Id；新剖面有 ES 連結（再跑一次會走移動路徑而非新建第二張）、B 標記畫在新剖面上 | ⏳ 本輪移動路徑全部成功，未觸發此路徑，仍待專門測試（釘選觸發是否真的失敗也未實測） |
+| c | 圖框線讀不到的圖紙 | `create_camera_sheet`（E1 30 x 42）：`DrawAreaSource` 含「未偵測到圖框線 → 四邊內縮改為 … ≈43 mm」；截圖透視圖不壓左側內框 | ⏳ margin fix（4 % 寬度退路）已部署，邏輯已生效，但本輪未針對「E1 30 x 42 Horizontal_Snowdon」重新截圖確認實際版面 |
+
+### MCP 自測第三輪修正　✅ 已由 MCP 複測（2026-09-26；第 5 項見複測結果的診斷字串備註）
+
+第二輪已由主線 MCP 驗證通過：最近房間 fallback、樣板層隱藏子類別、B 模式刪 A、不再誤判「手動移過」、圖紙不 Overflow、標題欄 20 % 退路、透視複本無標記、總覽裁剪讀回＝預期。第三輪 5 項已改、已編譯，並於 2026-09-26 由主線以 MCP 複測。
+
+| # | 問題 | 修正 | 複測方式 | 複測結果 |
+|---|---|---|---|---|
+| 1 | （回歸）更新既有剖面：CropBox 保留舊 Transform、只換範圍 → 內容跑到樓梯核／下層 | 旋轉／移動 viewer → 讀回座標系設範圍 → 後檢 5 mm；做不到且不在圖紙上才刪除重建（D-037） | 對「Unit 304 - Toward Core」連跑兩次 `run_camera_keyplan`（第二次換 `sectionMode`）：`Decisions.SectionApplyLog` 含「已旋轉／已移動」或「新建」、`SectionExtentDeviationMm` ≤ 5；`Section.Extents.CropBox` 的 Transform 原點＝新原點；`capture_view_image` 看不到鄰近樓梯核與下層 | ✅ 通過（見第四輪 a：偏差 0 mm） |
+| 2 | 圖框幾何 0 條線 | 三組 Options、SymbolGeometry 退路、實體邊、類型統計 | `create_camera_sheet`：`DrawAreaSource` 的「圖框幾何線 N 條」N > 0，且列出採用的 Options 與幾何類型；N 仍為 0 時記下類型統計回報 | ⏳ 邏輯已生效，E1 30x42 圖框仍待重新截圖確認（見第四輪 c） |
+| 3 | 圖紙約 40 % 空白、Key Plan 被迫 1:75 | 透視格＝實際視埠寬；右側自動版面（D-035） | `create_camera_sheet`：`DrawAreaSource` 含「透視格寬」與「右側版面＝…（試過 …）」；Key Plan 比例比 1:75 細或版面空白明顯減少；`Overflow=false`；截圖檢查 | ✅ 通過：`Overflow=false`，視埠類型挑到「Title w Line」，版面「上二下一」（平面 1:50／剖面 1:25／等角 1:75） |
+| 4 | 總覽裁剪切到「Unit 302 - Toward Interior」扇形 | 共用半徑函式＋讀回標記外接框外擴（D-036） | `run_camera_overview(L3)`：`ExtentsMode` 列每台半徑與「標記讀回外接框…皆在裁剪內」或「已外擴」；截圖扇形完整 | ✅ 通過：4 台相機皆有名稱標示，裁剪自動外擴以含所有標記 |
+| 5 | A 扇形子類別讀回「讀不到扇形幾何」 | Regenerate 後讀、Fine＋NonVisible、展開實例 | `run_camera_keyplan(markerMode="A")`：`AMarkerLog`「不符 0」、沒有「讀不到扇形幾何」 | ⚠️ 部分：視覺／透視圖複測（含套用視圖樣板「Cover」「Architectural Presentation 3D (No Shadows)」）0 失敗、扇形確實隱藏；但 `AMarkerLog` 診斷字串本身仍讀到「讀不到扇形幾何」，字串來源待查（不影響實際隱藏效果） |
 
 使用者實測加一項：圖紙上的透視圖大小在 Revit 內以「裁剪區域大小 → 縮放（鎖定比例）」手動調整後，重跑一鍵出圖紙時右側 Key Plan 會跟著重排（見下方使用者實測 #7）。
 
@@ -129,6 +129,8 @@
 
 ### 最後｜使用者實測清單（只有人能判斷的項目）　⏳
 
+> MCP 自測已完成；以下只剩人工項目。
+
 1. 面板手感：清單點名稱開 4 視圖、點數字直接改（Enter／Esc）、樓層下拉複製、右鍵選單，四種操作不會互相搶。
 2. ③ 位置圖：滾輪縮放、拖曳平移、點相機圓點，手勢不衝突；標記對位目視無偏移（開「框」檢查）。
 3. 300 px 寬：① 工具列、④ 動作列、② 下方提示都不被截斷、不出現水平捲軸；8 px 間距看起來整齊。
@@ -144,16 +146,37 @@
 13. 並排視窗在「使用索引標籤檢視」開／關兩種設定下的實際表現。
 14. 長時間使用是否再崩潰（開檔時面板開著／關著兩種情況）；若崩潰，把 `%APPDATA%\RevitMCP\Logs\CameraManagerCrash_*.log` 交給主線。
 
+## MCP 自測已驗證（2026-09-26）
+
+主線在 Revit 2024（公開範例 Snowdon Towers Sample Architectural）以 MCP 實際呼叫，對四輪修正（commit `afeddfb`、`c541423`、`8cc721d`、`325e215`）逐項複測，以下項目已確認可用，原列在下方「未驗證清單」，現移出：
+
+| 項目 | 驗證證據 |
+|---|---|
+| 8 個 MCP 工具皆回傳正確資料 | `list_cameras`（20 台相機）、`run_camera_keyplan`、`set_camera_pose`、`copy_camera_to_level`、`get_view_extents`、`run_camera_overview`、`create_camera_sheet`、`camera_version`（save／restore）皆正常；restore 還原出與存檔時完全相同的姿態（162.9 cm／200.67°） |
+| FOV 候選 C（裁剪形狀）正確 | 新放相機讀到 h=50.2°；拖曳裁剪框後左右不對稱邊界（L −44°／R +25°）正確反映在讀回值 |
+| 拖曳透視裁剪框會觸發標記更新 | log 顯示「更新相機標記」，角度隨拖曳變化 |
+| 複製出的 Key Plan／樓層總覽平面已解除 Scope Box | 裁剪讀回 11.5×12.2 m @ 1:50；樓層總覽讀回值＝預期值 |
+| 室內判定含最近房間 fallback；室內樓層＝房間所在樓層 | Loft Unit 旁的相機以最近房間 fallback（d=36 mm）判定為室內；storey 正確取自 room.Level |
+| 剖面更新走移動路徑（旋轉＋平移＋深度校正） | 旋轉 180°＋水平移動 5.2 m＋深度移動 1.5 m，世界範圍偏差 0 mm；另以全新相機建立剖面，偏差亦為 0 mm |
+| Key Plan 平面／剖面只顯示本相機的剖面線，其他 viewer 已隱藏 | 逐元素隱藏其他剖面／立面／詳圖索引標記，複測通過 |
+| 相機標記子類別在透視圖（含套用視圖樣板）全部隱藏 | 「Cover」「Architectural Presentation 3D (No Shadows)」等樣板複測 0 失敗；圖紙上的透視複本亦看不到標記 |
+| markerMode=B 會移除 A 標記；A 型實例可在實機建立 | 族群於 Revit 2024 用 `Metric Generic Model.rft` 成功建立／載入 |
+| 不再出現「剖面被誤判手動移過」的假警報 | 複測未觸發 |
+| 圖紙排版：出圖用透視複本、不 Overflow、視埠類型挑到「Title w Line」、版面「上二下一」 | `create_camera_sheet` 複測：相機在別張圖紙時正確放透視複本；四個視埠 `Overflow=false`；平面 1:50／剖面 1:25／等角 1:75 |
+| 淡化 Key Plan 樣式正確渲染 | 截圖確認半色調背景、外牆加粗、扇形 90% 填滿、眼睛楔形皆正確 |
+| 等角視圖為真標準等角、範圍只含房間、樓板可見 | 截圖確認 |
+| 簡化樓層記號（L3/L4，透明背景）正確渲染 | 截圖確認 |
+| 樓層總覽：4 台相機皆有名稱標示；裁剪自動外擴以含所有標記 | `run_camera_overview` 複測確認 |
+
+未列在上表、原「未驗證清單」中仍待確認的項目（含本輪複測發現的新細節，如 A 扇形 `AMarkerLog` 診斷字串、圖框幾何 margin fallback 尚未重新截圖等），見下方各表與備註。
+
 ## 未驗證清單（2026-09-25，Wave 3 後）
 
 以下行為已寫成程式並通過編譯，但**沒有在 Revit 內實際確認過**：
 
 | 項目 | 備註 |
 |---|---|
-| 8 個 MCP 測試工具的實際回傳（含 Wave 3 的 `create_camera_sheet`、`camera_version`） | 三波交付時 Revit 都未連線 MCP，只做了編譯與註冊檢查 → 上方「MCP 自測」 |
-| FOV 候選 C／A／B 哪個等於 Revit 真正的視野角 | 需以新放相機（預設 50° 鏡頭）比對 log |
 | 透視圖內滑鼠導覽是否觸發 DocumentChanged | 保留「從透視圖同步」按鈕 |
-| 拖曳透視裁剪框後平面扇形是否真的更新 | 09-25 log 證實事件會觸發；扇形變化未確認 |
 | `ExportImage` 在 TransactionGroup 開著時是否可用 | 有備援路徑 |
 | 底圖對位是否完全無偏移 | 只驗證長寬比；以「框」模式目視 |
 | 並排（TileViews）在索引標籤檢視模式下 | Revit 設定限制，可能只切分頁 |
@@ -172,43 +195,27 @@
 | 300 px 寬度下提示文字與欄寬是否不出現水平捲軸 | 只做常數估算（Wave 3 提示縮短到約 20 字） |
 | 開檔後無操作崩潰是否已根治 | 直接起因已修（ComboBox 樣式）；診斷 log 常駐 |
 | **Enscape 是否排除 A 型標記**（相機體＋扇形 DirectShape） | **使用者實測**：程式只在透視圖隱藏子類別「相機標記」；Enscape 讀的是視圖可見性還是整個模型，未查證 |
-| A 型族群能否在實機建立（`NewFamilyDocument`、`AddParameter`、`NewExtrusion`、`SaveAs`、`LoadFamily`） | 本機 2024 樣板只有 `English\Metric Generic Model.rft`（任務指定的 `English\Generic Model.rft` 不存在），程式會自動退到它 |
-| A 型實例放在眼睛高度、在 Key Plan 平面上是否可見（高於剖切面） | 一般模型在剖切面以上、視圖範圍頂以下通常會顯示，未實機確認 |
-| 扇形 DirectShape 指定子類別 GraphicsStyle 後，透視圖隱藏子類別是否也隱藏扇形 | 依 API 推斷 |
-| 視圖樣板控制 V/G 的透視圖 | 無法隱藏子類別，只記 log |
 | 拖 A 實例 → 相機（反向同步）與「相機→標記」是否互相觸發 | 以 1 mm／0.1° 門檻＋交易名稱防護，未實機確認 |
-| 樓層總覽：底圖挑選、裁剪 +3 m、名稱文字位置、比例（可能退到 1:200） | 未實機 |
-| `run_camera_overview` 實際回傳 | 未在 Revit 內呼叫 |
 | 刪除相機後孤兒標記清理 | 依賴面板 live sync 已啟用 |
-| 一鍵出圖紙：圖框外接框內縮後，右欄視埠是否壓到圖框標題欄 | 可繪區不扣標題欄（D-029 後果）→ 使用者實測 7 |
 | `VIEWPORT_ATTR_SHOW_LABEL` 的整數與「是／否／多個視埠時」對應 | 先看顯示字串，取不到才以 0＝否；log 記原始值 |
-| 透視圖放上圖紙後的視埠大小（裁剪框決定）與 60% 格子是否相稱 | 不改比例，只回報 Overflow |
 | `ViewSheet.Create` 自動編號、`sheet.Name` 設定在實機的結果 | 未實機 |
 | 視角版本還原：perspective 相機 `CropBox` 設定（含 Transform）是否被 Revit 接受 | 失敗只列警告、眼睛與方向照常套用 |
 | 視角版本還原：`VIEWER_BOUND_ACTIVE_FAR` 參數在透視相機上是否存在／可寫 | 失敗只列警告 |
 | 還原視角後 DocumentChanged → 標記去抖更新是否觸發 | 交易名稱「還原相機視角：…」不在忽略名單 |
 | 圖紙圖框下拉清單只在「重新整理」時更新 | 新載入的圖框要再按一次重新整理 |
 
-### 2026-09-25 22:20 MCP 自測第一輪修正（待 MCP 複測）
+### 2026-09-25 22:20 MCP 自測第一輪修正（大部分已由 MCP 複測，餘項見下表備註）
 
 | 項目 | 備註 |
 |---|---|
-| 解除 Scope Box 後 CropBox 是否照設定生效；`PLAN_VIEW_NORTH` 設 0 是否＝專案北 | 讀回比對有 WARNING；待複測 |
 | 旋轉裁剪框轉正（以 Identity Transform 設 CropBox）是否被 Revit 接受 | log 記「已轉正／未接受」 |
-| 新房間搜尋對三台相機（閣樓、廚房、大廳）的判定；`ROOM_PHASE_ID` 參數是否存在 | 同 Phase 無候選會不分 Phase 重找並記 log |
-| 室內樓層改房間 Level 後，清單樓層下拉（非建築樓層 Level）與 ③ 位置圖底圖挑選是否正常 | 待複測＋使用者實測 |
-| 逐元素隱藏 viewer 是否誤藏本相機剖面線或視圖自身裁剪框 | 以名稱排除自身裁剪框元素（依社群做法推斷） |
-| 出圖用透視複本的同步（方向／裁剪框／遠裁剪）與平面上多出的相機圖示 | 待複測 |
-| 視埠類型候選聯集後是否挑到有標題的類型 | 看 `ViewportTypeLog` 的「實際使用」 |
+| 室內樓層改房間 Level 後，清單樓層下拉（非建築樓層 Level）與 ③ 位置圖底圖挑選是否正常 | storey＝room.Level 已由 MCP 複測確認；清單下拉／③ 底圖挑選仍待使用者實測 |
 | 大模型（數百房間）下每次幾何計算都跑房間搜尋的效能 | 未實測 |
 
-### 2026-09-25 22:50 MCP 自測第二輪修正（待 MCP 複測）
+### 2026-09-25 22:50 MCP 自測第二輪修正（大部分已由 MCP 複測，餘項見下表備註）
 
 | 項目 | 備註 |
 |---|---|
-| 最近房間 fallback 會不會把真正在室外（陽台外 1 m）的相機判成室內 | 1.5 m 水平容差是假設值；待實例驗證 |
-| 在視圖樣板上隱藏子類別是否被 Revit 接受（`CanCategoryBeHidden` 對樣板的回傳） | log 會列「樣板也不可隱藏」 |
-| DirectShape 幾何的 `GraphicsStyleId` 讀回是否等於子類別樣式 | `AMarkerLog` 會列不符數 |
 | 剖面 CropBox 套用後 Revit 實際調整了多少（原點位移） | log「套用後原點被 Revit 調整 N mm」 |
 | 標題欄偵測（長直線啟發式）對 Snowdon 以外圖框的準確度 | 見 `DrawAreaSource` |
 | 透視複本裁剪框放大：「X/Y/Z×k」或「X/Y×k」哪個能維持 FOV | 見透視視埠 `Note`；兩者都不行會還原並警告 |
