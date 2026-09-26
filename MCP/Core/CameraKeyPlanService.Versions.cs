@@ -79,7 +79,11 @@ namespace RevitMCP.Core
                 if (string.IsNullOrWhiteSpace(json)) return list;
                 foreach (JObject o in JArray.Parse(json).OfType<JObject>())
                 {
-                    var v = new CameraViewVersion
+                    // 2026-09-26 稽核：單筆壞掉（例如座標欄位為 null）只略過那一筆，不讓整份清單變空。
+                    CameraViewVersion v;
+                    try
+                    {
+                    v = new CameraViewVersion
                     {
                         Name = o.Value<string>("name"),
                         SavedAt = o.Value<string>("savedAt"),
@@ -96,6 +100,12 @@ namespace RevitMCP.Core
                         FarClipFeet = o.Value<double?>("farClipFeet"),
                         FarClipActive = o.Value<int?>("farClipActive")
                     };
+                    }
+                    catch (Exception exItem)
+                    {
+                        Logger.Error($"相機視角版本：「{camera?.Name}」有一筆版本資料無法解析（略過該筆）", exItem);
+                        continue;
+                    }
                     if (!string.IsNullOrEmpty(v.Name) && v.Eye != null && v.Forward != null && v.Up != null) list.Add(v);
                 }
             }
@@ -191,8 +201,28 @@ namespace RevitMCP.Core
             }
         }
 
+        /// <summary>2026-09-26 稽核：相機上的版本 JSON 存在但整份無法解析（損毀）。ReadVersions 此時回空清單——
+        /// 若照常寫回，會把使用者所有版本覆蓋掉，所以 WriteVersions 遇到損毀一律拒寫。</summary>
+        internal static bool IsVersionDataCorrupt(View3D camera)
+        {
+            try
+            {
+                Schema schema = Schema.Lookup(VersionSchemaGuid);
+                if (schema == null || camera == null) return false;
+                Entity e = camera.GetEntity(schema);
+                if (e == null || !e.IsValid()) return false;
+                string json = e.Get<string>(schema.GetField(FieldVersionsJson));
+                if (string.IsNullOrWhiteSpace(json)) return false;
+                JArray.Parse(json);
+                return false;
+            }
+            catch { return true; }
+        }
+
         private static void WriteVersions(View3D camera, List<CameraViewVersion> versions)
         {
+            if (IsVersionDataCorrupt(camera))
+                throw new InvalidOperationException($"相機「{camera?.Name}」上的視角版本資料無法解析（可能損毀），為避免覆蓋既有版本，本次不寫入。");
             var arr = new JArray();
             foreach (CameraViewVersion v in versions)
             {
@@ -288,7 +318,7 @@ namespace RevitMCP.Core
                 try
                 {
                     WriteVersions(cam, list);
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                 }
                 catch (Exception ex)
                 {
@@ -315,7 +345,7 @@ namespace RevitMCP.Core
                 try
                 {
                     WriteVersions(cam, list);
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                 }
                 catch (Exception ex)
                 {
@@ -366,9 +396,19 @@ namespace RevitMCP.Core
                     }
                     cam.SetOrientation(new ViewOrientation3D(v.Eye, v.Up, v.Forward));
 
+                    // 2026-09-26 稽核：「裁剪啟用」與「裁剪框」分開 try——透視圖裁剪通常不能關、或被樣板控制，
+                    // 舊版一起放在同一個 try，啟用設定一丟例外就連裁剪框也沒還原。
                     try
                     {
                         if (cam.CropBoxActive != v.CropActive) cam.CropBoxActive = v.CropActive;
+                    }
+                    catch (Exception exAct)
+                    {
+                        warnings?.Add("裁剪啟用狀態還原失敗（" + (v.CropActive ? "開" : "關") + "）：" + exAct.Message);
+                        Logger.Error("相機視角版本：還原裁剪啟用狀態失敗（繼續還原裁剪框）", exAct);
+                    }
+                    try
+                    {
                         if (v.CropMin != null && v.CropMax != null && v.CropOrigin != null && v.CropBasisX != null && v.CropBasisY != null && v.CropBasisZ != null)
                         {
                             Transform tf = Transform.CreateTranslation(XYZ.Zero);
@@ -396,7 +436,7 @@ namespace RevitMCP.Core
                         Logger.Error("相機視角版本：還原遠裁剪失敗", exFar);
                     }
 
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                 }
                 catch (Exception ex)
                 {

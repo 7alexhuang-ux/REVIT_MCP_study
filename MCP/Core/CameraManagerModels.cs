@@ -86,12 +86,12 @@ namespace RevitMCP.Core
         public string ViewIdText => ViewId.GetIdValue().ToString();
 
         public string HeightAboveLevelCmText => HeightAboveLevelCm.HasValue
-            ? HeightAboveLevelCm.Value.ToString("F1")
+            ? HeightAboveLevelCm.Value.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) // 2026-09-26 稽核：與其他欄（WPF StringFormat＝en-US）一致用小數點
             : "—";
 
         /// <summary>DataGrid「遠裁剪 cm」選用欄的顯示字串（找不到參數時顯示 —）。</summary>
         public string FarClipCmText => FarClipCm.HasValue
-            ? FarClipCm.Value.ToString("F1")
+            ? FarClipCm.Value.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)
             : "—";
 
         /// <summary>DataGrid「狀態」欄：高度示警優先，其次是不在底圖範圍時的提示，都沒有就空白。</summary>

@@ -73,7 +73,7 @@ namespace RevitMCP.Core
                 .FirstOrDefault(v => !v.IsTemplate && v.Name == name);
         }
 
-        private static string OverviewNameFor(Level level) => "Key Plan-總覽-" + (level?.Name ?? "?");
+        private static string OverviewNameFor(Level level) => SanitizeRevitName("Key Plan-總覽-" + (level?.Name ?? "?")); // 2026-09-26 稽核：樓層名可能含非法字元
 
         /// <summary>
         /// 建立或更新多個樓層的總覽平面。levelIds＝null → 所有「有相機」的建築樓層。
@@ -157,7 +157,7 @@ namespace RevitMCP.Core
                         }
                         finally { st.Dispose(); }
                     }
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                     BumpOwnViewsEpoch();
                 }
                 catch (Exception ex)

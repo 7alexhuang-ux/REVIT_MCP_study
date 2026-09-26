@@ -50,6 +50,31 @@
 - MCP 工具數 218 → 220（`create_camera_sheet`、`camera_version`）。
 - 版面比例（左 60%、右欄三等分）與圖紙邊界 15 mm 是常數／本機設定，沒有 UI；實測後再決定要不要開放。
 
+### 全面稽核修正（2026-09-26 15:19）　⏳ 已編譯（R22–R26 皆 0 錯誤）、未部署（Revit 執行中）、待 MCP 複測（build R24 SHA256 79368FB8…1A239BAC2）
+
+三路唯讀稽核（核心 Key Plan／標記與版本／面板與事件）後一次修正。每項都「已編譯、未經 Revit 實機驗證」；可用 MCP 驗的見下方「MCP 回歸測試腳本」，只能人工驗的見表末。
+
+| # | 問題（稽核確認） | 修正 | 狀態 |
+|---|---|---|---|
+| 1 | 關檔再開同一檔（未編輯）時房間／樓層快取命中，回傳已關閉文件的 Room → 一鍵 4 視圖／標記 `InvalidObjectException` | 文件開啟／關閉／另存新檔清掉全部以路徑為鍵的快取並 bump epoch；快取命中時檢查 Room `IsValidObject` | 待 MCP 複測（腳本 R-8） |
+| 2 | `Commit()` 回傳 RolledBack 不丟例外（SilentFailuresPreprocessor），呼叫端回報成功、甚至讀回滾元素而崩 | 相機相關 26 處改 `TransactionHelper.CommitOrThrow`，未提交即走既有 catch | 待 MCP 複測（間接：腳本全程無假成功） |
+| 3 | 面板佇列動作以「執行當下」作用中文件套用排入時的 Id（兩份同模型複本會改錯檔） | `EnqueueForLoadedDoc`：排入時記來源文件，執行時不符就取消並清進行中旗標；DocumentChanged 只收面板來源文件；`set_camera_pose` 後續更新、ZoomToFit 排程同樣綁文件 | 人工（兩份文件） |
+| 4 | 另存新檔後文件鍵改變，導覽監看／標記計時器／DocumentClosing 靜默失效 | DocumentSavingAs／SavedAs 改認新鍵 | 人工 |
+| 5 | Undo／Redo 我們的交易：標記停在舊狀態且被記為已畫；Undo 相機又觸發新交易清掉 Redo | Undo／Redo 時清「已畫」紀錄＋bump epoch，不排會開交易的後續更新 | 人工 |
+| 6 | 導覽監看把本工具自己的編輯（面板／MCP／還原版本／拖 A）當成使用者導覽，1 秒後重跑後續更新 | 這些交易 Commit 時重設導覽基準；面板隱藏時不監看 | 待 MCP 複測（腳本 R-3 log） |
+| 7 | 剖面移動路徑中途失敗且剖面在圖紙上 → 半移動狀態被提交，之後被誤判「手動移過」永久錯位 | 移動路徑包 SubTransaction，失敗先回滾再走退路 | 待 MCP 複測（腳本 R-5 無「移動路徑失敗」；失敗路徑需釘選觸發） |
+| 8 | 剖面對位時被刪除重建 → 新剖面沒樣式／樓層記號 | 偵測到重建即補跑完整 Key Plan 更新 | 待 MCP 複測 |
+| 9 | 只改高度時 A 標記不動（實例與扇形在眼睛高度） | 高度分級改為「剖面標記＋A」 | 待 MCP 複測（腳本 R-3） |
+| 10 | 標記畫失敗（子交易回滾）仍記為「已畫」→ 之後永遠略過 | `DrawMarkerSafely` 回傳成敗，只記成功者；重畫組失敗不中斷其他組 | 待 MCP 複測 |
+| 11 | 拖 A 標記到鎖定的相機 → 整批回滾、每次拖都重演 | 鎖定相機略過並回報；每台相機獨立子交易 | 人工（鎖定視圖） |
+| 12 | 版本 JSON 損毀時讀成空清單、下一次儲存覆蓋全部版本；單筆壞資料讓整份清單變空 | 損毀拒寫；單筆壞資料只略過該筆 | 人工（需手改 ES） |
+| 13 | 還原版本：透視圖「裁剪啟用」設定丟例外時連裁剪框也沒還原 | 兩者分開 try、各自列警告 | 待 MCP 複測（腳本 R-2） |
+| 14 | `set_camera_pose`／面板接受 NaN、俯仰角 ±90°、遠裁剪 ≤ 0 | `ValidatePoseEdit`（俯仰 < ±89.5°、遠裁剪 > 0、高度 ±1 km） | 待 MCP 複測（腳本 R-2） |
+| 15 | 匯出 Excel：任一相機缺高度／FOV／遠裁剪 → ClosedXML 拒收 NaN，整份匯出失敗 | 缺值寫空白 | 人工（面板 ⋯ 匯出） |
+| 16 | 視圖／圖紙名稱含 Revit 不允許字元 | `SanitizeRevitName`（`MakeUniqueName`／類型名／圖紙名／複製到樓層）；清單改名遇到非法字元明確拒絕 | 人工（改名輸入 `a:b`） |
+| 17 | A 扇形樣式讀回永遠「不符」／「讀不到扇形幾何」（診斷誤報） | 以面樣式為準（DirectShape 實體層固定 -1）；讀不回元素幾何時改驗建立的實體 | 待 MCP 複測（腳本 R-6） |
+| 18 | 其他 | 面板回中性狀態時清所有進行中旗標；過期底圖回呼不再清新匯出的旗標；預覽視窗建立中文件關閉則丟棄；遠裁剪開關列入姿態雜湊；清單高度／遠裁剪欄一律小數點；⑤ 人視高接受小數逗號；`set_section_box` 容許 `viewId: null`；Key Plan／標記顏色交易不再觸發樓層記號重畫；R22／R23 `get/set_link_display_settings` 以版本常數保護（回報「需要 Revit 2024 以上」） | 部分人工 |
+
 ### 面板改高度確實重繪＋底圖排除自產視圖　⏳ 已編譯、未部署（Revit 執行中）、待複測（2026-09-26 14:47，build R24 SHA256 E2A8B3BF…F4E80D11）
 
 | # | 項目 | 複測方式 | 預期 |
@@ -208,6 +233,105 @@
 13. 並排視窗在「使用索引標籤檢視」開／關兩種設定下的實際表現。
 14. 長時間使用是否再崩潰（開檔時面板開著／關著兩種情況）；若崩潰，把 `%APPDATA%\RevitMCP\Logs\CameraManagerCrash_*.log` 交給主線。
 
+## MCP 回歸測試腳本（2026-09-26 全面稽核後；主線以 MCP 實跑）
+
+前置：Revit 2024 開 Snowdon Towers Sample Architectural（公開範例），部署本輪 DLL 後重啟 Revit、面板按一次「重新整理」、MCP 已連線。**全部跑完用 Revit 復原或關檔不存**。任一「預期」不符就停下記錄 log（`%APPDATA%\RevitMCP\Logs`）與回傳 JSON，不往下跑。
+
+六類相機（Id 取自前幾輪 `list_cameras`，若不符以名稱查）：
+
+| 代號 | 類型 | 相機 | Id |
+|---|---|---|---|
+| IN | 室內房間 | Camera - Unit 304 - Toward Core | 2076996 |
+| OUT | 室外街景 | Camera - Exterior Street View (Real) | 705685 |
+| ROOF1 | 屋頂花園 | Camera - Fifth Floor Roof Garden | 1991000 |
+| ROOF2 | 屋頂（樓梯旁） | Green Roof - By Stair 1 | 1413473 |
+| STAIR | 樓梯／挑空大廳 | Walkthrough Lobby Stair | 2304727 |
+| LOFT | 樓中樓 | Loft Unit | 851667 |
+| DBL | 挑高（旋轉梯） | Spiral Stair Loft | 851735 |
+
+### R-1｜讀取與分類（唯讀）
+
+| # | 呼叫 | 預期／斷言 |
+|---|---|---|
+| 1 | `list_cameras` | `Count` ≥ 7 個目標皆在；log 無例外 |
+| 2 | `list_cameras(nameContains="Unit 304")` | IN：`IndoorOutdoor`＝室內、`Room.Id` 非 null、`LevelSource`＝room 或 roomSpan |
+| 3 | `list_cameras(nameContains="Exterior Street")` | OUT：室外；`StandingSurface.ZMm` 有值（地面／基地） |
+| 4 | `list_cameras(nameContains="Roof Garden")`、`(nameContains="By Stair 1")` | ROOF1／ROOF2：室外；`Level`＝屋面那層（站立面規則）；`KeyPlan.PlanLevelMismatch`＝false（跑過 R-4 後） |
+| 5 | `list_cameras(nameContains="Lobby Stair")`、`(nameContains="Spiral Stair")`、`(nameContains="Loft Unit")` | STAIR／DBL：`LevelSource`＝roomSpan、`Level`＝上層（L3／樓中樓上層）；LOFT：室內（最近房間 fallback 時 `Room.Log` 含「最近房間 d=」且 d ≤ 1500） |
+| 6 | 同一呼叫連做兩次 `list_cameras` | 第二次 log「⏱ 讀相機快照 … 房間/樓層快取 命中 N」N 接近相機數 |
+
+### R-2｜姿態編輯與數值檢查（IN）
+
+| # | 呼叫 | 預期／斷言 |
+|---|---|---|
+| 1 | `set_camera_pose(cameraId=2076996, pitchDeg=90)` | **回錯誤**「俯仰角必須介於 −89.5° 與 +89.5° 之間」；相機不變（`list_cameras` 讀回與前一致） |
+| 2 | `set_camera_pose(cameraId=2076996, farClipCm=0)` | 回錯誤「遠裁剪距離必須大於 0 cm」（若該相機遠裁剪唯讀則回唯讀錯誤，亦可） |
+| 3 | `set_camera_pose(cameraId=2076996, heightAboveLevelCm=<原值+20>)` | `After.HeightAboveLevelCm`＝原值+20（±0.1）；`Timing.totalMs` 記下；1 秒後 log「→ 剖面標記＋A」（本輪改：高度也移 A 標記），**沒有**「導覽監看…排入相機更新」 |
+| 4 | `camera_version(cameraId=2076996, action="save", name="回歸 A")` | `Versions` 含「回歸 A」 |
+| 5 | `set_camera_pose(cameraId=2076996, yawDeg=<原值+30>)` → `camera_version(action="restore", name="回歸 A")` | `Camera.Current.YawDeg`＝存檔值（±0.1）；`Warnings` 若有「裁剪啟用狀態還原失敗」須同時**沒有**「裁剪框還原失敗」（本輪分開處理） |
+| 6 | `camera_version(cameraId=2076996, action="delete", name="回歸 A")` | 清單不含「回歸 A」 |
+
+### R-3｜標記後續更新（IN，A 標記）
+
+| # | 呼叫 | 預期／斷言 |
+|---|---|---|
+| 1 | `run_camera_keyplan(cameraId=2076996, markerMode="A")` | `Success`；`AMarkerLog`「不符 0」且**沒有**「讀不到扇形幾何」（本輪修正診斷） |
+| 2 | `set_camera_pose(cameraId=2076996, heightAboveLevelCm=<原值>)`（改回） | 1 秒後 log 分級「剖面標記＋A」；`get_view_extents(Key Plan 剖面)` 的 `ViewOwnedElements.DetailLines` > 0 |
+| 3 | 同一值再 `set_camera_pose` 一次 | 回傳 `Changed=false` 類訊息「數值與相機目前相同」，不排後續更新 |
+
+### R-4｜Key Plan（六類各一次）
+
+對 IN、OUT、ROOF1、ROOF2、STAIR、LOFT、DBL 依序 `run_camera_keyplan(cameraId=…)`：
+
+| 斷言 | 適用 |
+|---|---|
+| `Success=true`；`Plan`／`Section`／`Iso` 三個 Id 非 null；`Warnings` 無「未提交」「InvalidObject」 | 全部 |
+| `Decisions.IndoorOutdoor`＝室內、`Room.Id` 非 null | IN、STAIR、LOFT、DBL |
+| `Decisions.IndoorOutdoor`＝室外、`SectionModeUsed`＝AlongSightLine | OUT、ROOF1、ROOF2 |
+| log「室外平面…視圖範圍」剖切＝站立面 +1200、底／深度＝−1000；`get_view_extents(平面)` 讀回一致 | ROOF1、ROOF2 |
+| `get_view_extents(平面)`：`ScopeBox=null`、`CropBox.Active=true`、`VisibleViewers` 的剖面只有本相機 1 條 | 全部 |
+| 平面 GenLevel＝`list_cameras` 的 `Level`（`KeyPlan.PlanLevelMismatch=false`） | 全部，特別是 ROOF2、STAIR、DBL |
+| `Decisions.SectionApplyLog` 不含「移動路徑失敗」；`SectionExtentDeviationMm` ≤ 5 | 第二次跑同一台（先 `set_camera_pose` 移 `planXcm` +100） |
+
+### R-5｜剖面移動路徑（STAIR）
+
+| # | 呼叫 | 預期／斷言 |
+|---|---|---|
+| 1 | `set_camera_pose(cameraId=2304727, planXcm=<原值+100>, yawDeg=<原值+180>)` → `run_camera_keyplan(cameraId=2304727)` | `SectionApplyLog` 含「已旋轉」「已移動」；剖面 Id 與前次相同；偏差 ≤ 5 mm |
+| 2 | 改回原值再跑一次 | 同上；`SectionPreserved=false` |
+
+### R-6｜樓層總覽與 A 標記
+
+| # | 呼叫 | 預期／斷言 |
+|---|---|---|
+| 1 | `run_camera_overview(all=true)` | 每層一筆、`Error=null`；每層 `TaggedElements` 的 MarkerName 數＝該層相機數 |
+| 2 | `run_camera_keyplan(cameraId=851735, markerMode="AB")` | `AMarkerLog`「不符 0」、「失敗 0」；透視圖隱藏新增數或「改在視圖樣板隱藏」皆可 |
+| 3 | `run_camera_keyplan(cameraId=851735, markerMode="B")` | `AMarkerLog`「已刪除本相機 A 實例／扇形 2 個」 |
+
+### R-7｜圖紙（LOFT、OUT）
+
+| # | 呼叫 | 預期／斷言 |
+|---|---|---|
+| 1 | `create_camera_sheet(cameraId=851667)` | `Sheet.Name`＝「Key Plan-Loft Unit」；4 個視埠；`Overflow=false`；`Error=null` |
+| 2 | 重跑同一呼叫 | 同一 `Sheet.Id`、`Created=false`；4 個「保留原位」 |
+| 3 | `delete_element(<LOFT 的 Key Plan 等角視圖 Id>)` → `create_camera_sheet(cameraId=851667)` | `RanFourViews=true`（自動補建）；新等角視埠「新放置」；`Error=null`（本輪加：補建後讀不回視圖會明確報錯而非丟例外） |
+| 4 | `create_camera_sheet(cameraId=705685)` | 室外相機圖紙成功、`Error=null` |
+
+### R-8｜文件生命週期（快取）
+
+| # | 動作 | 預期／斷言 |
+|---|---|---|
+| 1 | `save_document` → `close_document` → `open_document(同一檔)` → `list_cameras` → `run_camera_keyplan(cameraId=2076996)` | log 有「文件關閉 → 清除房間／樓層、姿態、總覽快取」「文件開啟 → …」；`run_camera_keyplan` `Success=true`、無 `InvalidObjectException`（本輪修正的崩潰路徑）。⚠️ 會存檔：用範例檔的複本做 |
+
+### R-9｜雜項
+
+| # | 呼叫 | 預期／斷言 |
+|---|---|---|
+| 1 | `set_section_box(viewId=null, offsetsMm={minX:-100})`（作用中為 3D 等角） | 正常套用或清楚錯誤「目前作用中的視圖不是非樣板 3D 視圖」；不得是 NullReference |
+| 2 | `get_link_display_settings()` | Revit 2024：正常回傳（行為不變） |
+
+**只能人工驗**：兩份文件同時開（佇列取消訊息「作用中文件已切換，已取消上一個動作」）、另存新檔後面板仍連動、Undo／Redo 後標記不自動開交易（Redo 仍可用）、鎖定相機拖 A 標記、面板 ⋯ 匯出 Excel（含室外相機）、清單改名輸入含 `:` 的名稱被拒、⑤ 人視高輸入「162,5」。
+
 ## MCP 自測已驗證（2026-09-26）
 
 主線在 Revit 2024（公開範例 Snowdon Towers Sample Architectural）以 MCP 實際呼叫，對四輪修正（commit `afeddfb`、`c541423`、`8cc721d`、`325e215`）逐項複測，以下項目已確認可用，原列在下方「未驗證清單」，現移出：
@@ -238,7 +362,7 @@
 
 | 項目 | 備註 |
 |---|---|
-| 透視圖內滑鼠導覽是否觸發 DocumentChanged | 保留「從透視圖同步」按鈕 |
+| 透視圖內滑鼠導覽是否觸發 DocumentChanged | 保留「從透視圖同步」按鈕；導覽監看改為面板隱藏時停止、本工具自己的編輯不再誤判為導覽（2026-09-26 稽核修正，待 MCP 複測） |
 | `ExportImage` 在 TransactionGroup 開著時是否可用 | 有備援路徑 |
 | 底圖對位是否完全無偏移 | 只驗證長寬比；以「框」模式目視 |
 | 並排（TileViews）在索引標籤檢視模式下 | Revit 設定限制，可能只切分頁 |
@@ -249,21 +373,21 @@
 | 房間 BoundingBox 頂是否反映上限＋上限偏移 | log 另記 UnboundedHeight 供核對 |
 | 平面剖面線看不到的真正原因（比例門檻／類別／隱藏／半色調） | 逐項記 log，待實機 |
 | 連結模型「依主體視圖」後可見樓層計數是否反映實際顯示 | Revit 2024+ API |
-| 簡化樓層記號在 Level 改高程／改名後自動重畫 | 去抖交易「更新 Key Plan 樓層線」 |
+| 簡化樓層記號在 Level 改高程／改名後自動重畫 | 去抖交易「更新 Key Plan 樓層線」；本工具 Key Plan／標記顏色交易不再誤觸發（2026-09-26 稽核修正，待 MCP 複測）；樓層變更時依相機目前樓層重算保留集合（新插入／移動的樓層會加入或移除） |
 | 相機放置平面（步驟 0）的記錄時序 | DocumentChanged 讀作用中視圖 |
 | 平面扇形在俯仰 ≠ 0 時與 Revit 視錐線的投影差 | 未實機比對 |
 | 標記在極端俯仰角（接近 ±90°）的退化處理 | 有 try/catch 跳過 |
 | 清單常駐 TextBox 在停靠面板內是否確實收到鍵盤輸入 | log 記第一個按鍵／文字輸入 |
 | 300 px 寬度下提示文字與欄寬是否不出現水平捲軸 | 只做常數估算（Wave 3 提示縮短到約 20 字） |
-| 開檔後無操作崩潰是否已根治 | 直接起因已修（ComboBox 樣式）；診斷 log 常駐 |
+| 開檔後無操作崩潰是否已根治 | 直接起因已修（ComboBox 樣式）；診斷 log 常駐；關檔再開的房間快取失效崩潰路徑已修（2026-09-26 稽核修正，待 MCP 複測） |
 | **Enscape 是否排除 A 型標記**（相機體＋扇形 DirectShape） | **使用者實測**：程式只在透視圖隱藏子類別「相機標記」；Enscape 讀的是視圖可見性還是整個模型，未查證 |
-| 拖 A 實例 → 相機（反向同步）與「相機→標記」是否互相觸發 | 以 1 mm／0.1° 門檻＋交易名稱防護，未實機確認 |
-| 刪除相機後孤兒標記清理 | 依賴面板 live sync 已啟用 |
+| 拖 A 實例 → 相機（反向同步）與「相機→標記」是否互相觸發 | 以 1 mm／0.1° 門檻＋交易名稱防護，未實機確認；鎖定相機略過、每台獨立子交易、Undo／Redo 不再觸發反向同步（2026-09-26 稽核修正，待 MCP 複測） |
+| 刪除相機後孤兒標記清理 | 依賴面板 live sync 已啟用；Undo／Redo 時不再排清理交易（保留 Redo）（2026-09-26 稽核修正，待 MCP 複測） |
 | `VIEWPORT_ATTR_SHOW_LABEL` 的整數與「是／否／多個視埠時」對應 | 先看顯示字串，取不到才以 0＝否；log 記原始值 |
 | `ViewSheet.Create` 自動編號、`sheet.Name` 設定在實機的結果 | 未實機 |
-| 視角版本還原：perspective 相機 `CropBox` 設定（含 Transform）是否被 Revit 接受 | 失敗只列警告、眼睛與方向照常套用 |
-| 視角版本還原：`VIEWER_BOUND_ACTIVE_FAR` 參數在透視相機上是否存在／可寫 | 失敗只列警告 |
-| 還原視角後 DocumentChanged → 標記去抖更新是否觸發 | 交易名稱「還原相機視角：…」不在忽略名單 |
+| 視角版本還原：perspective 相機 `CropBox` 設定（含 Transform）是否被 Revit 接受 | 失敗只列警告、眼睛與方向照常套用；「裁剪啟用」與「裁剪框」改分開嘗試（2026-09-26 稽核修正，待 MCP 複測） |
+| 視角版本還原：`VIEWER_BOUND_ACTIVE_FAR` 參數在透視相機上是否存在／可寫 | 失敗只列警告；遠裁剪開關已列入姿態雜湊（切換會觸發標記更新）（2026-09-26 稽核修正，待 MCP 複測） |
+| 還原視角後 DocumentChanged → 標記去抖更新是否觸發 | 交易名稱「還原相機視角：…」不在忽略名單；還原後導覽監看重設基準（不重複排更新）（2026-09-26 稽核修正，待 MCP 複測） |
 | 圖紙圖框下拉清單只在「重新整理」時更新 | 新載入的圖框要再按一次重新整理 |
 
 ### 2026-09-25 22:20 MCP 自測第一輪修正（大部分已由 MCP 複測，餘項見下表備註）
@@ -285,5 +409,5 @@
 
 ## 已知限制（非本功能缺陷）
 
-- R22／R23 編譯有 11 個既有錯誤（`CommandExecutor.LinkDisplay.cs` 使用 2024+ API），另案處理。
+- ~~R22／R23 編譯有 11 個既有錯誤~~ → 2026-09-26 已以 `REVIT2024_OR_GREATER` 保護：R22／R23 0 錯誤，`get/set_link_display_settings` 在 2022／2023 回報「需要 Revit 2024 以上」。
 - Project Browser「顯示相機」無對應 API，不做（D-022）。

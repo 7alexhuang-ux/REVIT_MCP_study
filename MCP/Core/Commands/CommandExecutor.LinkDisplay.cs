@@ -22,6 +22,22 @@ namespace RevitMCP.Core
     /// </summary>
     public partial class CommandExecutor
     {
+        // View.GetLinkOverrides / RevitLinkGraphicsSettings / LinkVisibility 是 Revit 2024 API。
+        // R22／R23 建置時兩支工具直接回報「不支援」，避免整個 add-in 因此編譯失敗；R24+ 行為不變。
+#if !REVIT2024_OR_GREATER
+        private const string LinkDisplayUnsupported =
+            "get_link_display_settings / set_link_display_settings 需要 Revit 2024 以上（View.GetLinkOverrides 為 2024 API），此版本不支援。";
+
+        private object GetLinkDisplaySettings(JObject parameters)
+        {
+            throw new NotSupportedException(LinkDisplayUnsupported);
+        }
+
+        private object SetLinkDisplaySettings(JObject parameters)
+        {
+            throw new NotSupportedException(LinkDisplayUnsupported);
+        }
+#else
         private object GetLinkDisplaySettings(JObject parameters)
         {
             Document doc = _uiApp.ActiveUIDocument.Document;
@@ -171,6 +187,8 @@ namespace RevitMCP.Core
                 Message = $"已在視圖 '{view.Name}' 將 {applied.Count} 個連結設為 {mode}"
             };
         }
+
+#endif
 
         // ── helpers ────────────────────────────────────────────────────────
 

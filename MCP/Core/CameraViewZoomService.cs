@@ -41,6 +41,8 @@ namespace RevitMCP.Core
             public Dictionary<ElementId, string> LastRects;
             public int Ticks;
             public bool ExpectTile;
+            /// <summary>2026-09-26 稽核：排程當下的作用中文件（標題｜路徑）；Idling 時文件換了就取消，不把 Id 套到另一份文件的同號視圖。</summary>
+            public string DocKey;
             public EventHandler<IdlingEventArgs> Handler;
             public System.Diagnostics.Stopwatch Watch = System.Diagnostics.Stopwatch.StartNew(); // 2026-09-26 第四輪：⏱
         }
@@ -66,6 +68,7 @@ namespace RevitMCP.Core
                     ExpectTile = expectTile
                 };
                 if (p.ViewIds.Count == 0) return;
+                p.DocKey = DocKey(uiApp);
                 p.InitialRects = SnapshotRects(uiApp, p.ViewIds);
                 p.Handler = (s, e) => OnIdling(p);
                 _pending = p;
@@ -77,6 +80,16 @@ namespace RevitMCP.Core
                 Logger.Error("相機管理面板：排程 ZoomToFit 失敗（略過，不影響視圖）", ex);
                 CameraManagerDiagnostics.RecordCaught("ScheduleZoomToFit", ex);
             }
+        }
+
+        private static string DocKey(UIApplication uiApp)
+        {
+            try
+            {
+                Document d = uiApp?.ActiveUIDocument?.Document;
+                return d == null ? null : (d.Title ?? "") + "|" + (d.PathName ?? "");
+            }
+            catch { return null; }
         }
 
         private static void CancelPending()
@@ -92,6 +105,12 @@ namespace RevitMCP.Core
             try
             {
                 if (!ReferenceEquals(_pending, p)) { try { p.UiApp.Idling -= p.Handler; } catch { } return; }
+                if (DocKey(p.UiApp) != p.DocKey)
+                {
+                    CancelPending();
+                    Logger.Info("相機管理面板：排程 ZoomToFit 期間作用中文件已切換 → 取消。");
+                    return;
+                }
                 p.Ticks++;
 
                 Dictionary<ElementId, string> rects = SnapshotRects(p.UiApp, p.ViewIds);
@@ -177,7 +196,7 @@ namespace RevitMCP.Core
                 {
                     t.Start();
                     persp.SetOrientation(new ViewOrientation3D(before.EyePosition, before.UpDirection, before.ForwardDirection));
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                 }
             }
             catch (Exception ex)

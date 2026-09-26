@@ -28,7 +28,9 @@ namespace RevitMCP.Core
             var uiDoc = _uiApp.ActiveUIDocument;
             Document doc = uiDoc.Document;
 
-            IdType viewIdParam = parameters["viewId"]?.Value<IdType>() ?? 0;
+            // 2026-09-26 稽核：parameters 為 null 或 "viewId": null 時舊版丟 NullReference／轉型錯誤。
+            IdType viewIdParam = parameters?["viewId"]?.Type == JTokenType.Null ? 0 : (parameters?["viewId"]?.Value<IdType?>() ?? 0);
+            if (parameters == null) parameters = new JObject();
             View3D view3D = (viewIdParam == 0 ? doc.ActiveView : doc.GetElement(viewIdParam.ToElementId())) as View3D;
             if (view3D == null || view3D.IsTemplate)
                 throw new Exception(viewIdParam == 0

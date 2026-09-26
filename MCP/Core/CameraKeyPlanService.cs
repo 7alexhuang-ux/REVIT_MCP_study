@@ -68,6 +68,8 @@ namespace RevitMCP.Core
         /// <summary>「更新相機標記」交易名稱：Application.cs 的 DocumentChanged 用它（加上
         /// <see cref="IsUpdatingMarkers"/>）辨識「我們自己的標記重畫」，避免回饋迴圈。</summary>
         internal const string MarkerUpdateTransactionName = "更新相機標記";
+        internal const string KeyPlanTransactionName = "建立相機 Key Plan";
+        internal const string MarkerColorTransactionName = "變更相機標記顏色";
         /// <summary>標記重畫交易進行中（含 Commit 當下觸發的 DocumentChanged）。</summary>
         internal static bool IsUpdatingMarkers { get; private set; }
         // MarkerCrossRadiusCm／MarkerArrowLenCm（模型空間固定 cm）已被下面的「列印比例固定」
@@ -456,9 +458,10 @@ namespace RevitMCP.Core
 
             string cid = camera.UniqueId;
             string camName = camera.Name;
-            string planName = "Key Plan-" + camName + "-平面";
-            string sectionName = "Key Plan-" + camName + "-剖面";
-            string isoName = "Key Plan-" + camName + "-等角";
+            // 2026-09-26 稽核：先清掉 Revit 不允許的字元再比對／改名（否則「名稱不同 → 改名」每次都成立、依名稱找回也永遠找不到）。
+            string planName = SanitizeRevitName("Key Plan-" + camName + "-平面");
+            string sectionName = SanitizeRevitName("Key Plan-" + camName + "-剖面");
+            string isoName = SanitizeRevitName("Key Plan-" + camName + "-等角");
 
             double farClipFeet = cp.FarClipFeet;
             double leftRad = cp.LeftRad, rightRad = cp.RightRad;
@@ -514,7 +517,7 @@ namespace RevitMCP.Core
             string schemaErr = SelfCheckSchemas();
             if (schemaErr != null) Logger.Error("相機 Key Plan：ES Schema 自我檢查失敗（剖面狀態簿記將略過）：" + schemaErr);
 
-            using (Transaction t = TransactionHelper.Begin(doc, "建立相機 Key Plan"))
+            using (Transaction t = TransactionHelper.Begin(doc, KeyPlanTransactionName))
             {
                 t.Start();
                 try
@@ -567,7 +570,7 @@ namespace RevitMCP.Core
                     dec.IsoNearWallsLog = nearWallsLog;
                     result.IsoViewId = isoView.Id;
 
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                     BumpOwnViewsEpoch();
                     perf?.Lap("Key Plan 交易");
                 }
@@ -1207,8 +1210,13 @@ namespace RevitMCP.Core
             Transform target = intended.Transform;
             XYZ targetX = new XYZ(target.BasisX.X, target.BasisX.Y, 0).Normalize();
             string failReason = null;
+            // 2026-09-26 稽核：移動路徑包在 SubTransaction——中途失敗（方向不符／偏差 > 5 mm）時先回滾「轉了一半、移了一半」的 viewer，
+            // 再走退路。舊版在圖紙上的剖面會帶著半移動狀態一起提交，下次又被 HasUserMovedSection 誤判為「使用者手動移過」而永久保留錯位。
+            SubTransaction moveSt = null;
             try
             {
+                moveSt = new SubTransaction(doc);
+                moveSt.Start();
                 Transform cur = section.CropBox.Transform;
                 XYZ curX = new XYZ(cur.BasisX.X, cur.BasisX.Y, 0);
                 if (curX.GetLength() < 1e-6) throw new InvalidOperationException("目前剖面 BasisX 退化（非鉛直剖面？）");
@@ -1294,6 +1302,7 @@ namespace RevitMCP.Core
                 }
                 if (dev > SectionExtentToleranceMm)
                     throw new InvalidOperationException($"世界範圍偏差 {dev:F1}mm > {SectionExtentToleranceMm}mm");
+                moveSt.Commit();
                 log = sb.ToString();
                 Logger.Info($"相機 Key Plan：更新既有剖面「{section.Name}」 {log}");
                 return section;
@@ -1301,8 +1310,17 @@ namespace RevitMCP.Core
             catch (Exception ex)
             {
                 failReason = ex.Message;
+                try
+                {
+                    if (moveSt != null && moveSt.HasStarted() && !moveSt.HasEnded()) { moveSt.RollBack(); sb.Append("已回滾部分移動；"); }
+                }
+                catch (Exception exRb) { Logger.Error("相機 Key Plan：回滾剖面部分移動失敗", exRb); }
                 sb.Append($"移動路徑失敗：{ex.Message}；");
                 Logger.Error($"相機 Key Plan：更新既有剖面「{section.Name}」的位置失敗", ex);
+            }
+            finally
+            {
+                moveSt?.Dispose();
             }
 
             // ④ 退路：不在圖紙上 → 刪除重建；在圖紙上 → 回報
@@ -2646,14 +2664,30 @@ namespace RevitMCP.Core
                     t.Start();
                     try
                     {
+                        List<Level> storeys = null;
                         foreach (var g in groups.Values)
                         {
-                            List<Level> levels = g.Item3.Select(u => doc.GetElement(u) as Level).Where(l => l != null)
-                                .OrderBy(l => l.ProjectElevation).ToList();
+                            List<Level> levels = null;
+                            // 2026-09-26 稽核：舊版只重畫「已經畫過的那幾條樓層」→ 新插入的樓層、或移進／移出保留範圍的樓層不會更新。
+                            // 剖面且相機仍在 → 依相機目前樓層重算保留集合（與一鍵 4 視圖同一規則）；算不出來才沿用既有集合。
+                            try
+                            {
+                                if (g.Item1 is ViewSection && doc.GetElement(g.Item2) is View3D cam && cam.IsPerspective && !cam.IsTemplate)
+                                {
+                                    if (storeys == null) storeys = CameraMath.GetStoreyLevelsSorted(doc);
+                                    CameraParams cpL = ComputeCameraParams(cam, storeys);
+                                    if (cpL?.Geom?.LevelBelow != null)
+                                        levels = ComputeSectionKeepLevels(doc, cpL.Geom.LevelBelow, cpL.IsOutdoor, g.Item1);
+                                }
+                            }
+                            catch (Exception exKeep) { Logger.Error("相機 Key Plan：重算剖面樓層記號保留集合失敗（沿用既有樓層）", exKeep); levels = null; }
+                            if (levels == null || levels.Count == 0)
+                                levels = g.Item3.Select(u => doc.GetElement(u) as Level).Where(l => l != null)
+                                    .OrderBy(l => l.ProjectElevation).ToList();
                             DrawMarkerSafely(doc, "UpdateLevelMarks", () => DrawSectionLevelMarks(doc, g.Item1, levels, g.Item2));
                             done++;
                         }
-                        t.Commit();
+                        TransactionHelper.CommitOrThrow(t);
                         BumpOwnViewsEpoch();
                     }
                     catch
@@ -3666,6 +3700,8 @@ namespace RevitMCP.Core
                 var overviewCams = new List<(View3D cam, CameraParams cp)>();
                 var prevStorey = new Dictionary<string, long?>(StringComparer.Ordinal);
                 int done = 0, levelMarkRedraw = 0;
+                var drawFailed = new HashSet<string>(StringComparer.Ordinal); // 2026-09-26 稽核：畫失敗的相機不記「已畫」
+                bool sharedDrawFailed = false;
                 IsUpdatingMarkers = true;
                 try
                 {
@@ -3699,13 +3735,17 @@ namespace RevitMCP.Core
                                 if (plan != null && (force || storeyChanged) && IsPlanLevelMismatch(plan, cp.Geom.LevelBelow.Id))
                                     Logger.Info($"相機 Key Plan：「{cam.Name}」Key Plan 平面樓層不符（平面 {plan.GenLevel?.Name ?? "?"}、相機 {cp.Geom.LevelBelow.Name}）→ 請重跑一鍵 4 視圖重建");
                                 if (plan != null && (parts & MarkerParts.Plan) != 0)
-                                    DrawMarkerSafely(doc, "UpdatePlanMarker",
-                                        () => DrawPlanMarker(doc, plan, cp.Geom, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, cp.FanRadiusFeet, cid));
+                                {
+                                    if (!DrawMarkerSafely(doc, "UpdatePlanMarker",
+                                        () => DrawPlanMarker(doc, plan, cp.Geom, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, cp.FanRadiusFeet, cid)))
+                                        drawFailed.Add(cid);
+                                }
                                 sections.TryGetValue(cid, out ViewSection sec);
                                 if (sec != null && (parts & MarkerParts.Section) != 0)
                                 {
-                                    DrawMarkerSafely(doc, "UpdateSectionMarker",
-                                        () => DrawSectionMarker(doc, sec, cp.Geom, cp.CenterHoriz ?? cp.ForwardHoriz, cp.FanRadiusFeet, cp.DownRad, cp.UpRad, cid));
+                                    if (!DrawMarkerSafely(doc, "UpdateSectionMarker",
+                                        () => DrawSectionMarker(doc, sec, cp.Geom, cp.CenterHoriz ?? cp.ForwardHoriz, cp.FanRadiusFeet, cp.DownRad, cp.UpRad, cid)))
+                                        drawFailed.Add(cid);
                                     // 2026-09-25（§5.1）：淡化樣式下，簡化樓層記號跟著相機目前樓層重畫（2026-09-26：只在樓層變了才重畫）。
                                     if (IsKeyPlanFadedStyle() && (force || storeyChanged))
                                     {
@@ -3732,18 +3772,20 @@ namespace RevitMCP.Core
                             if (anyOverview)
                             {
                                 int ov = 0;
-                                DrawMarkerSafely(doc, "UpdateOverviewMarkers", () => ov = RedrawCamerasInOverviews(doc, overviewCams, force ? null : prevStorey));
+                                if (!DrawMarkerSafely(doc, "UpdateOverviewMarkers", () => ov = RedrawCamerasInOverviews(doc, overviewCams, force ? null : prevStorey)))
+                                    sharedDrawFailed = true;
                                 if (ov > 0) Logger.Info($"相機 Key Plan：更新樓層總覽上 {ov} 台相機的標記");
                             }
                             perf.Lap("總覽標記");
                             if (syncA)
                             {
                                 string aLog = null;
-                                DrawMarkerSafely(doc, "UpdateAMarkers", () => aLog = SyncAMarkersInTransaction(doc, overviewCams, placeMissing: true, light: !force));
+                                if (!DrawMarkerSafely(doc, "UpdateAMarkers", () => aLog = SyncAMarkersInTransaction(doc, overviewCams, placeMissing: true, light: !force)))
+                                    sharedDrawFailed = true;
                                 if (aLog != null) Logger.Info("相機 Key Plan：更新 A 型標記 " + aLog);
                             }
                             perf.Lap("A 標記");
-                            t.Commit();
+                            TransactionHelper.CommitOrThrow(t);
                             BumpOwnViewsEpoch();
                             perf.Lap("Commit");
                         }
@@ -3753,7 +3795,12 @@ namespace RevitMCP.Core
                             throw;
                         }
                     }
-                    foreach (var (cam, cp) in overviewCams) RecordDrawn(doc, cam, cp);
+                    // 2026-09-26 稽核：只記錄真的畫成功的相機；總覽／A 標記整批失敗 → 全部不記（下次整批重試）。
+                    if (!sharedDrawFailed)
+                        foreach (var (cam, cp) in overviewCams)
+                            if (!drawFailed.Contains(cam.UniqueId)) RecordDrawn(doc, cam, cp);
+                    if (drawFailed.Count > 0 || sharedDrawFailed)
+                        Logger.Info($"相機 Key Plan：更新標記有失敗（個別 {drawFailed.Count} 台{(sharedDrawFailed ? "、總覽／A 標記整批" : "")}）→ 不記「已畫」，下次變動時重試。");
                 }
                 finally
                 {
@@ -4039,7 +4086,7 @@ namespace RevitMCP.Core
         internal static string ApplyMarkerColor(Document doc, byte r, byte g, byte b)
         {
             if (doc == null) return "目前沒有開啟中的文件。";
-            using (Transaction t = TransactionHelper.Begin(doc, "變更相機標記顏色"))
+            using (Transaction t = TransactionHelper.Begin(doc, MarkerColorTransactionName))
             {
                 try
                 {
@@ -4060,7 +4107,7 @@ namespace RevitMCP.Core
                         Logger.Info($"相機 Key Plan：標記顏色變更，已更新 {n} 個既有箭頭的視圖取代顏色");
                     }
                     catch (Exception ex) { Logger.Error("相機 Key Plan：更新既有箭頭取代顏色失敗（線色仍會更新）", ex); }
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                     return null;
                 }
                 catch (Exception ex)
@@ -4074,7 +4121,8 @@ namespace RevitMCP.Core
 
         /// <summary>標記繪製一律包在 SubTransaction＋try/catch：任何失敗只回滾標記本身並記 log，
         /// 絕不讓一鍵 4 視圖整筆交易回滾（視圖照樣建立）。</summary>
-        private static void DrawMarkerSafely(Document doc, string what, Action draw)
+        /// <returns>2026-09-26 稽核：true＝已畫；false＝失敗已回滾（呼叫端據此不記「已畫」，下次不會被姿態雜湊略過）。</returns>
+        private static bool DrawMarkerSafely(Document doc, string what, Action draw)
         {
             SubTransaction st = null;
             try
@@ -4083,12 +4131,14 @@ namespace RevitMCP.Core
                 st.Start();
                 draw();
                 st.Commit();
+                return true;
             }
             catch (Exception ex)
             {
                 try { if (st != null && st.HasStarted() && !st.HasEnded()) st.RollBack(); } catch { }
                 Logger.Error($"相機 Key Plan：{what} 失敗，略過標記（視圖照常建立）", ex);
                 CameraManagerDiagnostics.RecordCaught(what, ex);
+                return false;
             }
             finally
             {
@@ -4437,8 +4487,32 @@ namespace RevitMCP.Core
         // 小工具
         // ══════════════════════════════════════════════════════════
 
+        /// <summary>Revit 視圖／圖紙／類型名稱不允許的字元（Revit UI 會擋：{}[]:\|;&lt;&gt;?`~）。</summary>
+        private static readonly char[] InvalidRevitNameChars = { '{', '}', '[', ']', ':', '\\', '|', ';', '<', '>', '?', '`', '~' };
+
+        /// <summary>把 Revit 名稱不允許的字元換成「_」並去掉控制字元／前後空白；空字串回傳 fallback。
+        /// 相機名稱雖然已是合法視圖名，但樓層名、使用者輸入、複製名稱組合後仍可能出現非法字元
+        /// （設 Name 會丟 ArgumentException、整筆交易回滾），所以所有建立／改名路徑一律先過這裡。</summary>
+        internal static string SanitizeRevitName(string name, string fallback = "未命名")
+        {
+            if (string.IsNullOrWhiteSpace(name)) return fallback;
+            var sb = new System.Text.StringBuilder(name.Length);
+            foreach (char c in name)
+            {
+                if (char.IsControl(c)) continue;
+                sb.Append(Array.IndexOf(InvalidRevitNameChars, c) >= 0 ? '_' : c);
+            }
+            string r = sb.ToString().Trim();
+            return r.Length == 0 ? fallback : r;
+        }
+
+        /// <summary>名稱是否含 Revit 不允許的字元（給使用者輸入的改名做明確拒絕）。</summary>
+        internal static bool HasInvalidRevitNameChars(string name)
+            => !string.IsNullOrEmpty(name) && (name.IndexOfAny(InvalidRevitNameChars) >= 0 || name.Any(char.IsControl));
+
         private static string MakeUniqueName(Document doc, string baseName, ElementId excludeId)
         {
+            baseName = SanitizeRevitName(baseName);
             HashSet<string> existing = new HashSet<string>(
                 new FilteredElementCollector(doc).OfClass(typeof(View)).Cast<View>()
                     .Where(v => v.Id != excludeId)
@@ -4460,6 +4534,7 @@ namespace RevitMCP.Core
         /// （例如 <see cref="FilledRegionType"/>）的名稱去重，不限於 View。</summary>
         private static string MakeUniqueTypeName(Document doc, Type elementType, string baseName)
         {
+            baseName = SanitizeRevitName(baseName);
             HashSet<string> existing = new HashSet<string>(
                 new FilteredElementCollector(doc).OfClass(elementType).Cast<ElementType>().Select(t => t.Name),
                 StringComparer.OrdinalIgnoreCase);

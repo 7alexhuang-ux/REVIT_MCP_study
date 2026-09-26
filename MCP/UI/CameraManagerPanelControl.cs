@@ -115,6 +115,14 @@ namespace RevitMCP.UI
         /// <summary>給 Application.cs 判斷作用中文件是否仍是面板資料的來源文件。</summary>
         public string LoadedDocumentKey => _loadedDocKey;
 
+        /// <summary>2026-09-26 稽核：另存新檔後文件鍵改變 → 面板改認新鍵（只在舊鍵＝面板來源文件時）。API context 呼叫。</summary>
+        public bool RekeyLoadedDocument(string oldKey, string newKey)
+        {
+            if (oldKey == null || newKey == null || _loadedDocKey != oldKey) return false;
+            _loadedDocKey = newKey;
+            return true;
+        }
+
         /// <summary>文件識別字串（標題＋路徑）。只在 API context 內呼叫（Idling／ExternalEvent／DocumentClosing）。</summary>
         public static string GetDocumentKey(Document doc)
         {
@@ -126,9 +134,10 @@ namespace RevitMCP.UI
         public CameraManagerPanelControl()
         {
             // 2026-09-26 第六輪：set_camera_pose（MCP）的去抖後續更新交給面板（面板已啟用時；同一個 800 ms 計時器、同一台合併）。
-            CameraKeyPlanService.PanelFollowUpSink = (id, hint) =>
+            CameraKeyPlanService.PanelFollowUpSink = (doc, id, hint) =>
             {
-                if (!_armed) return false;
+                // 2026-09-26 稽核：只接受面板資料來源文件的相機（MCP 可能對另一份文件下 set_camera_pose）。
+                if (!_armed || GetDocumentKey(doc) != _loadedDocKey) return false;
                 QueueCameraUpdate(id, hint);
                 return true;
             };
@@ -696,7 +705,7 @@ namespace RevitMCP.UI
             CameraRow row = GetPrimarySelectedRow();
             ElementId levelId = row?.LevelId;
             SetStatus("更新樓層總覽中...");
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 string msg;
                 try
@@ -794,7 +803,7 @@ namespace RevitMCP.UI
             if (row == null) { SetStatus("請先在清單選取一個相機。"); return; }
             string uid = row.UniqueId;
             ElementId perspId = row.ViewId;
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 string msg;
                 try
@@ -1168,7 +1177,7 @@ namespace RevitMCP.UI
             ElementId camId = row.ViewId;
             string camName = row.Name;
             SetStatus($"為「{camName}」建立圖紙中...");
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 string msg;
                 try
@@ -1255,7 +1264,7 @@ namespace RevitMCP.UI
             if (row == null) return;
             ElementId camId = row.ViewId;
             SetStatus("儲存視角版本中...");
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 string msg;
                 try
@@ -1277,7 +1286,7 @@ namespace RevitMCP.UI
             if (row == null) return;
             ElementId camId = row.ViewId;
             SetStatus($"還原視角「{name}」中...");
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 string msg;
                 try
@@ -1301,7 +1310,7 @@ namespace RevitMCP.UI
             if (row == null) return;
             ElementId camId = row.ViewId;
             SetStatus($"刪除視角版本「{name}」中...");
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 string msg;
                 try
@@ -1478,7 +1487,7 @@ namespace RevitMCP.UI
 
             int gen = _generation;
             string uid = primary.UniqueId;
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 XYZ p1 = null, p2 = null;
                 bool ok = false;
@@ -1738,6 +1747,7 @@ namespace RevitMCP.UI
                 _followAfterSnapshotViewId = null;
                 _followRefreshTimer?.Stop();
                 _baseMapRefreshInFlight = false;
+                ClearInFlightFlags(); // 2026-09-26 稽核
                 _sideBySideActive = false;
                 _sideBySideOpenedViewIds = new List<ElementId>();
                 _sideBySidePreviousActiveViewId = null;
@@ -1937,7 +1947,7 @@ namespace RevitMCP.UI
             Logger.Info($"相機管理面板：底圖匯出開始（planViewId={planViewId.GetIdValue()}）。");
             SetStatus("匯出底圖...");
             int gen = _generation;
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 BaseMapSnapshot map = null;
                 int modelEpoch = CameraKeyPlanService.ModelEpoch, ownEpoch = CameraKeyPlanService.OwnViewsEpoch;
@@ -1965,9 +1975,9 @@ namespace RevitMCP.UI
         {
             if (generation != _generation)
             {
+                // 2026-09-26 稽核：過期回呼不動旗標——ResetToNeutral 已清過；此時旗標屬於新一代的匯出，清掉會讓新匯出與
+                // 使用者之後挑的底圖（_pendingBaseMapPlanId）被丟失。
                 CameraManagerService.CleanupTempDir(map?.TempDirectory);
-                _baseMapRefreshInFlight = false;
-                _pendingBaseMapPlanId = null;
                 return;
             }
             try
@@ -2056,7 +2066,7 @@ namespace RevitMCP.UI
         private void OnNameEditCommitted(CameraRow row, string newName)
         {
             SetStatus("重新命名中...");
-            RunSuppressed(() => EnqueueRevit(uiApp =>
+            RunSuppressed(() => EnqueueForLoadedDoc(uiApp =>
             {
                 Document doc = uiApp?.ActiveUIDocument?.Document;
                 string err = CameraManagerService.RenameCameraView(doc, row.ViewId, newName);
@@ -2116,7 +2126,7 @@ namespace RevitMCP.UI
                 long enqueuedAt = System.Diagnostics.Stopwatch.GetTimestamp();
                 string what = edit.What();
                 SetStatus("套用" + what + "...");
-                CameraManagerEventQueue.EnqueuePriority("FastPoseEdit", uiApp =>
+                EnqueuePriorityForLoadedDoc("FastPoseEdit", uiApp =>
                 {
                     long waitMs = (System.Diagnostics.Stopwatch.GetTimestamp() - enqueuedAt) * 1000 / System.Diagnostics.Stopwatch.Frequency;
                     CameraPoseEditResult res;
@@ -2197,7 +2207,7 @@ namespace RevitMCP.UI
             ConfigManager.Instance.SaveSettings();
 
             SetStatus("套用高度中...");
-            RunSuppressed(() => EnqueueRevit(uiApp =>
+            RunSuppressed(() => EnqueueForLoadedDoc(uiApp =>
             {
                 Document doc = uiApp?.ActiveUIDocument?.Document;
                 var (okCount, skippedCount, err) = CameraManagerService.ApplyHeightToCameras(doc, targetIds, heightCm);
@@ -2225,7 +2235,7 @@ namespace RevitMCP.UI
             }
 
             SetStatus("複製相機中...");
-            RunSuppressed(() => EnqueueRevit(uiApp =>
+            RunSuppressed(() => EnqueueForLoadedDoc(uiApp =>
             {
                 Document doc = uiApp?.ActiveUIDocument?.Document;
                 var (created, err) = CameraManagerService.CopyCameraToLevels(doc, source.ViewId, targetLevelIds);
@@ -2269,7 +2279,7 @@ namespace RevitMCP.UI
         private void OpenPerspectiveOnly(ElementId viewId)
         {
             SetStatus("打開透視圖...");
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 string err;
                 try { err = CameraManagerService.OpenPerspectiveOnly(uiApp, viewId); }
@@ -2281,7 +2291,7 @@ namespace RevitMCP.UI
         private void JumpToView(ElementId viewId)
         {
             SetStatus("跳轉視圖...");
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 string err = CameraManagerService.JumpToView(uiApp, viewId);
                 RunOnUiThread(() => SetStatus(err ?? "已跳轉"));
@@ -2319,7 +2329,7 @@ namespace RevitMCP.UI
             bool queued = false;
             try
             {
-                RunSuppressed(() => EnqueueRevit(uiApp =>
+                RunSuppressed(() => EnqueueForLoadedDoc(uiApp =>
                 {
                     string err = null;
                     var createdList = new List<(ElementId id, string name)>();
@@ -2399,7 +2409,7 @@ namespace RevitMCP.UI
 
             Logger.Info($"相機管理面板：一鍵 4 視圖開始（viewId={row.ViewId?.GetIdValue()}, forceResetSection={forceResetSection}）。");
             SetStatus(forceResetSection ? "重設剖面位置中..." : "建立/更新 Key Plan 中...");
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 Document doc = uiApp?.ActiveUIDocument?.Document;
                 if (doc == null)
@@ -2464,7 +2474,7 @@ namespace RevitMCP.UI
             if (row.LevelId == null) { SetStatus("找不到這台相機的所在樓層，無法並排檢視。"); return; }
 
             SetStatus("並排檢視中...");
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 Document doc = uiApp?.ActiveUIDocument?.Document;
                 string err = null;
@@ -2542,7 +2552,7 @@ namespace RevitMCP.UI
             ElementId reactivate = _sideBySidePreviousActiveViewId;
 
             SetStatus("還原中...");
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 Document doc = uiApp?.ActiveUIDocument?.Document;
                 string err = null;
@@ -2588,11 +2598,14 @@ namespace RevitMCP.UI
             if (row == null) { SetStatus("請先在清單選取一個相機。"); return; }
             if (row.LevelId == null) { SetStatus("找不到這台相機的所在樓層。"); return; }
 
-            EnqueueRevit(uiApp =>
+            EnqueueForLoadedDoc(uiApp =>
             {
                 Document doc = uiApp?.ActiveUIDocument?.Document;
                 PreviewControl a = null, b = null;
                 string err = null;
+                // 2026-09-26 稽核：預覽控制項在 API context 建立、視窗稍後才在 UI 執行緒顯示；中間文件若關閉
+                // （DocumentClosing 已先跑完 CloseAllPreviewWindows），不可再顯示綁著已關閉文件的 PreviewControl。
+                int closeEpoch = System.Threading.Volatile.Read(ref _previewCloseEpoch);
                 try
                 {
                     if (doc == null) throw new Exception("目前沒有開啟中的文件。");
@@ -2611,6 +2624,13 @@ namespace RevitMCP.UI
                 RunOnUiThread(() =>
                 {
                     if (err != null) { SetStatus("開啟預覽視窗失敗：" + err); return; }
+                    if (System.Threading.Volatile.Read(ref _previewCloseEpoch) != closeEpoch)
+                    {
+                        SafeDispose(a); SafeDispose(b);
+                        Logger.Info("相機管理面板：預覽視窗建立期間文件已關閉 → 丟棄，不顯示。");
+                        SetStatus("文件已關閉，未開啟預覽視窗。");
+                        return;
+                    }
                     var win = new CameraPreviewWindow();
                     win.SetPreviews(a, b);
                     // 2026-09-24 崩潰修復：追蹤這個視窗，讓文件關閉／Revit 關閉時能強制關掉
@@ -2637,8 +2657,12 @@ namespace RevitMCP.UI
         /// 就是這類物件沒被明確 Dispose 的後果（Application.cs 訂閱處有完整說明）。
         /// 一律經 RunOnUiThread：Window.Close() 必須在建立該視窗的執行緒（UI 執行緒）上呼叫，
         /// 而 DocumentClosing／OnShutdown 都可能不是從 UI 執行緒的正常訊息處理路徑呼叫進來。</summary>
+        /// <summary>2026-09-26 稽核：每次 CloseAllPreviewWindows 遞增；建立中的預覽視窗據此判斷文件是否已在中途關閉。</summary>
+        private int _previewCloseEpoch;
+
         public void CloseAllPreviewWindows()
         {
+            System.Threading.Interlocked.Increment(ref _previewCloseEpoch);
             Action closeAll = () =>
             {
                 if (_openPreviewWindows.Count == 0) return;
@@ -2985,6 +3009,58 @@ namespace RevitMCP.UI
         private static void EnqueueRevit(Action<UIApplication> action, [CallerMemberName] string caller = "")
         {
             CameraManagerEventQueue.Enqueue(caller, action);
+        }
+
+        /// <summary>
+        /// 2026-09-26 稽核：排入「用面板清單的 ElementId 操作文件」的動作。排入當下記住面板資料來源文件；佇列真正執行時
+        /// 作用中文件若已不是它（使用者在底圖匯出等長工作期間切換視窗、或兩份同一模型的複本 Id 相同），就取消，
+        /// 不把 Id 套到另一份文件的同號元素上。取消時清掉這類動作的進行中旗標（面板隨後也會被 Idling 清回中性狀態）。
+        /// </summary>
+        private void EnqueueForLoadedDoc(Action<UIApplication> action, [CallerMemberName] string caller = "")
+            => CameraManagerEventQueue.Enqueue(caller, WrapForLoadedDoc(action, caller));
+
+        /// <summary>同 <see cref="EnqueueForLoadedDoc"/>，走優先佇列（編輯快速路徑）。</summary>
+        private void EnqueuePriorityForLoadedDoc(string name, Action<UIApplication> action)
+            => CameraManagerEventQueue.EnqueuePriority(name, WrapForLoadedDoc(action, name));
+
+        private Action<UIApplication> WrapForLoadedDoc(Action<UIApplication> action, string caller)
+        {
+            string expected = _loadedDocKey;
+            return uiApp =>
+            {
+                Document d = null;
+                try { d = uiApp?.ActiveUIDocument?.Document; } catch { d = null; }
+                if (expected == null || GetDocumentKey(d) != expected)
+                {
+                    Logger.Info($"相機管理面板：「{caller}」取消——作用中文件已不是面板資料來源文件（排入時 {expected ?? "(無)"}）。");
+                    RunOnUiThread(() =>
+                    {
+                        // 只清「會經由本包裝排入」的動作旗標；快照／標記計時器的旗標屬於未包裝的排程，交給 ResetToNeutral。
+                        _suppressLiveSync = false;
+                        _fourViewsInFlight = false;
+                        _sheetInFlight = false;
+                        _sectionLineInFlight = false;
+                        _baseMapRefreshInFlight = false;
+                        SetStatus("作用中文件已切換，已取消上一個動作；請按重新整理。");
+                    });
+                    return;
+                }
+                action(uiApp);
+            };
+        }
+
+        /// <summary>2026-09-26 稽核：所有「進行中」旗標歸零（動作被取消或面板回到中性狀態時）。舊版只由各動作自己的回呼清除，
+        /// 動作被丟棄／中途丟例外時旗標卡住 → RefreshAll 永遠不動、live sync 永遠不跑、標記計時器每 800 ms 空轉。UI 執行緒。</summary>
+        private void ClearInFlightFlags()
+        {
+            _suppressLiveSync = false;
+            _snapshotQueued = false;
+            _snapshotQueuedExport = false;
+            _fourViewsInFlight = false;
+            _sheetInFlight = false;
+            _markerRefreshInFlight = false;
+            _sectionLineInFlight = false;
+            _baseMapRefreshInFlight = false;
         }
 
         /// <summary>簡易 placeholder（標題列搜尋框用）：空白時顯示灰字提示，聚焦時清空。</summary>

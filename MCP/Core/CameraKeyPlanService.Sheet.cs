@@ -239,9 +239,15 @@ namespace RevitMCP.Core
                 KeyPlanResult kp = CreateOrUpdateFourViews(uiApp, doc, cameraViewId, false);
                 if (kp.Error != null) { res.Error = "先建立 Key Plan 失敗：" + kp.Error; return res; }
                 res.RanFourViews = true;
-                plan = doc.GetElement(kp.PlanViewId) as View;
-                section = doc.GetElement(kp.SectionViewId) as View;
-                iso = doc.GetElement(kp.IsoViewId) as View;
+                // 2026-09-26 稽核：Id 可能為 null（或交易回滾後元素已不存在）→ GetElement(null) 會丟 ArgumentNullException。
+                plan = kp.PlanViewId != null ? doc.GetElement(kp.PlanViewId) as View : null;
+                section = kp.SectionViewId != null ? doc.GetElement(kp.SectionViewId) as View : null;
+                iso = kp.IsoViewId != null ? doc.GetElement(kp.IsoViewId) as View : null;
+                if (plan == null || section == null || iso == null)
+                {
+                    res.Error = $"一鍵 4 視圖完成但讀不回 Key Plan 視圖（平面={plan != null} 剖面={section != null} 等角={iso != null}），未建立圖紙。";
+                    return res;
+                }
             }
 
             // 2) 交易外：圖框、視埠類型、各視圖目前在哪張圖紙
@@ -287,7 +293,7 @@ namespace RevitMCP.Core
                 t.Start();
                 try
                 {
-                    string sheetName = "Key Plan-" + camName;
+                    string sheetName = SanitizeRevitName("Key Plan-" + camName);
                     if (sheet == null)
                     {
                         sheet = ViewSheet.Create(doc, tbType);
@@ -437,7 +443,7 @@ namespace RevitMCP.Core
                     foreach (SheetViewportInfo info in res.Viewports)
                         if (info.ViewportId != null && doc.GetElement(info.ViewportId) is Viewport vpx) FillViewportGeometry(doc, vpx, info);
 
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                 }
                 catch (Exception ex)
                 {

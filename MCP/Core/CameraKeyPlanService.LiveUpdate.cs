@@ -111,6 +111,13 @@ namespace RevitMCP.Core
                 sb.Append('|').Append(far != null ? R(CameraMath.FeetToMm(far.AsDouble()), 1) : "-");
             }
             catch { sb.Append("|?"); }
+            // 2026-09-26 稽核：遠裁剪開／關也列入（舊版只看距離，切換開關不會觸發標記更新）。
+            try
+            {
+                Parameter act = cam.get_Parameter(BuiltInParameter.VIEWER_BOUND_ACTIVE_FAR);
+                sb.Append("|fa").Append(act != null && act.StorageType == StorageType.Integer ? act.AsInteger().ToString(CultureInfo.InvariantCulture) : "-");
+            }
+            catch { sb.Append("|fa?"); }
             return sb.ToString();
         }
 
@@ -157,6 +164,19 @@ namespace RevitMCP.Core
         {
             try { _lastKeyPlan[PoseKey(doc, cam.UniqueId)] = BuildPoseRecord(cam, cp, ComputePoseHash(cam)); }
             catch { }
+        }
+
+        /// <summary>2026-09-26 稽核：文件關閉／開啟、或 Undo／Redo 後，舊的「上次已畫」紀錄不再可信 → 全清，下次一律重畫。</summary>
+        internal static void ClearPoseRecords()
+        {
+            _lastDrawn.Clear();
+            _lastKeyPlan.Clear();
+        }
+
+        /// <summary>2026-09-26 稽核：某台相機的標記／剖面重畫失敗 → 移除「已畫」紀錄，避免之後被姿態雜湊判定「沒變」而永遠略過。</summary>
+        private static void ForgetDrawn(Document doc, string cid)
+        {
+            try { if (doc != null && !string.IsNullOrEmpty(cid)) _lastDrawn.Remove(PoseKey(doc, cid)); } catch { }
         }
 
         /// <summary>視野形狀雜湊：裁剪框啟用與 Min/Max（0.1 mm）＋遠裁剪（0.1 mm）。與眼睛／方向無關。</summary>
@@ -247,6 +267,8 @@ namespace RevitMCP.Core
                             if (kv.Value?.Before == null || !cameraIds.Contains(kv.Key)) continue;
                             if (!(doc.GetElement(kv.Key) is View3D cam) || cam.IsTemplate || !cam.IsPerspective) continue;
                             if (ReadVersions(cam).Count > 0) continue;
+                            // 2026-09-26 稽核：版本資料損毀的相機寫入會被拒 → 不放進同一交易（否則整批回滾、其他相機也存不到 A案）。
+                            if (IsVersionDataCorrupt(cam)) { Logger.Info($"相機視角版本：「{cam.Name}」版本資料損毀，略過自動存 A案。"); continue; }
                             toSave.Add((cam, kv.Value.Before));
                         }
                     }
@@ -263,7 +285,7 @@ namespace RevitMCP.Core
                                     WriteVersions(cam, new List<CameraViewVersion> { v });
                                     Logger.Info($"相機視角版本：「{cam.Name}」第一次被導覽修改前自動存「{OriginalVersionName}」（原始視角）。");
                                 }
-                                t.Commit();
+                                TransactionHelper.CommitOrThrow(t);
                                 notes.Add($"自動存「{OriginalVersionName}」{toSave.Count} 台");
                             }
                             catch (Exception ex)
@@ -339,14 +361,26 @@ namespace RevitMCP.Core
                 {
                     List<ElementId> ids = G(k);
                     if (ids.Count == 0) return;
-                    int n = UpdateMarkersForCameras(doc, ids, false, parts, out string mSummary);
-                    drawnCount += n;
-                    if (n > 0) redrawn.Add($"{label}×{n}");
-                    if (!string.IsNullOrEmpty(mSummary)) notes.Add(mSummary);
+                    // 2026-09-26 稽核：一組失敗（交易丟例外）不得中斷其他組、剖面對位與面板後續的樓層記號更新。
+                    try
+                    {
+                        int n = UpdateMarkersForCameras(doc, ids, false, parts, out string mSummary);
+                        drawnCount += n;
+                        if (n > 0) redrawn.Add($"{label}×{n}");
+                        if (!string.IsNullOrEmpty(mSummary)) notes.Add(mSummary);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error($"相機變動後更新：「{label}」重畫失敗（略過此組）", ex);
+                        CameraManagerDiagnostics.RecordCaught("FollowUpDraw", ex);
+                        notes.Add($"{label}重畫失敗：{ex.Message}");
+                        foreach (ElementId fid in ids) { try { ForgetDrawn(doc, doc.GetElement(fid)?.UniqueId); } catch { } }
+                    }
                 }
                 Draw(FollowUpKind.Markers, MarkerParts.All, "平面＋剖面標記");
                 Draw(FollowUpKind.SectionPitch, MarkerParts.Section | MarkerParts.AMarker, "剖面標記＋A");
-                Draw(FollowUpKind.SectionOnly, MarkerParts.Section, "剖面標記");
+                // 2026-09-26 稽核：A 標記族群實例與扇形放在眼睛高度 → 只改高度也要移 A 標記（舊版只畫剖面，A 標記停在舊高度且被記為已畫）。
+                Draw(FollowUpKind.SectionOnly, MarkerParts.Section | MarkerParts.AMarker, "剖面標記＋A");
                 // 剖面重新對位：平面／總覽／A 標記照常重畫，剖面標記留給對位後再畫（避免畫兩次）。
                 Draw(FollowUpKind.SectionRealign, MarkerParts.Plan | MarkerParts.Overview | MarkerParts.AMarker, "平面標記");
                 updated += drawnCount;
@@ -355,14 +389,23 @@ namespace RevitMCP.Core
                 {
                     try
                     {
-                        string r = RealignSectionForCamera(doc, id);
+                        string r = RealignSectionForCamera(doc, id, out bool recreated);
                         notes.Add(r);
                         redrawn.Add("剖面對位×1");
+                        // 2026-09-26 稽核：剖面在對位時被刪除重建 → 新剖面沒有 Key Plan 樣式與樓層記號、平面也沒隱藏其他剖面標頭
+                        // → 補跑一次完整 Key Plan 更新（同一鍵 4 視圖，不並排）。
+                        if (recreated && uiApp != null)
+                        {
+                            KeyPlanResult kr = CreateOrUpdateFourViews(uiApp, doc, id);
+                            notes.Add(kr.Error == null ? "剖面已重建 → 已補套 Key Plan 樣式與樓層記號" : "剖面已重建，補套 Key Plan 樣式失敗：" + kr.Error);
+                        }
                     }
                     catch (Exception ex)
                     {
                         Logger.Error("相機變動後更新：剖面重新對位失敗（略過）", ex);
                         CameraManagerDiagnostics.RecordCaught("RealignSection", ex);
+                        // 2026-09-26 稽核：平面標記已在上面記為「已畫」，但剖面沒對位 → 移除紀錄，下次不會被判「姿態沒變」而略過。
+                        try { ForgetDrawn(doc, doc.GetElement(id)?.UniqueId); } catch { }
                     }
                 }
                 perf.Lap("剖面對位");
@@ -445,8 +488,9 @@ namespace RevitMCP.Core
         /// 與一鍵 4 視圖同一套剖面規格（ComputeSectionSpec＋GetOrCreateSectionView；使用者手動移過的剖面照樣保留），
         /// 但不動平面裁剪、等角框、樣式、並排。單一交易「更新相機標記」（DocumentChanged 端視為本工具自己的變更）。
         /// </summary>
-        internal static string RealignSectionForCamera(Document doc, ElementId cameraId)
+        internal static string RealignSectionForCamera(Document doc, ElementId cameraId, out bool recreated)
         {
+            recreated = false;
             if (!(doc?.GetElement(cameraId) is View3D camera) || camera.IsTemplate || !camera.IsPerspective) return "剖面對位：找不到相機";
             string cid = camera.UniqueId;
             ViewSection section = FindLinkedView(doc, cid, "Section") as ViewSection;
@@ -465,8 +509,9 @@ namespace RevitMCP.Core
                 try { planBasisX = plan?.CropBox?.Transform?.BasisX; } catch { planBasisX = null; }
                 SectionSpec spec = ComputeSectionSpec(geom, cp, isoXY, storeyTop, GetSectionOrientationMode(), planBasisX, cutPlaneZ, GetSectionAnchorMode());
                 perf.Lap("剖面規格");
-                string sectionName = "Key Plan-" + camera.Name + "-剖面";
+                string sectionName = SanitizeRevitName("Key Plan-" + camera.Name + "-剖面");
                 bool preserved = false;
+                bool recreatedLocal = false;
                 IsUpdatingMarkers = true;
                 try
                 {
@@ -475,10 +520,12 @@ namespace RevitMCP.Core
                         t.Start();
                         try
                         {
+                            ElementId oldSectionId = section.Id;
                             ViewSection sec = GetOrCreateSectionView(doc, sectionName, cid, geom, spec, false, out preserved);
+                            recreatedLocal = sec != null && sec.Id != oldSectionId;
                             DrawMarkerSafely(doc, "RealignSectionMarker",
                                 () => DrawSectionMarker(doc, sec, geom, cp.CenterHoriz ?? cp.ForwardHoriz, cp.FanRadiusFeet, cp.DownRad, cp.UpRad, cid));
-                            t.Commit();
+                            TransactionHelper.CommitOrThrow(t);
                             BumpOwnViewsEpoch();
                         }
                         catch
@@ -490,6 +537,7 @@ namespace RevitMCP.Core
                 }
                 finally { IsUpdatingMarkers = false; }
                 perf.Lap("交易");
+                recreated = recreatedLocal;
                 RecordDrawn(doc, camera, cp);
                 string msg = preserved ? $"剖面對位：「{camera.Name}」剖面曾手動移過，範圍保留，只重畫標記"
                                        : $"剖面對位：「{camera.Name}」剖面已跟著相機移動";
@@ -505,10 +553,14 @@ namespace RevitMCP.Core
         internal const int FollowUpDebounceMs = 800;
 
         /// <summary>面板註冊：(相機, 變動前姿態) → 面板已啟用就排進面板的去抖計時器並回傳 true。</summary>
-        internal static Func<ElementId, CameraPoseHint, bool> PanelFollowUpSink;
+        /// 2026-09-26 稽核：多帶 Document——面板只接受「面板資料來源文件」的相機（否則 id 會套到另一份文件的同號元素）。
+        internal static Func<Document, ElementId, CameraPoseHint, bool> PanelFollowUpSink;
 
         private static readonly object _followLock = new object();
         private static readonly Dictionary<ElementId, CameraPoseHint> _followPending = new Dictionary<ElementId, CameraPoseHint>();
+        /// <summary>2026-09-26 稽核：待執行項目的相機 UniqueId 與來源文件鍵——計時器觸發時作用中文件可能已換，只在同一份文件、同一台相機時執行。</summary>
+        private static readonly Dictionary<ElementId, string> _followPendingUid = new Dictionary<ElementId, string>();
+        private static string _followDocKey;
         private static System.Threading.Timer _followTimer;
 
         /// <summary>
@@ -516,18 +568,28 @@ namespace RevitMCP.Core
         /// 面板已啟用 → 交給面板（它還會在完成後更新狀態列）；否則用這裡的計時器，到時經相機管理佇列（ExternalEvent）執行。
         /// 呼叫端須在 Revit 主執行緒。
         /// </summary>
-        internal static string ScheduleFollowUp(ElementId cameraId, CameraPoseHint hint)
+        internal static string ScheduleFollowUp(Document doc, ElementId cameraId, CameraPoseHint hint)
         {
-            if (cameraId == null) return "沒有相機";
+            if (cameraId == null || doc == null) return "沒有相機";
+            string docKey = StoreyDocKey(doc);
+            string uid = null;
+            try { uid = doc.GetElement(cameraId)?.UniqueId; } catch { uid = null; }
             try
             {
-                if (PanelFollowUpSink != null && PanelFollowUpSink(cameraId, hint))
+                if (PanelFollowUpSink != null && PanelFollowUpSink(doc, cameraId, hint))
                     return $"已排入面板的去抖後續更新（{FollowUpDebounceMs} ms 後，依變動分級重畫）";
             }
             catch (Exception ex) { Logger.Error("相機後續更新：交給面板失敗（改用內建排程）", ex); }
             lock (_followLock)
             {
-                if (!_followPending.ContainsKey(cameraId)) _followPending[cameraId] = hint;
+                if (_followDocKey != null && _followDocKey != docKey && _followPending.Count > 0)
+                {
+                    Logger.Info($"相機後續更新（內建排程）：文件已換 → 捨棄前一份文件待執行的 {_followPending.Count} 台（下次編輯會重新判斷）");
+                    _followPending.Clear();
+                    _followPendingUid.Clear();
+                }
+                _followDocKey = docKey;
+                if (!_followPending.ContainsKey(cameraId)) { _followPending[cameraId] = hint; _followPendingUid[cameraId] = uid; }
                 if (_followTimer == null) _followTimer = new System.Threading.Timer(_ => OnFollowTimer(), null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
                 _followTimer.Change(FollowUpDebounceMs, System.Threading.Timeout.Infinite);
             }
@@ -537,18 +599,29 @@ namespace RevitMCP.Core
         private static void OnFollowTimer()
         {
             Dictionary<ElementId, CameraPoseHint> batch;
+            Dictionary<ElementId, string> uids;
+            string batchDocKey;
             lock (_followLock)
             {
                 if (_followPending.Count == 0) return;
                 batch = new Dictionary<ElementId, CameraPoseHint>(_followPending);
+                uids = new Dictionary<ElementId, string>(_followPendingUid);
+                batchDocKey = _followDocKey;
                 _followPending.Clear();
+                _followPendingUid.Clear();
             }
             // 計時器執行緒 → 相機管理佇列（ExternalEvent，thread-safe Raise）
             CameraManagerEventQueue.Enqueue("CameraFollowUp", uiApp =>
             {
                 Document doc = uiApp?.ActiveUIDocument?.Document;
                 if (doc == null) return;
-                var ids = batch.Keys.Where(id => doc.GetElement(id) is View3D).ToList();
+                if (StoreyDocKey(doc) != batchDocKey)
+                {
+                    Logger.Info($"相機後續更新（內建排程）：作用中文件已不是排入時的文件 → 略過 {batch.Count} 台");
+                    return;
+                }
+                var ids = batch.Keys.Where(id => doc.GetElement(id) is View3D v &&
+                                                 (!uids.TryGetValue(id, out string u) || u == null || v.UniqueId == u)).ToList();
                 if (ids.Count == 0) return;
                 string summary = UpdateCamerasAfterChange(uiApp, doc, ids, batch, out int n);
                 Logger.Info($"相機後續更新（內建排程）：{ids.Count} 台 → {summary}");

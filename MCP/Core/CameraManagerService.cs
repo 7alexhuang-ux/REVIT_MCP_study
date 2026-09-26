@@ -380,8 +380,8 @@ namespace RevitMCP.Core
                     {
                         t.Start();
                         ViewPlan temp = CreateBaseMapTempView(doc, (ViewPlan)source, out _, inTransaction: true);
-                        tempId = temp.Id;
-                        t.Commit();
+                        TransactionHelper.CommitOrThrow(t);
+                        tempId = temp.Id; // 2026-09-26 稽核：提交成功才記，未提交時 finally 不去刪已回滾的元素
                     }
                     ViewPlan committed = doc.GetElement(tempId) as ViewPlan;
                     return ExportDeterministic(doc, committed, (ViewPlan)source, "mode=CommitThenDelete");
@@ -790,7 +790,7 @@ namespace RevitMCP.Core
                         v.SetOrientation(CameraMath.BuildOrientationForHeightAboveLevel(v, levelBelow, heightCm));
                         okCount++;
                     }
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                 }
                 return (okCount, skippedCount, null);
             }
@@ -858,7 +858,7 @@ namespace RevitMCP.Core
                         }
                     }
 
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                 }
                 return null;
             }
@@ -898,6 +898,25 @@ namespace RevitMCP.Core
             catch { return false; }
         }
 
+        /// <summary>2026-09-26 稽核：編輯數值檢查（面板與 set_camera_pose 共用）。舊版不檢查：NaN／無限大直接寫進相機、
+        /// 俯仰角 ±90° 讓前方向垂直、BuildLevelUp 退化、遠裁剪 ≤ 0 寫入參數。回傳 null＝OK。</summary>
+        internal static string ValidatePoseEdit(CameraPoseEdit edit)
+        {
+            if (edit == null) return "沒有要套用的編輯。";
+            bool Bad(double? d) => d.HasValue && (double.IsNaN(d.Value) || double.IsInfinity(d.Value));
+            if (Bad(edit.HeightAboveLevelCm) || Bad(edit.YawDeg) || Bad(edit.PitchDeg) || Bad(edit.EyeXFeet) || Bad(edit.EyeYFeet) || Bad(edit.FarClipCm))
+                return "數值無效（NaN 或無限大）。";
+            if (edit.PitchDeg.HasValue && Math.Abs(edit.PitchDeg.Value) >= MaxPitchDeg)
+                return $"俯仰角必須介於 −{MaxPitchDeg:0.#}° 與 +{MaxPitchDeg:0.#}° 之間（±90° 時相機朝正上／正下，方向無法定義）。";
+            if (edit.FarClipCm.HasValue && edit.FarClipCm.Value <= 0) return "遠裁剪距離必須大於 0 cm。";
+            if (edit.HeightAboveLevelCm.HasValue && Math.Abs(edit.HeightAboveLevelCm.Value) > MaxAbsHeightCm)
+                return $"離樓板高度超出合理範圍（±{MaxAbsHeightCm:0} cm）。";
+            return null;
+        }
+
+        internal const double MaxPitchDeg = 89.5;
+        internal const double MaxAbsHeightCm = 100000.0; // 1 km
+
         /// <summary>
         /// 編輯快速路徑：一個小交易（自動存「A案」JSON＋一次 SetOrientation＋遠裁剪），交易後立刻重繪透視圖，
         /// 再從相機實際姿態讀回新值（清單就地更新／MCP 回傳用）。不找房間、不讀其他相機、不碰 Key Plan／總覽／標記——
@@ -916,6 +935,8 @@ namespace RevitMCP.Core
             try
             {
                 if (doc == null) { res.Error = "目前沒有開啟中的文件。"; return res; }
+                string invalid = ValidatePoseEdit(edit);
+                if (invalid != null) { res.Error = invalid; return res; }
                 View3D v = edit?.ViewId != null ? doc.GetElement(edit.ViewId) as View3D : null;
                 if (v == null || v.IsTemplate || !v.IsPerspective) { res.Error = "找不到這個相機視圖（可能已被刪除），請按重新整理。"; return res; }
                 res.CameraName = v.Name;
@@ -959,7 +980,7 @@ namespace RevitMCP.Core
                             if (poseChanged) v.SetOrientation(new ViewOrientation3D(newEye, newUp, newForward));
                             if (farFeet.HasValue) farParam.Set(farFeet.Value);
                             if (markInPlace) _inPlaceEdits[v.Id.GetIdValue()] = DateTime.UtcNow.AddSeconds(5);
-                            t.Commit();
+                            TransactionHelper.CommitOrThrow(t);
                         }
                         catch
                         {
@@ -1023,6 +1044,9 @@ namespace RevitMCP.Core
             if (doc == null) return "目前沒有開啟中的文件。";
             if (string.IsNullOrWhiteSpace(newName)) return "名稱不可為空白。";
             newName = newName.Trim();
+            // 使用者輸入：含 Revit 不允許的字元就明確拒絕（不偷偷替換，避免名稱跟輸入不同）
+            if (CameraKeyPlanService.HasInvalidRevitNameChars(newName))
+                return "名稱不可包含下列字元：{ } [ ] : \\ | ; < > ? ` ~";
 
             try
             {
@@ -1042,7 +1066,7 @@ namespace RevitMCP.Core
                 {
                     t.Start();
                     v.Name = newName;
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                 }
                 return null;
             }
@@ -1102,7 +1126,7 @@ namespace RevitMCP.Core
                         View3D copy = doc.GetElement(copyId) as View3D;
                         if (copy == null) continue;
 
-                        string baseName = source.Name + " - " + targetLevel.Name;
+                        string baseName = CameraKeyPlanService.SanitizeRevitName(source.Name + " - " + targetLevel.Name);
                         string finalName = baseName;
                         int suffix = 2;
                         while (existingNames.Contains(finalName))
@@ -1120,7 +1144,7 @@ namespace RevitMCP.Core
                         created++;
                         createdCameras?.Add((copyId, finalName));
                     }
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                 }
                 return (created, null);
             }
@@ -1133,6 +1157,12 @@ namespace RevitMCP.Core
         // ══════════════════════════════════════════════════════════
         // 4.7 匯出 Excel
         // ══════════════════════════════════════════════════════════
+
+        private static void SetCellOrBlank(ClosedXML.Excel.IXLCell cell, double? v)
+        {
+            if (v.HasValue && !double.IsNaN(v.Value) && !double.IsInfinity(v.Value)) cell.Value = v.Value;
+            else cell.Value = "";
+        }
 
         internal static string ExportExcel(IList<CameraRow> rows, string filePath)
         {
@@ -1155,13 +1185,14 @@ namespace RevitMCP.Core
                     {
                         ws.Cell(r, 1).Value = row.Name;
                         ws.Cell(r, 2).Value = row.LevelName;
-                        ws.Cell(r, 3).Value = row.HeightAboveLevelCm ?? double.NaN;
-                        ws.Cell(r, 4).Value = row.EyeXCm;
-                        ws.Cell(r, 5).Value = row.EyeYCm;
-                        ws.Cell(r, 6).Value = row.HorizontalAngleDeg;
-                        ws.Cell(r, 7).Value = row.PitchDeg;
-                        ws.Cell(r, 8).Value = row.FovEstimateDeg ?? double.NaN;
-                        ws.Cell(r, 9).Value = row.FarClipCm ?? double.NaN;
+                        // 2026-09-26 稽核：ClosedXML 0.100+ 寫入 NaN 會丟 ArgumentException → 缺值（室外／無樓層／無遠裁剪）改寫空白。
+                        SetCellOrBlank(ws.Cell(r, 3), row.HeightAboveLevelCm);
+                        SetCellOrBlank(ws.Cell(r, 4), row.EyeXCm);
+                        SetCellOrBlank(ws.Cell(r, 5), row.EyeYCm);
+                        SetCellOrBlank(ws.Cell(r, 6), row.HorizontalAngleDeg);
+                        SetCellOrBlank(ws.Cell(r, 7), row.PitchDeg);
+                        SetCellOrBlank(ws.Cell(r, 8), row.FovEstimateDeg);
+                        SetCellOrBlank(ws.Cell(r, 9), row.FarClipCm);
                         ws.Cell(r, 10).Value = row.EyeElevationDisplay;
                         r++;
                     }

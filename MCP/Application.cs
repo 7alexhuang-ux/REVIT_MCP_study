@@ -135,6 +135,10 @@ namespace RevitMCP
                 // 崩潰診斷：文件開啟後 60 秒內記錄所有第一機會例外（2026-09-24 的崩潰都發生在開檔
                 // 後 5–10 秒、無使用者操作）。只是更新一個時間戳，不碰面板。
                 application.ControlledApplication.DocumentOpened += OnCameraManagerDocumentOpened;
+                // 2026-09-26 稽核：面板以「標題｜路徑」識別文件，另存新檔（含新專案第一次存檔）後鍵會變 →
+                // 導覽監看、標記計時器、DocumentClosing 全部靜默失效。另存前記舊鍵、另存後改成新鍵。
+                application.ControlledApplication.DocumentSavingAs += OnCameraManagerDocumentSavingAs;
+                application.ControlledApplication.DocumentSavedAs += OnCameraManagerDocumentSavedAs;
 
                 // 註冊 Process 退出事件 — Revit crash 時 OnShutdown 不會被呼叫，
                 // 但 ProcessExit 仍有機會觸發，確保 HttpListener 被釋放，
@@ -170,6 +174,8 @@ namespace RevitMCP
                     application.Idling -= OnCameraManagerIdling;
                     application.ControlledApplication.DocumentClosing -= OnCameraManagerDocumentClosing;
                     application.ControlledApplication.DocumentOpened -= OnCameraManagerDocumentOpened;
+                    application.ControlledApplication.DocumentSavingAs -= OnCameraManagerDocumentSavingAs;
+                    application.ControlledApplication.DocumentSavedAs -= OnCameraManagerDocumentSavedAs;
                 }
                 catch (Exception ex)
                 {
@@ -214,6 +220,27 @@ namespace RevitMCP
             CaptureCameraSourcePlan(e);
             // 2026-09-26 第四輪：相機以外的元素變了 → 房間／樓層快取與底圖點陣快取失效（面板有沒有啟用都要記）。
             NoteCameraModelEpoch(e);
+            // 2026-09-26 稽核：本工具自己改了相機（面板／MCP 編輯、還原版本、拖 A 標記）→ 導覽監看重抓基準，
+            // 不把自己的修改當成使用者導覽（舊版 1 秒後再排一次後續更新，甚至誤判大幅移動而重算整個 Key Plan）。
+            ResyncNavigationBaselineIfOwnCameraEdit(e);
+            bool undoRedo = false;
+            try
+            {
+                // 2026-09-26 稽核：Undo／Redo——「上次已畫」紀錄與快取不再可信 → 清掉（下次變動全部重畫）；
+                // 並且這次不排任何會開交易的後續更新（標記重畫、反向同步、孤兒清理），否則新交易會清掉 Redo 堆疊，
+                // 還會在使用者復原的同時又把標記／相機改回去。
+                // 只認真正的復原／重做：TransactionGroup 回滾（底圖匯出每次都會回滾暫存視圖群組）不算。
+                undoRedo = (e.Operation == UndoOperation.TransactionUndone || e.Operation == UndoOperation.TransactionRedone) &&
+                           !RevitMCP.Core.CameraManagerService.IsExportingBaseMap && !RevitMCP.Core.CameraSourcePlanStore.IsWriting;
+                if (undoRedo)
+                {
+                    RevitMCP.Core.CameraKeyPlanService.ClearPoseRecords();
+                    RevitMCP.Core.CameraKeyPlanService.BumpModelEpoch();
+                    // 復原若改到作用中相機，導覽監看會把它當成導覽而排更新（開交易＝清掉 Redo）→ 以復原後的姿態重建基準。
+                    ResetNavigationWatch();
+                }
+            }
+            catch { undoRedo = false; }
             try
             {
                 // 使用者還沒按過重新整理＝live sync 未啟用，連過濾都不做（最便宜的早退）。
@@ -224,9 +251,12 @@ namespace RevitMCP
                 if (RevitMCP.Core.CameraManagerService.IsExportingBaseMap) return;
                 // 2026-09-24 第四輪：我們自己的「更新相機標記」交易（DocumentChanged 在 Commit 時觸發）
                 // 一律忽略，否則會「重畫標記 → DocumentChanged → 再排一次重畫」無限回饋。
-                if (RevitMCP.Core.CameraKeyPlanService.IsUpdatingMarkers || IsOwnMarkerTransaction(e)) return;
+                if (RevitMCP.Core.CameraKeyPlanService.IsUpdatingMarkers || (!undoRedo && IsOwnMarkerTransaction(e))) return;
                 Document doc = e.GetDocument();
                 if (!IsCameraManagerRelevantDocument(doc)) return;
+                // 2026-09-26 稽核：只處理面板資料來源文件的變更——另一份文件的 ElementId 若排進面板佇列，
+                // 會套到面板文件的同號元素上（兩份文件同時開著、MCP 改另一份時）。文件切換由 Idling 的中性化處理。
+                if (CameraManagerPanelControl.GetDocumentKey(doc) != _cameraManagerPanel.LoadedDocumentKey) return;
 
                 // 規格 §4.4：透視相機本身被修改（拖曳裁剪框改 FOV、移動／旋轉相機）→ 只排入
                 // 「更新相機標記」（面板端 500ms 去抖、同一相機合併）。這裡只收集 Id，不修改模型。
@@ -246,6 +276,15 @@ namespace RevitMCP
                         else if (el is FamilyInstance && RevitMCP.Core.CameraKeyPlanService.IsAMarkerInstance(el, out _))
                             (aMarkerIds ?? (aMarkerIds = new System.Collections.Generic.List<ElementId>())).Add(id);
                     }
+                    if (undoRedo)
+                    {
+                        if (perspIds != null || aMarkerIds != null || levelChanged)
+                            Logger.Info("相機管理面板：DocumentChanged＝Undo／Redo → 不排會開交易的標記／相機後續更新（保留 Redo），已清除「已畫」紀錄。");
+                        perspIds = null; aMarkerIds = null; levelChanged = false;
+                    }
+                    // 2026-09-26 稽核：本工具的 Key Plan／標記顏色交易會動到樓層的視圖專屬設定（隱藏樓層標頭、基準範圍），
+                    // Level 被列為已修改 → 不要因此再排一次「更新 Key Plan 樓層線」。
+                    if (levelChanged && IsOwnKeyPlanStyleTransaction(e)) levelChanged = false;
                     if (perspIds != null) _cameraManagerPanel.QueueCameraMarkerRefresh(perspIds);
                     // 2026-09-26 第六輪（編輯快速路徑）：面板自己的「編輯相機」交易、只改了剛就地更新過清單列的相機
                     // → 清單已是最新，不再排 live sync 整份快照重讀（標記更新已在上一行排入去抖）。
@@ -264,7 +303,7 @@ namespace RevitMCP
                     if (levelChanged) _cameraManagerPanel.QueueLevelMarkRefresh();
                     if (aMarkerIds != null) _cameraManagerPanel.QueueMarkerToCameraSync(aMarkerIds);
                     // 2026-09-25 Wave 2：有元素被刪除（可能是相機）→ 去抖後清掉「相機已不存在」的標記（A／總覽）。
-                    if (e.GetDeletedElementIds().Count > 0) _cameraManagerPanel.QueueOrphanMarkerCleanup();
+                    if (!undoRedo && e.GetDeletedElementIds().Count > 0) _cameraManagerPanel.QueueOrphanMarkerCleanup();
                 }
                 catch (Exception exMarker)
                 {
@@ -389,6 +428,67 @@ namespace RevitMCP
             catch
             {
                 return false;
+            }
+        }
+
+        /// <summary>2026-09-26 稽核：一鍵 4 視圖／標記顏色交易（會改到樓層的視圖專屬顯示，但不是使用者改樓層）。</summary>
+        private static bool IsOwnKeyPlanStyleTransaction(DocumentChangedEventArgs e)
+        {
+            try
+            {
+                System.Collections.Generic.ICollection<string> names = e.GetTransactionNames();
+                return names != null && names.Count > 0 &&
+                       names.All(n => n == RevitMCP.Core.CameraKeyPlanService.KeyPlanTransactionName ||
+                                      n == RevitMCP.Core.CameraKeyPlanService.MarkerColorTransactionName);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>2026-09-26 稽核：本工具改相機姿態的交易（編輯相機／還原版本／由標記更新相機）→ 導覽監看重抓基準。</summary>
+        private static void ResyncNavigationBaselineIfOwnCameraEdit(DocumentChangedEventArgs e)
+        {
+            try
+            {
+                if (_navCamId == null) return;
+                System.Collections.Generic.ICollection<string> names = e.GetTransactionNames();
+                if (names == null || names.Count == 0) return;
+                if (names.Any(n => n == RevitMCP.Core.CameraManagerService.FastEditTransactionName ||
+                                   n == RevitMCP.Core.CameraKeyPlanService.MarkerToCameraTransactionName ||
+                                   (n != null && n.StartsWith(RevitMCP.Core.CameraKeyPlanService.VersionRestoreTransactionPrefix, StringComparison.Ordinal))))
+                {
+                    // 下一次 Idling 以「修改後」的姿態重新建立基準（不在這裡讀，DocumentChanged 內只做最少的事）。
+                    ResetNavigationWatch();
+                }
+            }
+            catch { }
+        }
+
+        private static string _savingAsOldDocKey;
+
+        private static void OnCameraManagerDocumentSavingAs(object sender, Autodesk.Revit.DB.Events.DocumentSavingAsEventArgs e)
+        {
+            try { _savingAsOldDocKey = CameraManagerPanelControl.GetDocumentKey(e.Document); }
+            catch { _savingAsOldDocKey = null; }
+        }
+
+        private static void OnCameraManagerDocumentSavedAs(object sender, Autodesk.Revit.DB.Events.DocumentSavedAsEventArgs e)
+        {
+            try
+            {
+                string oldKey = _savingAsOldDocKey;
+                _savingAsOldDocKey = null;
+                string newKey = CameraManagerPanelControl.GetDocumentKey(e.Document);
+                if (oldKey == null || newKey == null || oldKey == newKey) return;
+                CameraManagerPanelControl panel = _cameraManagerPanel;
+                if (panel != null && panel.RekeyLoadedDocument(oldKey, newKey))
+                    Logger.Info("相機管理面板：文件另存新檔 → 面板文件識別已更新（" + oldKey + " → " + newKey + "）。");
+                ResetNavigationWatch();
+                // 房間／姿態快取以路徑＋標題為鍵 → 另存後全部失效（重算一次即可）。
+                RevitMCP.Core.CameraKeyPlanService.ResetDocumentCaches("另存新檔");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"相機管理面板處理 DocumentSavedAs 失敗: {ex.Message}");
             }
         }
 
@@ -602,6 +702,8 @@ namespace RevitMCP
             }
             string docKey = CameraManagerPanelControl.GetDocumentKey(doc);
             if (docKey == null || docKey != panel.LoadedDocumentKey) { ResetNavigationWatch(); return; }
+            // 2026-09-26 稽核：面板隱藏時不監看（不在背景持續開交易改標記；再打開面板後重新建立基準）。
+            if (!IsCameraManagerPaneShown(uiApp)) { if (_navCamId != null) ResetNavigationWatch(); return; }
             // 本工具正在寫入（標記／還原／編輯）時不比對，避免把自己的修改當成使用者導覽。
             if (RevitMCP.Core.CameraKeyPlanService.IsUpdatingMarkers) return;
 
@@ -673,6 +775,10 @@ namespace RevitMCP
                 string title = null;
                 try { title = e.Document?.Title; } catch { }
                 CameraManagerDiagnostics.ExtendWatch(60, "DocumentOpened: " + (title ?? "?"));
+                // 2026-09-26 稽核：同名／同路徑的文件重新開啟 → 以路徑＋標題為鍵的快取一律作廢（舊 Room 物件屬於已關閉文件）。
+                // 族群文件（例如本工具建立 A 標記族群時開的暫存族群檔）與連結文件不算。
+                if (IsCameraManagerRelevantDocument(e.Document))
+                    RevitMCP.Core.CameraKeyPlanService.ResetDocumentCaches("開啟");
             }
             catch { }
         }
@@ -682,7 +788,12 @@ namespace RevitMCP
         {
             try
             {
+                // 2026-09-26 稽核：族群文件（本工具建 A 標記族群時 fam.Close）與連結文件的關閉不影響面板與快取。
+                if (!IsCameraManagerRelevantDocument(e.Document)) return;
                 _cameraManagerPanel?.CloseAllPreviewWindows();
+                // 2026-09-26 稽核：快取的 Room／姿態紀錄屬於這份文件 → 關閉時清掉；導覽監看也放掉這份文件的相機。
+                RevitMCP.Core.CameraKeyPlanService.ResetDocumentCaches("關閉");
+                ResetNavigationWatch();
 
                 // 關掉的是面板資料的來源文件 → 清回中性狀態（非同步、純 WPF）。
                 CameraManagerPanelControl panel = _cameraManagerPanel;

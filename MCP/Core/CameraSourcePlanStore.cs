@@ -84,7 +84,7 @@ namespace RevitMCP.Core
                             Entity e = new Entity(schema);
                             e.Set(schema.GetField(FieldPlanUniqueId), plan.UniqueId ?? "");
                             cam.SetEntity(e);
-                            t.Commit();
+                            TransactionHelper.CommitOrThrow(t);
                         }
                     }
                     finally { IsWriting = false; }

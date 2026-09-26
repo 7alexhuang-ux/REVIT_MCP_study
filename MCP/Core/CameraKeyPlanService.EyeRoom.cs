@@ -41,6 +41,29 @@ namespace RevitMCP.Core
         /// <summary>DocumentChanged（非本工具交易、且變更的不只是透視相機）時呼叫：房間／樓層快取與底圖快取全部失效。</summary>
         internal static void BumpModelEpoch() => Interlocked.Increment(ref _modelEpoch);
 
+        /// <summary>
+        /// 2026-09-26 稽核：文件關閉／開啟時清掉所有「以文件路徑＋標題為鍵」的快取。
+        /// 舊版只在 DocumentChanged 才 bump epoch → 關檔再開同一檔（沒有任何編輯）時快取命中，
+        /// 回傳的 RoomCtx.Room 是已關閉文件的 Room → 讀 .Id 丟 InvalidObjectException（一鍵 4 視圖／標記全失敗）。
+        /// 兩份未存檔的「專案1」同名時也會互相命中。只在 API context（DocumentClosing／DocumentOpened）呼叫。
+        /// </summary>
+        internal static void ResetDocumentCaches(string reason)
+        {
+            try
+            {
+                BumpModelEpoch();
+                _storeyCache.Clear();
+                _planLevelsKey = null;
+                _planLevels = new HashSet<long>();
+                _raycastViewKey = null;
+                _raycastViewId = null;
+                ClearPoseRecords();
+                _overviewStoreyHash.Clear();
+                Logger.Info("相機管理：文件" + reason + " → 清除房間／樓層、姿態、總覽快取。");
+            }
+            catch (Exception ex) { Logger.Error("相機管理：清除文件快取失敗", ex); }
+        }
+
         private sealed class StoreyCacheEntry
         {
             public string ValueKey;
@@ -61,6 +84,11 @@ namespace RevitMCP.Core
             string s = $"房間/樓層快取 命中 {_storeyCacheHits}、重算 {_storeyCacheMisses}";
             _storeyCacheHits = 0; _storeyCacheMisses = 0;
             return s;
+        }
+
+        private static bool IsValidRevitObject(Element e)
+        {
+            try { return e != null && e.IsValidObject; } catch { return false; }
         }
 
         private static string StoreyDocKey(Document doc)
@@ -118,7 +146,9 @@ namespace RevitMCP.Core
             Document doc = camera.Document;
             string ck = StoreyDocKey(doc) + "|" + camera.Id.GetIdValue();
             string vk = StoreyValueKey(camera, geom.Eye);
-            if (_storeyCache.TryGetValue(ck, out StoreyCacheEntry hit) && hit.ValueKey == vk)
+            // 2026-09-26 稽核：快取的 Room 可能屬於已關閉的文件或已刪除（Undo 不一定 bump epoch）→ 失效就重算。
+            if (_storeyCache.TryGetValue(ck, out StoreyCacheEntry hit) && hit.ValueKey == vk &&
+                (hit.Room?.Room == null || IsValidRevitObject(hit.Room.Room)))
             {
                 _storeyCacheHits++;
                 ApplyStoreyEntry(doc, geom, hit);

@@ -459,7 +459,7 @@ namespace RevitMCP.Core
             string update;
             try
             {
-                update = fast.Changed ? CameraKeyPlanService.ScheduleFollowUp(camera.Id, hint) : "數值與相機目前相同，未變更（不排後續更新）";
+                update = fast.Changed ? CameraKeyPlanService.ScheduleFollowUp(doc, camera.Id, hint) : "數值與相機目前相同，未變更（不排後續更新）";
             }
             catch (Exception exUpd)
             {

@@ -159,7 +159,7 @@ namespace RevitMCP.Core
                     bool ok = doc.LoadFamily(rfa, new AMarkerFamilyLoadOptions(), out Family fam);
                     if (!ok && fam == null) { t.RollBack(); return "載入相機標記族群失敗（LoadFamily 回傳 false）。"; }
                     GetOrCreateProjectMarkerSubcategory(doc);
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                 }
                 catch (Exception ex)
                 {
@@ -231,7 +231,7 @@ namespace RevitMCP.Core
                     // 視線箭頭：桿寬 30、頭寬 120、總長 350（mm），厚 20，中心在 z=0。
                     Extrusion arrow = NewPrism(fam, new[] { (-15.0, 0.0), (15.0, 0.0), (15.0, 200.0), (60.0, 200.0), (0.0, 350.0), (-60.0, 200.0), (-15.0, 200.0) }, F(-10), F(20));
                     arrow.Subcategory = sub;
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                 }
                 fam.SaveAs(path, new SaveAsOptions { OverwriteExistingFile = true });
             }
@@ -340,7 +340,7 @@ namespace RevitMCP.Core
                         log = SyncAMarkersInTransaction(doc, cams, placeMissing);
                         int orphans = DeleteOrphanTaggedElements(doc);
                         if (orphans > 0) log += $"；清除相機已刪除的標記 {orphans} 個";
-                        t.Commit();
+                        TransactionHelper.CommitOrThrow(t);
                     }
                     catch
                     {
@@ -443,7 +443,7 @@ namespace RevitMCP.Core
                         // 2026-09-26 第四輪：扇形樣式讀回驗證要 Regenerate＋讀幾何（慢）→ 即時更新（light）只驗新建的扇形。
                         if (!light || newFan)
                         {
-                            if (!VerifyFanGraphicsStyle(fan, gsId, out string fanStyleLog)) fanStyleBad++;
+                            if (!VerifyFanGraphicsStyle(fan, gsId, solid, out string fanStyleLog)) fanStyleBad++;
                             if (fanStyleLog != null && fanStyleSample == null) fanStyleSample = fanStyleLog;
                         }
                     }
@@ -607,7 +607,7 @@ namespace RevitMCP.Core
         }
 
         /// <summary>讀回扇形 DirectShape 的幾何，確認每個實體的 GraphicsStyleId＝子類別樣式（隱藏子類別才會一起隱藏）。</summary>
-        private static bool VerifyFanGraphicsStyle(DirectShape fan, ElementId gsId, out string log)
+        private static bool VerifyFanGraphicsStyle(DirectShape fan, ElementId gsId, Solid built, out string log)
         {
             log = null;
             try
@@ -629,6 +629,18 @@ namespace RevitMCP.Core
                     CollectFanStyleIds(ge, ids, ref solids, ref meshes, ref faces, 0);
                     if (ids.Count > 0) break;
                 }
+                if (ids.Count == 0 && built != null)
+                {
+                    // 2026-09-26 稽核：交易內剛 SetShape 的 DirectShape，get_Geometry 有時仍回空（MCP 複測 AMarkerLog
+                    // 「讀不到扇形幾何」但實際已隱藏）。退而檢查交給 SetShape 的實體本身的面樣式，並在 log 標明來源。
+                    CollectFanStyleIds(built, ids, ref solids, ref meshes, ref faces);
+                    if (ids.Count > 0)
+                    {
+                        bool okBuilt = gsId != ElementId.InvalidElementId && ids.All(x => x == (long)gsId.GetIdValue());
+                        log = okBuilt ? null : $"元素幾何讀不回，改驗建立的實體：GraphicsStyleId=[{string.Join(",", ids.Distinct())}]，預期 {gsId.GetIdValue()}";
+                        return okBuilt;
+                    }
+                }
                 if (ids.Count == 0) { log = $"讀不到扇形幾何（實體 {solids}、網格 {meshes}）"; return false; }
                 bool ok = gsId != ElementId.InvalidElementId && ids.All(x => x == (long)gsId.GetIdValue());
                 log = ok
@@ -639,22 +651,40 @@ namespace RevitMCP.Core
             catch (Exception ex) { log = "驗證扇形樣式失敗：" + ex.Message; return false; }
         }
 
+        private static void CollectFanStyleIds(Solid built, List<long> ids, ref int solids, ref int meshes, ref int faces)
+            => CollectFanStyleIdsCore(new GeometryObject[] { built }, ids, ref solids, ref meshes, ref faces, 0);
+
         private static void CollectFanStyleIds(GeometryElement ge, List<long> ids, ref int solids, ref int meshes, ref int faces, int depth)
         {
             if (ge == null || depth > 3) return;
-            foreach (GeometryObject go in ge)
+            CollectFanStyleIdsCore(ge, ids, ref solids, ref meshes, ref faces, depth);
+        }
+
+        private static void CollectFanStyleIdsCore(IEnumerable<GeometryObject> objs, List<long> ids, ref int solids, ref int meshes, ref int faces, int depth)
+        {
+            foreach (GeometryObject go in objs)
             {
                 if (go is Solid so)
                 {
                     if (so.Faces.Size == 0) continue;
                     solids++;
-                    ids.Add(go.GraphicsStyleId != null ? (long)go.GraphicsStyleId.GetIdValue() : -1L);
-                    // 面上的 GraphicsStyleId（DirectShape 的面通常沿用實體樣式；若面有自己的樣式也要一致）
+                    // 2026-09-26 稽核：DirectShape 讀回時 Solid 本身的 GraphicsStyleId 固定是 -1，樣式存在「每個面」上
+                    // （SolidOptions 的 GraphicsStyleId 被寫到面；Revit 繪圖與 V/G 子類別隱藏也是依面判斷——MCP 複測已確認
+                    // 隱藏子類別時扇形確實消失）。舊版把實體層的 -1 也列入比對 → 永遠「不符」、診斷字串誤報。
+                    // 改為：以面的樣式為準；只有「所有面都沒有樣式」時才把實體層的值（可能 -1）列入。
+                    int faceStyled = 0;
                     foreach (Face f in so.Faces)
                     {
                         faces++;
                         ElementId fg = f.GraphicsStyleId;
-                        if (fg != null && fg != ElementId.InvalidElementId) ids.Add((long)fg.GetIdValue());
+                        if (fg != null && fg != ElementId.InvalidElementId) { ids.Add((long)fg.GetIdValue()); faceStyled++; }
+                        else ids.Add(-1L);
+                    }
+                    if (faceStyled == 0 && go.GraphicsStyleId != null && go.GraphicsStyleId != ElementId.InvalidElementId)
+                    {
+                        // 面都沒樣式但實體有 → 以實體為準（移除剛加的 -1）
+                        ids.RemoveRange(ids.Count - so.Faces.Size, so.Faces.Size);
+                        ids.Add((long)go.GraphicsStyleId.GetIdValue());
                     }
                 }
                 else if (go is Mesh me)
@@ -696,7 +726,7 @@ namespace RevitMCP.Core
                 using (Transaction t = TransactionHelper.Begin(doc, MarkerUpdateTransactionName))
                 {
                     t.Start();
-                    try { n = DeleteOrphanTaggedElements(doc); if (n > 0) t.Commit(); else t.RollBack(); }
+                    try { n = DeleteOrphanTaggedElements(doc); if (n > 0) TransactionHelper.CommitOrThrow(t); else t.RollBack(); }
                     catch { try { if (t.HasStarted() && !t.HasEnded()) t.RollBack(); } catch { } throw; }
                 }
             }
@@ -727,7 +757,7 @@ namespace RevitMCP.Core
                     {
                         foreach (DirectShape e in ids.Select(i => doc.GetElement(i)).OfType<DirectShape>()) { try { if (e.Pinned) e.Pinned = false; } catch { } }
                         doc.Delete(ids);
-                        t.Commit();
+                        TransactionHelper.CommitOrThrow(t);
                     }
                     catch { try { if (t.HasStarted() && !t.HasEnded()) t.RollBack(); } catch { } throw; }
                 }
@@ -756,7 +786,7 @@ namespace RevitMCP.Core
                     t.Start();
                     foreach (DirectShape e in ids.Select(i => doc.GetElement(i)).OfType<DirectShape>()) { try { if (e.Pinned) e.Pinned = false; } catch { } }
                     doc.Delete(ids);
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                 }
             }
             finally { IsUpdatingMarkers = false; }
@@ -798,11 +828,16 @@ namespace RevitMCP.Core
             if (doc == null || instanceIds == null || instanceIds.Count == 0) return changed;
             List<Level> levels = CameraMath.GetStoreyLevelsSorted(doc);
             var plan = new List<(View3D cam, ViewOrientation3D o, string note)>();
+            var lockedNames = new List<string>();
             foreach (ElementId id in instanceIds)
             {
                 Element e = doc.GetElement(id);
                 if (!IsAMarkerInstance(e, out string cid)) continue;
                 if (!(doc.GetElement(cid) is View3D cam) || cam.IsTemplate || !cam.IsPerspective) continue;
+                // 2026-09-26 稽核：鎖定的 3D 視圖 SetOrientation 會丟例外 → 整批（含其他合法相機）回滾、每次拖曳重演。先排除並回報。
+                bool isLocked = false;
+                try { isLocked = cam.IsLocked; } catch { isLocked = false; }
+                if (isLocked) { lockedNames.Add(cam.Name); continue; }
                 if (!(((FamilyInstance)e).Location is LocationPoint lp)) continue;
                 CameraMath.CameraGeometry g = CameraMath.ComputeGeometry(cam, levels);
                 XYZ p = lp.Point;
@@ -819,7 +854,9 @@ namespace RevitMCP.Core
                 plan.Add((cam, new ViewOrientation3D(eye, CameraMath.BuildLevelUp(fwd), fwd),
                     $"「{cam.Name}」移 {CameraMath.FeetToMm(dXY):F0}mm、水平角 {curYaw:F1}°→{yaw:F1}°"));
             }
-            if (plan.Count == 0) { log = "標記與相機一致，不需更新"; return changed; }
+            string lockedNote = lockedNames.Count > 0 ? $"；相機視圖已鎖定、未跟著標記移動：{string.Join("、", lockedNames)}（請先解鎖或把標記移回）" : "";
+            if (lockedNames.Count > 0) Logger.Info("由標記更新相機：略過已鎖定的相機 " + string.Join("、", lockedNames));
+            if (plan.Count == 0) { log = "標記與相機一致，不需更新" + lockedNote; return changed; }
 
             using (Transaction t = TransactionHelper.Begin(doc, MarkerToCameraTransactionName))
             {
@@ -828,11 +865,25 @@ namespace RevitMCP.Core
                 {
                     foreach (var x in plan)
                     {
-                        EnsureOriginalVersionInTransaction(x.cam, "拖 A 標記"); // 2026-09-26：第一次修改前自動存 A案
-                        x.cam.SetOrientation(x.o);
-                        changed.Add(x.cam.Id);
+                        // 2026-09-26 稽核：每台相機各自一個 SubTransaction——一台失敗只回滾那一台，不拖垮整批。
+                        using (SubTransaction st = new SubTransaction(doc))
+                        {
+                            try
+                            {
+                                st.Start();
+                                EnsureOriginalVersionInTransaction(x.cam, "拖 A 標記"); // 2026-09-26：第一次修改前自動存 A案
+                                x.cam.SetOrientation(x.o);
+                                st.Commit();
+                                changed.Add(x.cam.Id);
+                            }
+                            catch (Exception exCam)
+                            {
+                                try { if (st.HasStarted() && !st.HasEnded()) st.RollBack(); } catch { }
+                                Logger.Error($"由標記更新相機：「{x.cam.Name}」失敗（略過此台）", exCam);
+                            }
+                        }
                     }
-                    t.Commit();
+                    TransactionHelper.CommitOrThrow(t);
                 }
                 catch
                 {
@@ -840,7 +891,7 @@ namespace RevitMCP.Core
                     throw;
                 }
             }
-            log = string.Join("；", plan.Select(x => x.note));
+            log = string.Join("；", plan.Where(x => changed.Contains(x.cam.Id)).Select(x => x.note)) + lockedNote;
             Logger.Info("由標記更新相機：" + log);
             return changed;
         }

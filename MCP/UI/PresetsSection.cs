@@ -44,8 +44,16 @@ namespace RevitMCP.UI
 
         public double DefaultHeightCm
         {
-            get => double.TryParse(_heightBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double v) ? v : 160.0;
+            get => TryParseHeight(_heightBox.Text, out double v) ? v : 160.0;
             set => _heightBox.Text = value.ToString("F0", CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>2026-09-26 稽核：與清單數字格相同——先 InvariantCulture、再目前地區設定（小數逗號地區輸入「162,5」不再被當成無效而默默用 160）。</summary>
+        private static bool TryParseHeight(string text, out double value)
+        {
+            string t = (text ?? "").Trim();
+            return double.TryParse(t, NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+                || double.TryParse(t, NumberStyles.Float, CultureInfo.CurrentCulture, out value);
         }
 
         public PresetsSection()
@@ -72,7 +80,7 @@ namespace RevitMCP.UI
             {
                 try
                 {
-                    if (double.TryParse(_heightBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double h) && h > 0)
+                    if (TryParseHeight(_heightBox.Text, out double h) && h > 0)
                     {
                         HeightPopup.IsOpen = false;
                         ApplyHeightRequested?.Invoke(h, false);
@@ -90,7 +98,7 @@ namespace RevitMCP.UI
             {
                 try
                 {
-                    if (!double.TryParse(_heightBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double h) || h <= 0)
+                    if (!TryParseHeight(_heightBox.Text, out double h) || h <= 0)
                     {
                         MessageBox.Show("高度必須是正數 (cm)。", "套用人視高", MessageBoxButton.OK, MessageBoxImage.Warning);
                         return;
