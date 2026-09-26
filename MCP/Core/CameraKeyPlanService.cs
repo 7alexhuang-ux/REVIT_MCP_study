@@ -55,6 +55,11 @@ namespace RevitMCP.Core
         private const double NoRoomFanCapMm = 8000.0;          // 室內但算不出視線離開房間距離：扇形距離夾到 8m
         private const double OutdoorPlanMarginMm = 2000.0;     // 室外：平面裁剪／等角 XY＝扇形外接框 +2m
         private const double OutdoorBehindEyeMm = 2000.0;      // 室外：剖面在眼睛後方留 2m
+        // 2026-09-26 第七輪（Snowdon Towers「Exterior Street View」Key Plan 平面看不到剖面線：室外剖面沿線 −2m…+60m，
+        // 遠端標頭超出平面裁剪框、近端標頭被眼睛楔形蓋住）：剖面沿線範圍兩端各截到平面裁剪框內縮 1m，確保標頭落在框內。
+        private const double SectionLineCropInsetMm = 1000.0;
+        private const double SightCenterlineSkipAngleDeg = 3.0; // 剖面方向與畫面中心線夾角 < 此值 → 平面上不重畫紅色視線中心線（剖面線已代表它）
+        private const int SectionViewerLineWeight = 6;         // 本相機剖面 viewer 在 Key Plan 平面上的投影線寬（深灰、虛線，不跟淡化走）
         private const double OutdoorBelowLevelMm = 1000.0;     // 室外：Z 下限＝min(下方樓層, 最低樓層) −1m
         private const double OutdoorAboveModelMm = 2000.0;     // 室外：Z 上限＝XY 範圍內模型最高點 +2m
         private const double OutdoorModelScanZFeet = 10000.0;  // 室外：找模型最高點時 Outline 的 Z 範圍（±10000 ft，等同不限）
@@ -534,9 +539,6 @@ namespace RevitMCP.Core
                     dec.FadedStyle = faded;
                     Logger.Info("相機 Key Plan：表現法＝" + (faded ? "淡化背景" : "原始"));
                     DrawMarkerSafely(doc, "ApplyKeyPlanStylePlan", () => ApplyKeyPlanStyle(planView, faded));
-                    DrawMarkerSafely(doc, "DrawPlanMarker",
-                        () => DrawPlanMarker(doc, planView, geom, forwardHoriz, leftRad, rightRad, fanRadiusFeet, cid));
-                    result.PlanViewId = planView.Id;
 
                     double? cutPlaneZ = GetPlanCutPlaneZ(doc, planView);
                     XYZ planBasisX = null;
@@ -544,6 +546,9 @@ namespace RevitMCP.Core
                     CameraSectionAnchorMode sectionAnchor = GetSectionAnchorMode();
                     dec.SectionAnchor = sectionAnchor;
                     SectionSpec spec = ComputeSectionSpec(geom, cp, isoXY, storeyTop, sectionMode, planBasisX, cutPlaneZ, sectionAnchor);
+                    // 2026-09-26 第七輪：剖面沿線範圍截到 Key Plan 平面裁剪框內（避免遠端標頭超框、近端被眼睛楔形蓋住）；
+                    // 一定要在 DrawPlanMarker（讀 spec/section 軸判斷是否重畫紅色視線中心線）與建剖面之前做。
+                    ClampSectionSpecToPlanCrop(planView, spec);
                     Logger.Info("相機 Key Plan：剖面規格 " + spec.Log);
                     dec.SectionModeUsed = spec.ModeUsed;
                     dec.SectionSpecLog = spec.Log;
@@ -551,6 +556,12 @@ namespace RevitMCP.Core
                     ViewSection sectionView = GetOrCreateSectionView(doc, sectionName, cid, geom, spec, forceResetSection, out bool preserved);
                     dec.SectionApplyLog = preserved ? "保留使用者手動調整（範圍未動）" : _lastSectionApplyLog;
                     dec.SectionExtentDeviationMm = double.IsNaN(_lastSectionDeviationMm) ? (double?)null : _lastSectionDeviationMm;
+                    // 2026-09-26 第七輪：移到剖面建好之後——平面上的紅色視線中心線要跟「剖面實際軸向」比較夾角
+                    // （讀既有剖面 CropBox.Transform.BasisX，preserved／新建都適用），角度 < 3° 就不重複畫。
+                    XYZ sectionAxisXY = GetSectionAxisWorldXY(sectionView);
+                    DrawMarkerSafely(doc, "DrawPlanMarker",
+                        () => DrawPlanMarker(doc, planView, geom, forwardHoriz, leftRad, rightRad, fanRadiusFeet, cid, sectionAxisXY: sectionAxisXY));
+                    result.PlanViewId = planView.Id;
                     DrawMarkerSafely(doc, "ApplyKeyPlanStyleSection",
                         () => ApplyKeyPlanStyle(sectionView, faded, isSection: true, levelBelow: geom.LevelBelow, outdoor: cp.IsOutdoor, eye: geom.Eye, cid: cid));
                     DrawMarkerSafely(doc, "DrawSectionMarker",
@@ -878,6 +889,20 @@ namespace RevitMCP.Core
             }
         }
 
+        /// <summary>專案內第一個名稱含「dash」（不分大小寫）或「虛」的 <see cref="LinePatternElement"/>（依名稱排序取第一個）；
+        /// 找不到回傳 null（呼叫端維持實線，不強塞一個不存在的樣式）。</summary>
+        private static ElementId FindDashLinePatternId(Document doc)
+        {
+            try
+            {
+                LinePatternElement dash = new FilteredElementCollector(doc).OfClass(typeof(LinePatternElement)).Cast<LinePatternElement>()
+                    .Where(x => x.Name != null && (x.Name.IndexOf("dash", StringComparison.OrdinalIgnoreCase) >= 0 || x.Name.Contains("虛")))
+                    .OrderBy(x => x.Name, StringComparer.Ordinal).FirstOrDefault();
+                return dash?.Id;
+            }
+            catch (Exception ex) { Logger.Error("相機 Key Plan：搜尋虛線圖案失敗（改用實線）", ex); return null; }
+        }
+
         /// <summary>
         /// 2026-09-25（使用者回報：1:100 的 Key Plan 平面上看不到本相機剖面線，log 卻說已只留本相機剖面）。
         /// 逐項檢查並修正，每項記 log 說明「是否是原因、做了什麼」：
@@ -885,7 +910,8 @@ namespace RevitMCP.Core
         ///      若比平面比例細 → Revit 不畫剖面標記；每次都設成可接受的最粗值（5000→…→200 依序嘗試）。
         ///   ② 平面 Sections 類別被隱藏 → 取消隱藏。
         ///   ③ viewer 元素逐元素隱藏 → 已由呼叫端 UnhideElements；這裡再記一次最終 IsHidden。
-        ///   ④ 平面 Display Model＝半色調會讓標記變灰 → 對 viewer 設元素取代：halftone=false、投影線色＝標記色、線寬 5。
+        ///   ④ 平面 Display Model＝半色調會讓標記變灰 → 對 viewer 設元素取代：halftone=false、投影線色＝深灰 64、線寬 6、
+        ///      虛線（專案有 Dash 圖案才套用；不跟淡化走，2026-09-26 第七輪修正——原本套標記色、線寬 5，容易被誤認成標記）。
         /// 剖面垂直範圍是否包含平面剖切面（原因②於協調者清單）在 ComputeSectionSpec 已確保並記 log。
         /// </summary>
         private static void EnsureOurSectionMarkerVisible(Document doc, ViewPlan plan, ViewSection section, ICollection<ElementId> viewerIds)
@@ -938,7 +964,9 @@ namespace RevitMCP.Core
             }
             catch (Exception ex) { Logger.Error("相機 Key Plan：檢查平面 Sections 類別失敗", ex); }
             // ③＋④
-            Color color = GetConfiguredMarkerColor();
+            // 2026-09-26 第七輪（使用者：剖面線要看得像一般剖面線，不要跟著淡化、也不要用標記色）：
+            // 投影線色改深灰 64（KpDarkGrey）、線寬 6、有虛線圖案就用虛線；halftone 仍固定 false（不跟淡化走）。
+            ElementId dashPatternId = FindDashLinePatternId(doc);
             foreach (ElementId vid in viewerIds)
             {
                 try
@@ -947,10 +975,12 @@ namespace RevitMCP.Core
                     bool hiddenNow = ve != null && ve.IsHidden(plan);
                     var ogs = new OverrideGraphicSettings();
                     ogs.SetHalftone(false);
-                    ogs.SetProjectionLineColor(color);
-                    ogs.SetProjectionLineWeight(MarkerLineWeight);
+                    ogs.SetProjectionLineColor(KpDarkGrey);
+                    ogs.SetProjectionLineWeight(SectionViewerLineWeight);
+                    if (dashPatternId != null) ogs.SetProjectionLinePatternId(dashPatternId);
                     plan.SetElementOverrides(vid, ogs);
-                    Logger.Info($"相機 Key Plan：本相機剖面 viewer {vid.GetIdValue()} 最終 IsHidden={hiddenNow}；已設元素取代（非半色調、標記色、線寬 {MarkerLineWeight}）");
+                    Logger.Info($"相機 Key Plan：本相機剖面 viewer {vid.GetIdValue()} 最終 IsHidden={hiddenNow}；已設元素取代" +
+                                $"（非半色調、深灰 64、線寬 {SectionViewerLineWeight}、{(dashPatternId != null ? "虛線" : "實線（專案內找不到 Dash 圖案）")}）");
                 }
                 catch (Exception ex) { Logger.Error("相機 Key Plan：本相機剖面 viewer 元素取代失敗", ex); }
             }
@@ -1917,6 +1947,66 @@ namespace RevitMCP.Core
             log.Append($" | 剖面原點=({CameraMath.FeetToMm(o.X):F0},{CameraMath.FeetToMm(o.Y):F0},{CameraMath.FeetToMm(o.Z):F0})mm{(o.IsAlmostEqualTo(geom.Eye) ? "＝眼睛" : "")} axis=({s.Axis.X:F3},{s.Axis.Y:F3})");
             s.Log = log.ToString();
             return s;
+        }
+
+        /// <summary>
+        /// 2026-09-26 第七輪（Snowdon Towers「Exterior Street View」：室外剖面沿線 −2m…+60m，遠端標頭超出
+        /// Key Plan 平面的裁剪框、近端標頭被眼睛楔形蓋住，平面上看不出剖面線）：把 <paramref name="spec"/> 的
+        /// 沿線範圍（MinX/MaxX，相對 spec.Origin）截到 <paramref name="planView"/> 目前裁剪框內、兩端各再內縮
+        /// <see cref="SectionLineCropInsetMm"/>，讓兩端標頭符號都落在平面可見範圍內。只縮短，原本就比裁剪框
+        /// 短的範圍不動；讀不到裁剪框或算不出交點（原點在框外）就不截，維持原範圍。只改 spec，不動已建立的視圖。
+        /// </summary>
+        private static void ClampSectionSpecToPlanCrop(ViewPlan planView, SectionSpec spec)
+        {
+            try
+            {
+                BoundingBoxXYZ crop = planView?.CropBox;
+                if (crop == null || spec?.Axis == null) return;
+                XYZ origin = spec.Origin;
+                if (origin == null) return;
+                double inset = CameraMath.MmToFeet(SectionLineCropInsetMm);
+                double posLimit = RayToCropEdge(crop, origin, spec.Axis);
+                double negLimit = RayToCropEdge(crop, origin, spec.Axis.Negate());
+                var log = new System.Text.StringBuilder();
+                if (!double.IsInfinity(posLimit))
+                {
+                    double cap = Math.Max(posLimit - inset, 0.0);
+                    if (spec.MaxX > cap + 1e-6)
+                    {
+                        log.Append($"正向截到平面裁剪框（{CameraMath.FeetToMm(posLimit):F0}mm 內縮 {SectionLineCropInsetMm:F0}mm）：MaxX {CameraMath.FeetToMm(spec.MaxX):F0}→{CameraMath.FeetToMm(cap):F0}mm；");
+                        spec.MaxX = cap;
+                    }
+                }
+                if (!double.IsInfinity(negLimit))
+                {
+                    double cap = Math.Max(negLimit - inset, 0.0);
+                    if (spec.MinX < -cap - 1e-6)
+                    {
+                        log.Append($"負向截到平面裁剪框（{CameraMath.FeetToMm(negLimit):F0}mm 內縮 {SectionLineCropInsetMm:F0}mm）：MinX {CameraMath.FeetToMm(spec.MinX):F0}→{CameraMath.FeetToMm(-cap):F0}mm；");
+                        spec.MinX = -cap;
+                    }
+                }
+                if (log.Length > 0)
+                {
+                    spec.Log += " | 剖面沿線範圍截到平面裁剪框：" + log;
+                    Logger.Info("相機 Key Plan：剖面沿線範圍截到平面裁剪框：" + log);
+                }
+            }
+            catch (Exception ex) { Logger.Error("相機 Key Plan：剖面沿線範圍截到平面裁剪框失敗（維持原範圍）", ex); }
+        }
+
+        /// <summary>既有剖面的世界座標軸方向（水平，Z 忽略），供平面上判斷「剖面方向與視線中心線是否幾乎重疊」。
+        /// 讀不到（剖面不存在或例外）回傳 null；呼叫端應視為「無法判斷」而照原規則畫。</summary>
+        private static XYZ GetSectionAxisWorldXY(ViewSection section)
+        {
+            try
+            {
+                XYZ bx = section?.CropBox?.Transform?.BasisX;
+                if (bx == null) return null;
+                XYZ flat = new XYZ(bx.X, bx.Y, 0);
+                return flat.GetLength() > 1e-6 ? flat.Normalize() : null;
+            }
+            catch { return null; }
         }
 
         /// <summary>
@@ -3735,16 +3825,18 @@ namespace RevitMCP.Core
                                 bool storeyChanged = !hadRecord || prev != cp.Geom.LevelBelow.Id.GetIdValue();
                                 overviewCams.Add((cam, cp));
                                 plans.TryGetValue(cid, out ViewPlan plan);
+                                sections.TryGetValue(cid, out ViewSection sec);
                                 // 2026-09-26 第五輪：標記更新交易不重建視圖；樓層不符只提示（一鍵 4 視圖時會重建 Key Plan 平面）。
                                 if (plan != null && (force || storeyChanged) && IsPlanLevelMismatch(plan, cp.Geom.LevelBelow.Id))
                                     Logger.Info($"相機 Key Plan：「{cam.Name}」Key Plan 平面樓層不符（平面 {plan.GenLevel?.Name ?? "?"}、相機 {cp.Geom.LevelBelow.Name}）→ 請重跑一鍵 4 視圖重建");
                                 if (plan != null && (parts & MarkerParts.Plan) != 0)
                                 {
+                                    // 2026-09-26 第七輪：既有剖面的實際軸向 → 平面上紅色視線中心線與剖面夾角 < 3° 就不重畫。
+                                    XYZ sectionAxisXY = sec != null ? GetSectionAxisWorldXY(sec) : null;
                                     if (!DrawMarkerSafely(doc, "UpdatePlanMarker",
-                                        () => DrawPlanMarker(doc, plan, cp.Geom, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, cp.FanRadiusFeet, cid)))
+                                        () => DrawPlanMarker(doc, plan, cp.Geom, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, cp.FanRadiusFeet, cid, sectionAxisXY: sectionAxisXY)))
                                         drawFailed.Add(cid);
                                 }
-                                sections.TryGetValue(cid, out ViewSection sec);
                                 if (sec != null && (parts & MarkerParts.Section) != 0)
                                 {
                                     if (!DrawMarkerSafely(doc, "UpdateSectionMarker",
@@ -4264,7 +4356,8 @@ namespace RevitMCP.Core
         }
 
         private static void DrawPlanMarker(Document doc, ViewPlan planView, CameraMath.CameraGeometry geom,
-            XYZ forwardHoriz, double leftRad, double rightRad, double farClipFeet, string cid, double? zOverride = null, bool forceB = false)
+            XYZ forwardHoriz, double leftRad, double rightRad, double farClipFeet, string cid, double? zOverride = null, bool forceB = false,
+            XYZ sectionAxisXY = null)
         {
             // 2026-09-25：farClipFeet 參數現在傳入的是「扇形半徑」（視線離開房間 +0.6m，夾 [1.5m, 遠裁剪]），名稱沿用。
             // 2026-09-25（非對稱視錐）：扇形從相機左緣 leftRad 到右緣 rightRad（相對正前方帶號角，相機右為正），
@@ -4294,11 +4387,24 @@ namespace RevitMCP.Core
             AddCircle(curves, eyeFlat, circleR, forwardHoriz, side);
 
             // 中央視線：2026-09-25 起沿「畫面中心線」（左右緣角平分線；對稱視錐時＝相機正前方），從眼睛圓圈邊到扇形半徑。
+            // 2026-09-26 第七輪：剖面方向與這條中心線幾乎重疊（< 3°）時，剖面線本身已經代表視線方向 → 不重畫紅色中心線
+            // （否則兩條線完全疊在一起，剖面線反而被畫在下面看不到）；扇形邊線／弧／楔形照畫，不受影響。
             XYZ centerDir = PlanEdgeDir(forwardHoriz, (leftRad + rightRad) / 2.0);
             centerDir = centerDir.GetLength() > 1e-6 ? new XYZ(centerDir.X, centerDir.Y, 0).Normalize() : forwardHoriz;
+            bool skipCenterline = false;
+            if (sectionAxisXY != null)
+            {
+                double dot = Math.Max(-1.0, Math.Min(1.0, Math.Abs(centerDir.DotProduct(sectionAxisXY))));
+                double angleDeg = Math.Acos(dot) * 180.0 / Math.PI;
+                if (angleDeg < SightCenterlineSkipAngleDeg)
+                {
+                    skipCenterline = true;
+                    Logger.Info($"相機 Key Plan：剖面方向與視線中心線夾角={angleDeg:F1}°（< {SightCenterlineSkipAngleDeg:F0}°）→ 平面上不畫紅色視線中心線（由剖面線代表）");
+                }
+            }
             XYZ shaftStart = eyeFlat + centerDir * circleR;
             XYZ sightEnd = eyeFlat + centerDir * farClipFeet;
-            if (farClipFeet > circleR && (sightEnd - shaftStart).GetLength() > 1e-6)
+            if (!skipCenterline && farClipFeet > circleR && (sightEnd - shaftStart).GetLength() > 1e-6)
                 curves.Add(Line.CreateBound(shaftStart, sightEnd));
 
             // 視野扇形：相機左緣／右緣邊界線 + 弧（物理範圍，不受「列印比例固定」影響）。

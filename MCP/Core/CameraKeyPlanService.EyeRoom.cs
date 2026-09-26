@@ -137,6 +137,9 @@ namespace RevitMCP.Core
         ///   室內：樓層＝{room.Level} ∪ {房間垂直範圍內、且至少有一張非樣板樓層平面的 Level} 之中，高程 ≤ 眼睛 − 300 mm 的最高者；
         ///         （第五輪：範圍容差 ±300 mm；都不符合 → 全模型 ≤ 眼睛 − 300 mm 的最高建築樓層（優先有平面），不再盲目用 room.Level）
         ///         （例：大廳樓梯房間掛在 L1、往上跨到 L3，眼睛在 L3 → 樓層＝L3）。
+        ///   第六輪：候選 &gt; 1（房間跨多層）時，先打眼睛正下方站立面射線，選高程與站立面差 ≤ 300 mm 的候選（優先有平面者）；
+        ///         沒打到站立面或都不在容差內才退回「≤ 眼睛 − 300 mm 最高者」（例：Café Kitchen 房間跨 4 層，
+        ///         腳下站的是最底層樓板，不是「≤ 眼睛−300mm 最高者」那層——中間隔了一層樓板，高度會腰斬）。
         ///   第五輪合理性檢查：離樓層 &lt; 0 或 &gt; 6 m、且眼下 6 m 內有站立面 → 改以站立面判定（空拍相機維持高程規則）。
         ///   室外：眼睛正下方往下打（樓板／屋頂／地形／基地），站立面 Z → 樓層＝有平面、高程 ≤ Z + 300 mm 的最高 Level；
         ///         沒有 → 高程最接近 Z 的 Level；沒打到 → 眼睛下方最近的建築樓層（舊規則）。
@@ -175,7 +178,7 @@ namespace RevitMCP.Core
                     catch { roomLevel = null; }
                     if (roomLevel != null)
                     {
-                        Level storey = PickIndoorStorey(doc, roomLevel, rc, geom.Eye.Z, out string slog);
+                        Level storey = PickIndoorStorey(doc, roomLevel, rc, geom, out string slog);
                         entry.LevelId = storey.Id;
                         entry.Source = storey.Id == roomLevel.Id ? "room" : "roomSpan";
                         entry.StoreyLog = slog;
@@ -246,9 +249,11 @@ namespace RevitMCP.Core
 
         private const double StoreyEyeClearanceMm = 300.0;
         /// <summary>樓層規則版本（併入快取 key）；規則改版就遞增，讓記憶體內舊判定全部失效。</summary>
-        private const int StoreyRuleVersion = 5;
+        private const int StoreyRuleVersion = 6;
         /// <summary>房間垂直範圍收集候選 Level 的容差（±）：Level 與房間底／頂差幾 mm 以內仍算在範圍內。</summary>
         private const double StoreySpanToleranceMm = 300.0;
+        /// <summary>多樓層房間以站立面挑樓層時，站立面 Z 與候選 Level 高程的比對容差（±）；超出容差視為「站立面沒對到候選」。</summary>
+        private const double IndoorSurfaceMatchToleranceMm = 300.0;
         /// <summary>眼睛在房間底「以下」仍可算在房間內的上限（相機略低於架高地板）；眼睛在房間頂以上一律不接受。</summary>
         private const double EyeRoomBelowBaseToleranceMm = 600.0;
         /// <summary>高度合理範圍上限與站立面搜尋距離：離樓層 &lt; 0 或 &gt; 6 m 且眼下 6 m 內有站立面 → 改以站立面判定。</summary>
@@ -257,9 +262,14 @@ namespace RevitMCP.Core
         /// <summary>
         /// 多層房間：{room.Level} ∪ {房間垂直範圍 [底−300, 頂+300] 內且有樓層平面的 Level} 中，高程 ≤ 眼睛 − 300 mm 的最高者；
         /// 都不符合 → 全模型「建築樓層」中 ≤ 眼睛 − 300 mm 的最高者（優先有樓層平面者）；仍沒有才用 room.Level。
+        /// 2026-09-26 第六輪（Snowdon Towers「Camera at Kitchen 01/03」：房間跨 4 層，「≤ 眼睛−300mm 最高者」選到眼睛正下方
+        /// 隔了一層樓板的樓層，量出的高度腰斬）：候選 &gt; 1（房間跨多層）時，先打眼睛正下方的站立面射線，
+        /// 選「高程與站立面差 ≤ 300 mm」的候選（多個時取有樓層平面者，同票取最近者）；沒打到站立面或都不在容差內 →
+        /// 沿用「≤ 眼睛−300mm 最高者」舊規則。
         /// </summary>
-        private static Level PickIndoorStorey(Document doc, Level roomLevel, RoomCtx rc, double eyeZ, out string log)
+        private static Level PickIndoorStorey(Document doc, Level roomLevel, RoomCtx rc, CameraMath.CameraGeometry geom, out string log)
         {
+            double eyeZ = geom.Eye.Z;
             double limit = eyeZ - CameraMath.MmToFeet(StoreyEyeClearanceMm);
             var cands = new List<Level> { roomLevel };
             string span = "無房間垂直範圍";
@@ -277,8 +287,29 @@ namespace RevitMCP.Core
                     if (z >= b - tol - 1e-6 && z <= t + tol + 1e-6 && withPlan.Contains(l.Id.GetIdValue())) cands.Add(l);
                 }
             }
+            string candText = string.Join("、", cands.Select(l => l.Name));
+
+            if (cands.Count > 1)
+            {
+                double? surf = EnsureStandingSurface(doc, geom);
+                if (surf.HasValue)
+                {
+                    double surfTol = CameraMath.MmToFeet(IndoorSurfaceMatchToleranceMm);
+                    Level bySurf = cands.Where(l => Math.Abs(l.ProjectElevation - surf.Value) <= surfTol + 1e-6)
+                        .OrderByDescending(l => withPlan.Contains(l.Id.GetIdValue()))
+                        .ThenBy(l => Math.Abs(l.ProjectElevation - surf.Value))
+                        .FirstOrDefault();
+                    if (bySurf != null)
+                    {
+                        log = $"{span}；候選 {candText}；多樓層房間 → 以站立面 Z={CameraMath.FeetToMm(surf.Value):F0}mm 選「{bySurf.Name}」";
+                        Logger.Info($"相機管理：多樓層房間 → 以站立面 Z={CameraMath.FeetToMm(surf.Value):F0}mm 選「{bySurf.Name}」");
+                        return bySurf;
+                    }
+                }
+            }
+
             Level pick = cands.Where(l => l.ProjectElevation <= limit + 1e-9).OrderByDescending(l => l.ProjectElevation).FirstOrDefault();
-            log = $"{span}；候選 {string.Join("、", cands.Select(l => l.Name))}；取 ≤ 眼睛−{StoreyEyeClearanceMm:F0}mm 最高者";
+            log = $"{span}；候選 {candText}；取 ≤ 眼睛−{StoreyEyeClearanceMm:F0}mm 最高者";
             if (pick != null) { log += $"「{pick.Name}」"; return pick; }
 
             // 2026-09-26 第五輪（「Camera in Stair 3 - Parking Level」：房間 Level 高於眼睛，盲目退回 room.Level → 高度 −500 cm）
