@@ -240,6 +240,21 @@ namespace RevitMCP.Core
             res.BasePlanName = source?.Name;
             res.BasePlanReason = why;
 
+            // 2026-09-26 第五輪：總覽以樓層快取，但 GenLevel 不可改——既有總覽的 GenLevel ≠ 本次底圖（挑選器結果）的樓層
+            // （沒有挑選結果＝本樓層）→ 退役舊總覽（沒上圖紙＝刪除；上了圖紙＝改名「-舊樓層」並解除連結），下方重建。
+            if (view != null)
+            {
+                ElementId expectedLevelId = source?.GenLevel?.Id ?? level.Id;
+                if (IsPlanLevelMismatch(view, expectedLevelId))
+                {
+                    string oldLevel = view.GenLevel?.Name ?? "?";
+                    string newLevel = (doc.GetElement(expectedLevelId) as Level)?.Name ?? "?";
+                    string retired = RetireMismatchedKeyPlanView(doc, view, null, null);
+                    Logger.Info($"樓層總覽：「{level.Name}」總覽平面樓層不符（舊 {oldLevel} → 新 {newLevel}）→ 重建；{retired}");
+                    view = null;
+                }
+            }
+
             if (view == null)
             {
                 ViewPlan dupFrom = source ?? FindSourcePlanForDuplication(doc, null, level.Id);

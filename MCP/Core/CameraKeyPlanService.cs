@@ -371,6 +371,8 @@ namespace RevitMCP.Core
             public string IsoXYLog;
             public CameraSectionOrientationMode SectionModeRequested;
             public CameraSectionOrientationMode SectionModeUsed;
+            /// <summary>2026-09-26 第五輪：剖面位置（Camera＝剖切面通過眼睛／Center＝舊行為）。</summary>
+            public CameraSectionAnchorMode SectionAnchor;
             public string SectionSpecLog;
             /// <summary>2026-09-26：剖面套用紀錄（新建／移動旋轉／刪除重建＋世界範圍後檢）。</summary>
             public string SectionApplyLog;
@@ -396,6 +398,8 @@ namespace RevitMCP.Core
             public CameraMarkerMode? MarkerMode;
             /// <summary>2026-09-26：等角近側牆單次覆寫（Cut／Keep），不寫回面板設定。</summary>
             public CameraIsoNearWallsMode? IsoNearWalls;
+            /// <summary>2026-09-26 第五輪：剖面位置單次覆寫（Camera／Center），不寫回面板設定。</summary>
+            public CameraSectionAnchorMode? SectionAnchor;
         }
 
         // Revit API 只在主執行緒執行，一次只會有一個一鍵 4 視圖在跑，靜態欄位即可。
@@ -534,7 +538,9 @@ namespace RevitMCP.Core
                     double? cutPlaneZ = GetPlanCutPlaneZ(doc, planView);
                     XYZ planBasisX = null;
                     try { planBasisX = planView.CropBox?.Transform?.BasisX; } catch { planBasisX = null; }
-                    SectionSpec spec = ComputeSectionSpec(geom, cp, isoXY, storeyTop, sectionMode, planBasisX, cutPlaneZ);
+                    CameraSectionAnchorMode sectionAnchor = GetSectionAnchorMode();
+                    dec.SectionAnchor = sectionAnchor;
+                    SectionSpec spec = ComputeSectionSpec(geom, cp, isoXY, storeyTop, sectionMode, planBasisX, cutPlaneZ, sectionAnchor);
                     Logger.Info("相機 Key Plan：剖面規格 " + spec.Log);
                     dec.SectionModeUsed = spec.ModeUsed;
                     dec.SectionSpecLog = spec.Log;
@@ -654,9 +660,19 @@ namespace RevitMCP.Core
         private static ViewPlan GetOrCreatePlanView(Document doc, UIApplication uiApp, Level levelBelow, string planName, string cid)
         {
             View linked = FindLinkedView(doc, cid, "Plan");
+            // 2026-09-26 第五輪（屋頂花園相機：新規則已判到正確樓層，但 ES 連結的平面是舊版在下一層建的）：
+            // ViewPlan 的 GenLevel 不可改 → 樓層不符就退役舊平面（沒上圖紙＝刪除；上了圖紙＝改名「-舊樓層」並解除連結），
+            // 再走下方同一條「從該層底圖複製」路徑重建。呼叫端後續步驟一律用回傳的新視圖。
+            if (linked is ViewPlan mismatched && IsPlanLevelMismatch(mismatched, levelBelow.Id))
+            {
+                string oldLevel = mismatched.GenLevel?.Name ?? "?";
+                string retired = RetireMismatchedKeyPlanView(doc, mismatched, cid, "MarkerPlan");
+                Logger.Info($"相機 Key Plan：Key Plan 平面樓層不符（舊 {oldLevel} → 新 {levelBelow.Name}）→ 重建；{retired}");
+                linked = null;
+            }
             if (linked is ViewPlan linkedPlan)
             {
-                // 2026-09-25（使用者決策）：相機樓層不就地修改（清單改樓層＝複製新相機），不再退役／刪除舊樓層平面。
+                // 2026-09-25（使用者決策）：相機樓層不就地修改（清單改樓層＝複製新相機）；樓層不符由上方重建處理。
                 if (linkedPlan.Name != planName) linkedPlan.Name = MakeUniqueName(doc, planName, linkedPlan.Id);
                 EnsureSectionsVisible(linkedPlan);
                 return linkedPlan;
@@ -694,6 +710,55 @@ namespace RevitMCP.Core
             TagLink(created, cid, "Plan");
             EnsureSectionsVisible(created);
             return created;
+        }
+
+        /// <summary>2026-09-26 第五輪：平面視圖的 GenLevel 與預期樓層不同（GenLevel 為 null 或無預期值＝不判不符）。</summary>
+        internal static bool IsPlanLevelMismatch(View v, ElementId expectedLevelId)
+        {
+            if (!(v is ViewPlan vp) || expectedLevelId == null || expectedLevelId == ElementId.InvalidElementId) return false;
+            Level gl;
+            try { gl = vp.GenLevel; } catch { return false; }
+            return gl != null && gl.Id.GetIdValue() != expectedLevelId.GetIdValue();
+        }
+
+        /// <summary>
+        /// 2026-09-26 第五輪：退役樓層不符的 Key Plan 平面／樓層總覽（須在交易內）。
+        /// 沒放在任何圖紙上（含其從屬視圖）且不是作用中視圖 → 刪除；否則刪掉本相機在其上的標記（markerRole 非 null 時）、
+        /// 解除 ES 連結、改名「&lt;原名&gt;-舊樓層」（重名自動加序號）。回傳一句說明（log 用）。呼叫後不可再使用 old。
+        /// </summary>
+        private static string RetireMismatchedKeyPlanView(Document doc, ViewPlan old, string markerCid, string markerRole)
+        {
+            ElementId oldId = old.Id;
+            string oldName = old.Name;
+            var ids = new HashSet<long> { oldId.GetIdValue() };
+            try { foreach (ElementId d in old.GetDependentViewIds()) ids.Add(d.GetIdValue()); } catch { }
+            bool onSheet = new FilteredElementCollector(doc).OfClass(typeof(Viewport)).Cast<Viewport>()
+                .Any(vp => vp.ViewId != null && ids.Contains(vp.ViewId.GetIdValue()));
+            bool isActive = false;
+            try { isActive = doc.ActiveView != null && doc.ActiveView.Id == oldId; } catch { }
+            if (!onSheet && !isActive)
+            {
+                try
+                {
+                    doc.Delete(oldId);
+                    return $"已刪除舊視圖「{oldName}」（未放在圖紙上）";
+                }
+                catch (Exception ex) { Logger.Error($"相機 Key Plan：刪除舊樓層視圖「{oldName}」失敗，改為改名保留", ex); }
+            }
+            if (markerCid != null && markerRole != null)
+            {
+                try { DeleteOldMarkers(doc, old, markerCid, markerRole); }
+                catch (Exception ex) { Logger.Error($"相機 Key Plan：清除舊樓層視圖「{oldName}」上的相機標記失敗", ex); }
+            }
+            try
+            {
+                Schema s = Schema.Lookup(SchemaGuid);
+                if (s != null) old.DeleteEntity(s);
+            }
+            catch (Exception ex) { Logger.Error($"相機 Key Plan：解除舊樓層視圖「{oldName}」的連結失敗", ex); }
+            string newName = MakeUniqueName(doc, oldName + "-舊樓層", oldId);
+            old.Name = newName;
+            return $"舊視圖{(onSheet ? "已放在圖紙上" : "為作用中視圖")} → 改名「{newName}」並解除連結";
         }
 
         /// <summary>
@@ -1512,6 +1577,17 @@ namespace RevitMCP.Core
             public string Log;
         }
 
+        /// <summary>2026-09-26 第五輪：剖面位置——單次覆寫（MCP 工具）優先，否則面板設定（預設相機位置）。</summary>
+        private static CameraSectionAnchorMode GetSectionAnchorMode()
+        {
+            if (_runOptions?.SectionAnchor != null) return _runOptions.SectionAnchor.Value;
+            try { return ConfigManager.Instance.Settings.CameraManager.SectionAnchor; }
+            catch { return CameraSectionAnchorMode.Camera; }
+        }
+
+        /// <summary>面板目前設定的剖面位置（唯讀，list_cameras 用）。</summary>
+        internal static CameraSectionAnchorMode GetConfiguredSectionAnchorMode() => GetSectionAnchorMode();
+
         private static CameraSectionOrientationMode GetSectionOrientationMode()
         {
             if (_runOptions?.SectionMode != null) return _runOptions.SectionMode.Value;
@@ -1659,7 +1735,8 @@ namespace RevitMCP.Core
         /// 任何一步失敗只記 log、退回較簡單的規則。
         /// </summary>
         private static SectionSpec ComputeSectionSpec(CameraMath.CameraGeometry geom, CameraParams cp, IsoXY isoXY, StoreyTop storeyTop,
-            CameraSectionOrientationMode mode, XYZ planBasisX, double? cutPlaneZ)
+            CameraSectionOrientationMode mode, XYZ planBasisX, double? cutPlaneZ,
+            CameraSectionAnchorMode anchor = CameraSectionAnchorMode.Center)
         {
             // 2026-09-25：「沿視線」一律沿畫面中心線（水平視錐左右緣角平分線），不是相機正前方。
             XYZ center = cp.CenterHoriz ?? cp.ForwardHoriz;
@@ -1742,6 +1819,39 @@ namespace RevitMCP.Core
                     log.Append($"mode=沿視線 (no sight range) X[{CameraMath.FeetToMm(s.MinX):F0},{CameraMath.FeetToMm(s.MaxX):F0}]mm");
                 }
             }
+
+            // 2026-09-26 第五輪（使用者：剖面預設要剛好通過相機位置）：剖面位置＝相機位置 → 原點＝眼睛（方向沿用上面的模式），
+            // 水平範圍改成相對眼睛；深度：剖切面（區域 Max.Z）＝0（通過眼睛），往看向側（−BasisZ）延伸扇形半徑（至少 1 m）。
+            // 對齊房間長邊時若扇形中心線落在剖切面背後（看向側的反側），把軸反向（範圍對調），讓相機前方的扇形在剖面裡看得到。
+            if (anchor == CameraSectionAnchorMode.Camera)
+            {
+                try
+                {
+                    XYZ o0 = s.Origin ?? geom.Eye;
+                    XYZ ax = s.Axis;
+                    double sh = (geom.Eye - o0).DotProduct(ax);
+                    double x0 = s.MinX - sh, x1 = s.MaxX - sh;
+                    XYZ look = XYZ.BasisZ.CrossProduct(ax); // 看向＝−BasisZ＝−(axis×up)＝up×axis
+                    bool flipped = false;
+                    if (look.GetLength() > 1e-6 && center != null && center.DotProduct(look.Normalize()) < -1e-6)
+                    {
+                        ax = ax.Negate();
+                        double a = x0; x0 = -x1; x1 = -a;
+                        flipped = true;
+                    }
+                    double depth = Math.Max(cp.FanRadiusFeet, Cm(100));
+                    s.Axis = ax; s.Origin = geom.Eye; s.MinX = x0; s.MaxX = x1;
+                    s.MinZ = -depth; s.MaxZ = 0.0;
+                    log.Append($" | 剖面位置＝相機位置：原點＝眼睛 X[{CameraMath.FeetToMm(s.MinX):F0},{CameraMath.FeetToMm(s.MaxX):F0}]mm 深度[{CameraMath.FeetToMm(s.MinZ):F0},0]mm（剖切面通過眼睛）" +
+                               (flipped ? "；扇形在剖切面背後 → 軸反向" : ""));
+                }
+                catch (Exception exA)
+                {
+                    Logger.Error("相機 Key Plan：剖面位置＝相機位置 計算失敗，沿用視野中心規則", exA);
+                    log.Append(" | 剖面位置＝相機位置 失敗 → 沿用視野中心");
+                }
+            }
+            else log.Append(" | 剖面位置＝視野中心（舊行為）");
 
             double levelZ = geom.LevelBelow.ProjectElevation;
             double bottomZ = levelZ - Cm(SectionBelowLevelCm);
@@ -3567,6 +3677,9 @@ namespace RevitMCP.Core
                                 bool storeyChanged = !hadRecord || prev != cp.Geom.LevelBelow.Id.GetIdValue();
                                 overviewCams.Add((cam, cp));
                                 plans.TryGetValue(cid, out ViewPlan plan);
+                                // 2026-09-26 第五輪：標記更新交易不重建視圖；樓層不符只提示（一鍵 4 視圖時會重建 Key Plan 平面）。
+                                if (plan != null && (force || storeyChanged) && IsPlanLevelMismatch(plan, cp.Geom.LevelBelow.Id))
+                                    Logger.Info($"相機 Key Plan：「{cam.Name}」Key Plan 平面樓層不符（平面 {plan.GenLevel?.Name ?? "?"}、相機 {cp.Geom.LevelBelow.Name}）→ 請重跑一鍵 4 視圖重建");
                                 if (plan != null)
                                     DrawMarkerSafely(doc, "UpdatePlanMarker",
                                         () => DrawPlanMarker(doc, plan, cp.Geom, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, cp.FanRadiusFeet, cid));

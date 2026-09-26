@@ -87,6 +87,24 @@ namespace RevitMCP.Core
             }
         }
 
+        /// <summary>2026-09-26 第五輪：剖面位置單次覆寫（camera＝剖切面通過眼睛／center＝視野中心舊行為）。</summary>
+        private static CameraSectionAnchorMode? ParseSectionAnchor(JObject parameters)
+        {
+            string s = parameters?["sectionAnchor"]?.Value<string>();
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            switch (s.Trim().ToLowerInvariant())
+            {
+                case "camera":
+                case "eye":
+                    return CameraSectionAnchorMode.Camera;
+                case "center":
+                case "centre":
+                    return CameraSectionAnchorMode.Center;
+                default:
+                    throw new Exception($"sectionAnchor「{s}」無效，請用 camera 或 center。");
+            }
+        }
+
         private static CameraIsoExtentMode? ParseIsoMode(JObject parameters)
         {
             string s = parameters?["isoMode"]?.Value<string>();
@@ -236,6 +254,9 @@ namespace RevitMCP.Core
                     KeyPlan = new
                     {
                         PlanViewId = plan?.Id.GetIdValue(),
+                        // 2026-09-26 第五輪：Key Plan 平面的 GenLevel 與相機目前樓層不同＝需重跑一鍵 4 視圖（會自動重建）
+                        PlanLevel = (plan as ViewPlan)?.GenLevel?.Name,
+                        PlanLevelMismatch = plan is ViewPlan ? (bool?)CameraKeyPlanService.IsPlanLevelMismatch(plan, geom.LevelBelow?.Id) : null,
                         SectionViewId = section?.Id.GetIdValue(),
                         IsoViewId = iso?.Id.GetIdValue(),
                         SectionManuallyMoved = sectionMoved
@@ -244,7 +265,9 @@ namespace RevitMCP.Core
                     {
                         Configured = configuredMode.ToString(),
                         // 室外一律沿視線；室內找不到房間時 ComputeSectionSpec 也會退回沿視線（以 run_camera_keyplan 的 SectionModeUsed 為準）
-                        ExpectedForThisCamera = outdoor ? CameraSectionOrientationMode.AlongSightLine.ToString() : configuredMode.ToString()
+                        ExpectedForThisCamera = outdoor ? CameraSectionOrientationMode.AlongSightLine.ToString() : configuredMode.ToString(),
+                        // 2026-09-26 第五輪：剖面位置（Camera＝剖切面通過眼睛／Center＝視野中心）
+                        AnchorConfigured = CameraKeyPlanService.GetConfiguredSectionAnchorMode().ToString()
                     }
                 });
             }
@@ -275,7 +298,8 @@ namespace RevitMCP.Core
                 SectionMode = ParseSectionMode(parameters),
                 IsoMode = ParseIsoMode(parameters),
                 MarkerMode = ParseMarkerMode(parameters),
-                IsoNearWalls = ParseIsoNearWalls(parameters)
+                IsoNearWalls = ParseIsoNearWalls(parameters),
+                SectionAnchor = ParseSectionAnchor(parameters)
             };
 
             CameraKeyPlanService.KeyPlanResult result =
@@ -351,6 +375,7 @@ namespace RevitMCP.Core
                     IsoXYLog = d.IsoXYLog,
                     SectionModeRequested = d.SectionModeRequested.ToString(),
                     SectionModeUsed = d.SectionModeUsed.ToString(),
+                    SectionAnchor = d.SectionAnchor.ToString(),
                     d.SectionSpecLog,
                     d.SectionApplyLog,
                     SectionExtentDeviationMm = CmRound(d.SectionExtentDeviationMm, 1),

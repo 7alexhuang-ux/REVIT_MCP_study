@@ -519,6 +519,17 @@ namespace RevitMCP.Core
     }
 
     /// <summary>
+    /// 2026-09-26 第五輪（使用者）：Key Plan 剖面「位置」（剖切面通過哪一點；方向仍由 <see cref="CameraSectionOrientationMode"/> 決定）。
+    ///   Camera（預設）＝剖切面通過相機眼睛；深度＝眼睛（深度 0，剖切面）往視圖看向側延伸扇形半徑。
+    ///   Center＝舊行為（對齊房間長邊：畫面中心線上半個扇形半徑處；沿視線：眼睛、深度前後各 1.5 m）。
+    /// </summary>
+    public enum CameraSectionAnchorMode
+    {
+        Camera = 0,
+        Center = 1
+    }
+
+    /// <summary>
     /// 2026-09-25（Wave 2）：相機標記型式（⋯ 更多 → 相機標記）。
     ///   B（預設）＝Key Plan 平面／剖面／樓層總覽上的詳圖標記（只在該視圖、可列印、不進算圖）；
     ///   A＝模型族群「RevitMCP 相機標記」（平面／剖面／3D 都看得到，透視圖一律隱藏子類別「相機標記」）＋視野扇形（DirectShape）；
@@ -556,6 +567,9 @@ namespace RevitMCP.Core
 
         /// <summary>Key Plan 剖面方向，見 <see cref="CameraSectionOrientationMode"/>（預設對齊房間長邊）。</summary>
         public CameraSectionOrientationMode SectionOrientationMode { get; set; } = CameraSectionOrientationMode.AlongRoomLongAxis;
+
+        /// <summary>2026-09-26 第五輪：Key Plan 剖面位置，見 <see cref="CameraSectionAnchorMode"/>（預設＝相機位置）。</summary>
+        public CameraSectionAnchorMode SectionAnchor { get; set; } = CameraSectionAnchorMode.Camera;
 
         /// <summary>2026-09-24：Key Plan 平面／剖面相機標記線（線型「相機標記線」）與箭頭填滿顏色，
         /// 十六進位 #RRGGBB；預設藍 #3B82C4（面板 accent 色）。</summary>

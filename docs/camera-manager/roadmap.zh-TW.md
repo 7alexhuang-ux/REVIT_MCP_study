@@ -50,6 +50,14 @@
 - MCP 工具數 218 → 220（`create_camera_sheet`、`camera_version`）。
 - 版面比例（左 60%、右欄三等分）與圖紙邊界 15 mm 是常數／本機設定，沒有 UI；實測後再決定要不要開放。
 
+### Key Plan 平面樓層不符重建＋剖面位置「相機位置」　⏳ 已編譯、未部署（Revit 執行中）、待複測（2026-09-26 12:45，build R24 SHA256 41B39F18…EFA7B810）
+
+| # | 項目 | 複測方式 | 預期 |
+|---|---|---|---|
+| a | 樓層不符重建 | 部署後 `list_cameras`「Green Roof - By Stair 1」→ 看 `KeyPlan.PlanLevelMismatch`（應為 true）→ `run_camera_keyplan` → 再 `list_cameras` | log「Key Plan 平面樓層不符（舊 X → 新 Green Roof Hardscape）→ 重建」＋舊平面已刪除（或在圖紙上＝改名「-舊樓層」、無 ES）；新平面 GenLevel＝相機樓層、`PlanLevelMismatch`＝false；平面上只見本相機剖面線、標記在新平面 |
+| b | 剖面位置＝相機位置 | 預設設定 `run_camera_keyplan` 一台室內相機（room 與 sight 各一次） | `Decisions.SectionAnchor`＝Camera；`SectionSpecLog` 有「剖面位置＝相機位置：原點＝眼睛 … 深度[−R,0]」；平面上剖面線通過相機標記圓心；剖面裡看得到相機前方的扇形區域 |
+| c | 視野中心＝舊行為 | `sectionAnchor="center"`；④ ▾ 切換兩個選項看勾號 | 與舊版相同原點／深度；切換設定寫入本機設定並保留；手動拖過的剖面仍保留，重設剖面位置依目前設定 |
+
 ### 使用者實測第四輪修正（D-039–D-043）　⏳ 已編譯、已部署 Revit 2024、待複測（2026-09-26）
 
 > 使用者 Revit 2024 實測回報（Snowdon Towers Sample Architectural）後的修正。程式已編譯並部署到 Revit 2024（RevitMCP.dll SHA256 AE3B1488…0B24EF，建置＝部署）。以下每一項都要重新測；效能項目請看 RevitMCP log 的 `⏱` 行。

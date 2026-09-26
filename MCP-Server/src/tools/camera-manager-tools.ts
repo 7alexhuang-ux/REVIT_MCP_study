@@ -12,7 +12,7 @@ export const cameraManagerTools: Tool[] = [
     {
         name: "list_cameras",
         title: "列出透視相機（相機管理）",
-        description: "列出專案中所有透視相機，逐台回報相機管理面板看到的同一份資料：所在樓層（室內＝眼睛所在房間的樓層、室外＝眼睛正下方的建築樓層，附判定來源）、離樓板高度（cm 與 mm）、水平角（0°=+Y 順時針）、俯仰角、視野角（左／右／下／上邊界與水平／垂直總角）、遠裁剪、室內／室外與眼睛所在房間、相機放置時記錄的平面、③ 位置圖底圖挑選器會選哪張平面與步驟、已連結的 Key Plan 平面／剖面／等角視圖 id、剖面方向設定、剖面是否被手動移過。唯讀。觸發條件：相機清單、相機管理、Key Plan、人視高檢查、camera list。",
+        description: "列出專案中所有透視相機，逐台回報相機管理面板看到的同一份資料：所在樓層（室內＝眼睛所在房間的樓層、室外＝眼睛正下方的建築樓層，附判定來源）、離樓板高度（cm 與 mm）、水平角（0°=+Y 順時針）、俯仰角、視野角（左／右／下／上邊界與水平／垂直總角）、遠裁剪、室內／室外與眼睛所在房間、相機放置時記錄的平面、③ 位置圖底圖挑選器會選哪張平面與步驟、已連結的 Key Plan 平面／剖面／等角視圖 id（KeyPlan.PlanLevelMismatch＝平面的樓層與相機目前樓層不符，重跑一鍵 4 視圖會重建）、剖面方向與剖面位置設定、剖面是否被手動移過。唯讀。觸發條件：相機清單、相機管理、Key Plan、人視高檢查、camera list。",
         inputSchema: {
             type: "object",
             properties: {
@@ -43,6 +43,11 @@ export const cameraManagerTools: Tool[] = [
                     type: "string",
                     enum: ["room", "sight"],
                     description: "只影響這次執行的剖面方向：room＝對齊房間長邊、sight＝沿視線；省略＝沿用面板設定"
+                },
+                sectionAnchor: {
+                    type: "string",
+                    enum: ["camera", "center"],
+                    description: "只影響這次執行的剖面位置：camera＝剖切面剛好通過相機眼睛（預設；深度＝往看向側延伸扇形半徑）、center＝視野中心（舊行為）；方向仍依 sectionMode。省略＝沿用面板設定。回傳 Decisions.SectionAnchor"
                 },
                 isoMode: {
                     type: "string",

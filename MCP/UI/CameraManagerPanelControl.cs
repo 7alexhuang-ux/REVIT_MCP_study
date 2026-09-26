@@ -459,6 +459,13 @@ namespace RevitMCP.UI
             _secRoomAxisItem.IsCheckable = false; _secSightItem.IsCheckable = false;
             _fourViewsMenu.Items.Add(_secRoomAxisItem);
             _fourViewsMenu.Items.Add(_secSightItem);
+            // 2026-09-26 第五輪（使用者）：剖面位置——相機位置（預設，剖切面通過眼睛）／視野中心（舊行為）
+            const string anchorTip = "④ 剖面位置：相機位置（預設）＝剖切面剛好通過相機眼睛，往看向側延伸扇形半徑（方向仍依上面的剖面方向）；視野中心＝舊行為（對齊房間長邊時通過中心線上半個扇形半徑處）。手動拖過的剖面仍保留（下次一鍵 4 視圖／重設剖面位置套用）";
+            _secAnchorCameraItem = NewMenuItem("剖面位置：相機位置（預設）", anchorTip, () => SetSectionAnchor(CameraSectionAnchorMode.Camera), "SectionAnchorCamera");
+            _secAnchorCenterItem = NewMenuItem("剖面位置：視野中心", anchorTip, () => SetSectionAnchor(CameraSectionAnchorMode.Center), "SectionAnchorCenter");
+            _secAnchorCameraItem.IsCheckable = false; _secAnchorCenterItem.IsCheckable = false;
+            _fourViewsMenu.Items.Add(_secAnchorCameraItem);
+            _fourViewsMenu.Items.Add(_secAnchorCenterItem);
             _fourViewsMenu.Items.Add(new Separator());
             // 2026-09-25：室外相機（眼睛不在任何房間）的 Key Plan 範圍半徑，實際＝min(遠裁剪, 本值)
             _fourViewsMenu.Items.Add(NewMenuItem("室外範圍半徑… (m)",
@@ -496,6 +503,9 @@ namespace RevitMCP.UI
             bool sight = ConfigManager.Instance.Settings.CameraManager.SectionOrientationMode == CameraSectionOrientationMode.AlongSightLine;
             if (_secRoomAxisItem != null) _secRoomAxisItem.IsChecked = !sight;
             if (_secSightItem != null) _secSightItem.IsChecked = sight;
+            bool anchorCenter = ConfigManager.Instance.Settings.CameraManager.SectionAnchor == CameraSectionAnchorMode.Center;
+            if (_secAnchorCameraItem != null) _secAnchorCameraItem.IsChecked = !anchorCenter;
+            if (_secAnchorCenterItem != null) _secAnchorCenterItem.IsChecked = anchorCenter;
             CameraIsoNearWallsMode near = ConfigManager.Instance.Settings.CameraManager.IsoNearWalls;
             if (_nearCameraItem != null) _nearCameraItem.IsChecked = near == CameraIsoNearWallsMode.Camera;
             if (_nearCutItem != null) _nearCutItem.IsChecked = near == CameraIsoNearWallsMode.Wall;
@@ -503,6 +513,18 @@ namespace RevitMCP.UI
         }
 
         private WpfMenuItem _secRoomAxisItem, _secSightItem;
+        private WpfMenuItem _secAnchorCameraItem, _secAnchorCenterItem;
+
+        private void SetSectionAnchor(CameraSectionAnchorMode mode)
+        {
+            ConfigManager.Instance.Settings.CameraManager.SectionAnchor = mode;
+            ConfigManager.Instance.SaveSettings();
+            UpdateIsoMenuChecks();
+            Logger.Info("相機管理面板：剖面位置 → " + mode);
+            SetStatus(mode == CameraSectionAnchorMode.Center
+                ? "剖面位置：視野中心——下次一鍵 4 視圖／重設剖面位置套用。"
+                : "剖面位置：相機位置——下次一鍵 4 視圖／重設剖面位置套用。");
+        }
         private WpfMenuItem _nearCameraItem, _nearCutItem, _nearKeepItem;
 
         private void SetIsoNearWalls(CameraIsoNearWallsMode mode)
