@@ -167,7 +167,7 @@
 | 控制項 | 行為 |
 |---|---|
 | 一鍵 4 視圖（主鈕） | §10 |
-| ▾ 選單 | 等角範圍（整層（見上層樑）／只到當層（不含上層））、剖面方向（對齊房間長邊（預設）／沿視線）、室外範圍半徑… (m)（預設 60，有效 5–1000）、重設剖面位置、全部符合畫面、**更新樓層總覽**（有選取相機＝該相機的樓層；沒有選取＝所有有相機的樓層；只更新一張時自動開啟它，§10.10）、**一鍵出圖紙**（§10.13）、**圖紙圖框 ▸**（自動（最常用）＋專案內每個圖框類型，附已使用張數；本機設定 `SheetTitleBlockTypeId`，0＝自動；清單在「重新整理」時讀取） |
+| ▾ 選單 | 等角範圍（整層（見上層樑）／只到當層（不含上層））、等角近側牆（切掉（預設）／保留，§10.6）、剖面方向（對齊房間長邊（預設）／沿視線）、室外範圍半徑… (m)（預設 60，有效 5–1000）、重設剖面位置、全部符合畫面、**更新樓層總覽**（有選取相機＝該相機的樓層；沒有選取＝所有有相機的樓層；只更新一張時自動開啟它，§10.10）、**一鍵出圖紙**（§10.13）、**圖紙圖框 ▸**（自動（最常用）＋專案內每個圖框類型，附已使用張數；本機設定 `SheetTitleBlockTypeId`，0＝自動；清單在「重新整理」時讀取） |
 | 並排 | 開啟選取相機的透視圖＋下方樓層一張**既有**平面（已開啟 > 已裁剪 > 名稱排序；找不到就報錯，不新建），先關閉其他視圖，再 `PostCommand(TileViews)` |
 | 還原 | 關閉並排額外開的視圖、切回之前的作用視圖；已被關掉的其他視圖不會重新打開 |
 | ⋯ 更多 | 複製到其他樓層…、**相機標記 ▸（B 詳圖（預設）／A 模型／A+B，§10.11）**、標記顏色 ▸（藍 `#3B82C4` 預設／紅 `#D9534F`／橘 `#E8A33D`／綠 `#4CAF7A`／紫 `#8E6BBF`／黑 `#1C2B3A`／自訂…）、Key Plan 樣式 ▸（淡化背景（預設）／原始）、⑤ 人視高預設值…、匯出 Excel、開啟預覽視窗 |
@@ -292,6 +292,7 @@ ES `RevitMCP_CameraSectionStateV2` 記下上次程式產生剖面時的原點與
 - 方向＝**真正的標準等角**：在 ViewCube 上方四角（yaw 45°/135°/225°/315°）中挑水平方向最接近相機前方向者，forward＝(±1, ±1, −1)/√3（俯角 ≈ 35.264°，`CameraMath.SnapToIsoCorner`）；眼睛放在 Section Box 中心沿 −forward 退到框外（至少 5 m）；up 不滾動。
 - 室內範圍：
   - XY＝眼睛所在房間 +0.6 m；無房間＝扇形框（夾 8 m）。
+  - **近側牆切除（2026-09-26，D-038）**：等角 forward＝(sx, sy, −1)/√3，觀看者在 −sx／−sy 側 → 近側兩面＝X：sx > 0 ? MinX : MaxX、Y：sy > 0 ? MinY : MaxY，改為「眼睛所在房間邊界線外接框（平面、軸向）往內 100 mm」（房間邊界＝牆內面 → 擋住室內的兩道牆被切掉）；遠側兩面維持房間 +0.6 m（牆保留）；Z 不變。設定 ④ ▾「等角近側牆：切掉（預設）／保留」（`CameraManagerSettings.IsoNearWalls`），`run_camera_keyplan` 的 `isoNearWalls`（cut／keep）單次覆寫；室外相機、無眼睛所在房間、內縮後 min ≥ max → 不切。切了哪兩面與數值寫 log 並回傳 `Decisions.IsoNearWalls`／`IsoNearWallsLog`。
   - Z 下限＝min(本層樓板底 −50 mm, 支撐樑底)；本層樓板＝XY 重疊、頂面在樓層高程 ±300 mm 內的樓板取最低；找不到＝樓層 −300 mm。支撐樑規則同 `set_3d_section_box` 的 `includeSupportingBeams`（共用 `SectionBoxLevelHelper`）。
   - Z 上限：上層樓板只認「底面或頂面 ≥ 房間頂 −0.1 m」的樓板／屋頂（房間內較低的夾層不算）；「整層（見上層樑）」＝min(房間頂 +0.3 m, 上層樓板底 −10 mm)；「只到當層（不含上層）」＝再與上層樑底 −10 mm 取小。無房間時：上層樓板底（找不到 → 上一樓層高程 − 該樓層樓板厚中位數（無樓板 300 mm）；無上一樓層 → 眼睛 +3 m）。上限 ≤ 下限時保底 +3 m。
 - 室外範圍：XY＝非對稱扇形外接框 +2 m；Z＝[min(下方樓層, 最低樓層) −1 m, max(XY 範圍內模型最高點, 眼睛) +2 m]（`SectionBoxLevelHelper.FindMaxModelTopInXY`）；不做樓層切、不找上層樓板／支撐樑。
@@ -431,7 +432,7 @@ C#：`MCP/Core/Commands/CommandExecutor.CameraManager.cs`；TS：`MCP-Server/src
 | 工具 | 讀／寫 | 參數 | 呼叫的共用程式碼 |
 |---|---|---|---|
 | `list_cameras` | 唯讀 | `nameContains?` | `ReadSnapshot`／`BuildCameraRow`、`ComputePerspectiveFov`、`FindEyeRoom`、`BaseMapPlanChooser.Choose`、ES 連結查詢 |
-| `run_camera_keyplan` | 寫入 | `cameraId?`、`tile`（預設 false）、`sectionMode?`（room／sight）、`isoMode?`（full／current）、`resetSection`（預設 false）、`markerMode?`（B／A／AB，2026-09-25） | `CreateOrUpdateFourViews`（單次覆寫設定，不寫回設定檔）、`tile=true` 時 `OpenAndTileFourViews`；另回傳 `MarkerModeUsed`、`Warnings`（裁剪框讀回不符）、`Plan.Extents.ScopeBox` |
+| `run_camera_keyplan` | 寫入 | `cameraId?`、`tile`（預設 false）、`sectionMode?`（room／sight）、`isoMode?`（full／current）、`resetSection`（預設 false）、`markerMode?`（B／A／AB，2026-09-25）、`isoNearWalls?`（cut／keep，2026-09-26） | `CreateOrUpdateFourViews`（單次覆寫設定，不寫回設定檔）、`tile=true` 時 `OpenAndTileFourViews`；另回傳 `MarkerModeUsed`、`Warnings`（裁剪框讀回不符）、`Plan.Extents.ScopeBox` |
 | `set_camera_pose` | 寫入 | `cameraId?`＋任一：`heightAboveLevelCm`、`yawDeg`、`pitchDeg`、`planXcm`、`planYcm`、`farClipCm` | `BuildEditRequestFromRow`＋`ApplyDetailEdit` |
 | `copy_camera_to_level` | 寫入 | `cameraId?`、`levelId` 或 `levelName` | `CopyCameraToLevels` |
 | `run_camera_overview` | 寫入（Wave 2） | `levelId` 或 `levelName`，或 `all=true`（所有有相機的樓層） | `CreateOrUpdateOverviews`（§10.10）；回傳每層視圖 id、名稱、是否新建、相機數與名稱、底圖來源與理由、範圍模式、裁剪外接框 mm、比例、依角色的標記元素數 |
@@ -446,7 +447,7 @@ C#：`MCP/Core/Commands/CommandExecutor.CameraManager.cs`；TS：`MCP-Server/src
 | 資料 | 存在哪 | 誰看得到 |
 |---|---|---|
 | 相機、Key Plan 視圖、樓層總覽、相機圖紙、標記、樓層記號、A 型族群與實例、視角版本、ES 連結 | .rvt | 所有開這個檔的人 |
-| 面板設定（人視高、欄位顯示、分割比例、等角範圍、剖面方向、室外半徑、標記顏色、Key Plan 樣式、相機標記型式、底圖清單模式、圖紙圖框、圖紙邊界…） | `ServiceSettings.CameraManager`（本機 JSON） | 只有本機 |
+| 面板設定（人視高、欄位顯示、分割比例、等角範圍、等角近側牆、剖面方向、室外半徑、標記顏色、Key Plan 樣式、相機標記型式、底圖清單模式、圖紙圖框、圖紙邊界…） | `ServiceSettings.CameraManager`（本機 JSON） | 只有本機 |
 
 ## 14. 技術約束
 

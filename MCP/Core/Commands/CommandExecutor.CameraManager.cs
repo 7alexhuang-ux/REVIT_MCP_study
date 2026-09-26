@@ -105,6 +105,18 @@ namespace RevitMCP.Core
             }
         }
 
+        private static CameraIsoNearWallsMode? ParseIsoNearWalls(JObject parameters)
+        {
+            string s = parameters?["isoNearWalls"]?.Value<string>();
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            switch (s.Trim().ToLowerInvariant())
+            {
+                case "cut": return CameraIsoNearWallsMode.Cut;
+                case "keep": return CameraIsoNearWallsMode.Keep;
+                default: throw new Exception($"isoNearWalls「{s}」無效，請用 cut 或 keep。");
+            }
+        }
+
         private static CameraMarkerMode? ParseMarkerMode(JObject parameters)
         {
             string s = parameters?["markerMode"]?.Value<string>();
@@ -253,7 +265,8 @@ namespace RevitMCP.Core
             {
                 SectionMode = ParseSectionMode(parameters),
                 IsoMode = ParseIsoMode(parameters),
-                MarkerMode = ParseMarkerMode(parameters)
+                MarkerMode = ParseMarkerMode(parameters),
+                IsoNearWalls = ParseIsoNearWalls(parameters)
             };
 
             CameraKeyPlanService.KeyPlanResult result =
@@ -333,6 +346,8 @@ namespace RevitMCP.Core
                     d.SectionApplyLog,
                     SectionExtentDeviationMm = CmRound(d.SectionExtentDeviationMm, 1),
                     IsoExtentMode = d.IsoExtentMode.ToString(),
+                    IsoNearWalls = d.IsoNearWalls.ToString(),
+                    d.IsoNearWallsLog,
                     KeyPlanStyle = d.FadedStyle ? "淡化背景" : "原始"
                 }
             };

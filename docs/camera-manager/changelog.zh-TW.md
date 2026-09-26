@@ -6,6 +6,10 @@
 
 ## 2026-09-26
 
+### 08:23｜等角近側牆切除＋新通用工具 `set_section_box`（已編譯、待 MCP 複測）
+- **等角 Key Plan 切掉觀看者側兩道牆**（使用者要求，D-038）：室內相機的等角剖面框，近側兩面（依等角角落方向：sx > 0 → MinX 否則 MaxX；sy > 0 → MinY 否則 MaxY）改為房間邊界往內 100 mm，遠側兩面維持房間 +0.6 m，Z 不變；④ ▾ 新增「等角近側牆：切掉（預設）／保留」（本機設定），`run_camera_keyplan` 加 `isoNearWalls`（cut／keep），回傳 `Decisions.IsoNearWalls`／`IsoNearWallsLog`。室外相機不變。
+- **新 MCP 工具 `set_section_box`**（通用，view-cropbox-tools）：直接設定 3D 視圖 Section Box——絕對 `minMm`＋`maxMm` 或相對 `offsetsMm`（各面正＝外擴、負＝內縮），`enable` 預設 true；正交視圖同時關閉 CropBox；交易「設定剖面框」，回傳前後世界 min/max 與尺寸。工具數 220 → 221。
+
 ### 07:56｜主線 MCP 自測全項複測（四輪修正，Snowdon Towers Sample Architectural）
 - 主線在 Revit 2024（公開範例 Snowdon Towers Sample Architectural）以 MCP 對四輪修正（commit `afeddfb`、`c541423`、`8cc721d`、`325e215`）逐項實機複測。**已驗證**：8 個 MCP 工具皆回傳正確資料（含 `camera_version` restore 還原出與存檔時完全相同的姿態 162.9 cm／200.67°）；FOV 候選 C 正確（新放相機 h=50.2°，拖曳後不對稱邊界 L −44°／R +25°）；拖曳透視裁剪框觸發標記更新；複製出的 Key Plan／樓層總覽已解除 Scope Box（裁剪讀回 11.5×12.2 m @1:50，總覽讀回＝預期）；室內判定含最近房間 fallback（Loft Unit d=36 mm）且樓層＝room.Level；剖面更新走移動路徑（旋轉180°＋移動5.2 m＋深度1.5 m，世界範圍偏差 0 mm；全新建立偏差亦 0 mm）；平面／剖面只顯示本相機剖面線；相機標記子類別在透視圖（含套用視圖樣板）全部隱藏、0 失敗；markerMode=B 移除 A 標記，A 型族群可在 R24 用 `Metric Generic Model.rft` 建立；不再誤判「手動移過」；圖紙出圖用透視複本、不 Overflow、視埠類型挑到「Title w Line」、版面「上二下一」（1:50／1:25／1:75）；淡化 Key Plan 樣式、真標準等角、簡化樓層記號皆截圖確認正確；樓層總覽 4 台相機皆標名稱且裁剪自動外擴。詳見 `roadmap.zh-TW.md`「MCP 自測已驗證（2026-09-26）」表。
 - **仍待處理**：A 扇形視覺已確認隱藏，但 `AMarkerLog` 診斷字串仍讀到「讀不到扇形幾何」（字串來源待查，不影響實際效果）；圖框 margin fallback（4% 寬度退路）邏輯已生效，但「E1 30 x 42 Horizontal_Snowdon」尚未重新截圖確認版面；刪除重建剖面路徑本輪移動路徑全部成功、未被觸發，仍待專門測試。

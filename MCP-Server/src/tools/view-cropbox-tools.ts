@@ -44,6 +44,39 @@ export const viewCropBoxTools: Tool[] = [
         },
     },
     {
+        name: "set_section_box",
+        title: "設定 3D 視圖剖面框（Section Box）",
+        description: "直接設定非樣板 3D 視圖（正交或透視）的 Section Box，不需目標元素。二擇一：(A) minMm＋maxMm＝世界座標（內部原點，mm）軸向對齊的絕對範圍；(B) offsetsMm＝在「目前」Section Box 各面上的相對位移（正＝往外擴、負＝往內縮，可只給部分面；目前框有旋轉時在框自身座標系內位移）。enable 預設 true（開啟 Section Box）。與 set_3d_section_box 相同會關閉正交視圖的 CropBox 避免雙重裁切（透視視圖必須保留裁剪，不動）。每軸必須 min < max。單一交易「設定剖面框」，回傳前後的世界座標 min/max 與尺寸。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                viewId: { type: "number", description: "目標 3D 視圖 Element ID；省略時使用目前作用中的 3D 視圖" },
+                minMm: {
+                    type: "object",
+                    description: "絕對模式：世界座標最小角點（mm，內部原點）；需與 maxMm 同時提供",
+                    properties: { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } },
+                    required: ["x", "y", "z"],
+                },
+                maxMm: {
+                    type: "object",
+                    description: "絕對模式：世界座標最大角點（mm，內部原點）；需與 minMm 同時提供",
+                    properties: { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } },
+                    required: ["x", "y", "z"],
+                },
+                offsetsMm: {
+                    type: "object",
+                    description: "相對模式：各面位移（mm），正＝往外擴、負＝往內縮；可只給部分面。不可與 minMm/maxMm 同時使用",
+                    properties: {
+                        minX: { type: "number" }, maxX: { type: "number" },
+                        minY: { type: "number" }, maxY: { type: "number" },
+                        minZ: { type: "number" }, maxZ: { type: "number" },
+                    },
+                },
+                enable: { type: "boolean", description: "設定後開啟 Section Box，預設 true；false 時只寫入範圍、關閉 Section Box", default: true },
+            },
+        },
+    },
+    {
         name: "shift_view_cropbox",
         description: "在 CropBox 自身座標系中平移視圖的 CropBox。dx 正值往右、dy 正值往上（單位公釐）。viewId 不指定時使用 active view。",
         inputSchema: {

@@ -432,6 +432,14 @@ namespace RevitMCP.UI
             _fourViewsMenu.Items.Add(_isoFullItem);
             _fourViewsMenu.Items.Add(_isoLevelItem);
             _fourViewsMenu.Items.Add(new Separator());
+            // 2026-09-26（使用者要求，D-038）：等角近側牆——室內相機觀看者側兩道牆切掉（預設）或保留
+            const string nearTip = "④ 等角近側牆（室內相機）：切掉（預設）＝等角是從角落看，最靠近觀看者的兩面剖面框改到房間邊界往內 100 mm，把擋住室內的兩道牆切掉；遠側兩面維持房間 +0.6 m（牆保留）。保留＝四面都留牆。室外相機不受影響（下次一鍵 4 視圖套用）";
+            _nearCutItem = NewMenuItem("等角近側牆：切掉（預設）", nearTip, () => SetIsoNearWalls(CameraIsoNearWallsMode.Cut), "IsoNearCut");
+            _nearKeepItem = NewMenuItem("等角近側牆：保留", nearTip, () => SetIsoNearWalls(CameraIsoNearWallsMode.Keep), "IsoNearKeep");
+            _nearCutItem.IsCheckable = false; _nearKeepItem.IsCheckable = false;
+            _fourViewsMenu.Items.Add(_nearCutItem);
+            _fourViewsMenu.Items.Add(_nearKeepItem);
+            _fourViewsMenu.Items.Add(new Separator());
             // 2026-09-25（使用者拍板）：剖面方向單選（存在相機設定，下次一鍵 4 視圖／重設剖面位置套用）
             const string secTip = "④ 剖面方向：對齊房間長邊（預設）＝剖面沿眼睛所在房間的長軸、通過畫面中心（中心線上半個扇形半徑處）；沿視線＝剖面包含畫面中心線（側視）。室外相機一律沿視線（下次一鍵 4 視圖／重設剖面位置套用）";
             _secRoomAxisItem = NewMenuItem("剖面方向：對齊房間長邊（預設）", secTip, () => SetSectionOrientationMode(CameraSectionOrientationMode.AlongRoomLongAxis), "SectionRoomAxis");
@@ -476,9 +484,24 @@ namespace RevitMCP.UI
             bool sight = ConfigManager.Instance.Settings.CameraManager.SectionOrientationMode == CameraSectionOrientationMode.AlongSightLine;
             if (_secRoomAxisItem != null) _secRoomAxisItem.IsChecked = !sight;
             if (_secSightItem != null) _secSightItem.IsChecked = sight;
+            bool keep = ConfigManager.Instance.Settings.CameraManager.IsoNearWalls == CameraIsoNearWallsMode.Keep;
+            if (_nearCutItem != null) _nearCutItem.IsChecked = !keep;
+            if (_nearKeepItem != null) _nearKeepItem.IsChecked = keep;
         }
 
         private WpfMenuItem _secRoomAxisItem, _secSightItem;
+        private WpfMenuItem _nearCutItem, _nearKeepItem;
+
+        private void SetIsoNearWalls(CameraIsoNearWallsMode mode)
+        {
+            ConfigManager.Instance.Settings.CameraManager.IsoNearWalls = mode;
+            ConfigManager.Instance.SaveSettings();
+            UpdateIsoMenuChecks();
+            Logger.Info("相機管理面板：等角近側牆 → " + mode);
+            SetStatus(mode == CameraIsoNearWallsMode.Keep
+                ? "等角近側牆：保留——下次一鍵 4 視圖套用。"
+                : "等角近側牆：切掉——下次一鍵 4 視圖套用。");
+        }
 
         private void SetSectionOrientationMode(CameraSectionOrientationMode mode)
         {

@@ -472,6 +472,17 @@ namespace RevitMCP.Core
     }
 
     /// <summary>
+    /// 2026-09-26（使用者要求，D-038）：等角 Key Plan 視圖「觀看者側」兩道牆（室內相機）。
+    ///   Cut（預設）＝近側兩面切到房間邊界往內 100 mm（dollhouse cutaway，牆被切掉看得到室內）；
+    ///   Keep＝舊行為（四面都是房間 +0.6 m，牆保留）。室外相機不受影響。
+    /// </summary>
+    public enum CameraIsoNearWallsMode
+    {
+        Cut = 0,
+        Keep = 1
+    }
+
+    /// <summary>
     /// 2026-09-25（使用者拍板）：Key Plan 剖面的方向。
     ///   AlongRoomLongAxis（預設，選項 C「對齊房間長邊」）：剖面沿眼睛所在房間的長軸、通過眼睛，
     ///     水平範圍＝房間沿該軸 +0.6m；找不到房間時退回 AlongSightLine。
@@ -515,6 +526,9 @@ namespace RevitMCP.Core
 
         /// <summary>等角 Key Plan 視圖的範圍模式，見 <see cref="CameraIsoExtentMode"/>。</summary>
         public CameraIsoExtentMode IsoExtentMode { get; set; } = CameraIsoExtentMode.FullWithUpperBeams;
+
+        /// <summary>2026-09-26：等角近側牆，見 <see cref="CameraIsoNearWallsMode"/>（預設切掉）。</summary>
+        public CameraIsoNearWallsMode IsoNearWalls { get; set; } = CameraIsoNearWallsMode.Cut;
 
         /// <summary>Key Plan 剖面方向，見 <see cref="CameraSectionOrientationMode"/>（預設對齊房間長邊）。</summary>
         public CameraSectionOrientationMode SectionOrientationMode { get; set; } = CameraSectionOrientationMode.AlongRoomLongAxis;

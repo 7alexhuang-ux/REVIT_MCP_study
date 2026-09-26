@@ -27,7 +27,7 @@ export const cameraManagerTools: Tool[] = [
     {
         name: "run_camera_keyplan",
         title: "執行相機一鍵 4 視圖（Key Plan）",
-        description: "對一台透視相機執行相機管理面板的「一鍵 4 視圖」核心（建立或更新 Key Plan 平面／剖面／等角三張視圖＋相機標記），與面板同一段程式碼，不經面板 UI。回傳三張視圖的 id、名稱、比例、範圍（平面裁剪框、剖面裁剪框、等角 Section Box，mm）、各視圖內本相機標記元素數（依角色分組），以及關鍵判定（室內／室外、使用的房間、本層頂、扇形半徑、實際剖面方向、等角範圍模式）、實際生效的相機標記型式，與裁剪框讀回不符預期（> 1 %）的警告。複製來的平面會先解除 Scope Box、改專案北、圖紙上的標題改為「Key Plan 平面」；平面／剖面隱藏其他剖面／立面／詳圖索引標記（平面保留本相機剖面）。寫入模型（一個交易「建立相機 Key Plan」），不刪除任何使用者元素。觸發條件：一鍵 4 視圖、Key Plan、相機平面剖面等角、run keyplan。",
+        description: "對一台透視相機執行相機管理面板的「一鍵 4 視圖」核心（建立或更新 Key Plan 平面／剖面／等角三張視圖＋相機標記），與面板同一段程式碼，不經面板 UI。回傳三張視圖的 id、名稱、比例、範圍（平面裁剪框、剖面裁剪框、等角 Section Box，mm）、各視圖內本相機標記元素數（依角色分組），以及關鍵判定（室內／室外、使用的房間、本層頂、扇形半徑、實際剖面方向、等角範圍模式、等角近側牆切掉哪兩面）、實際生效的相機標記型式，與裁剪框讀回不符預期（> 1 %）的警告。複製來的平面會先解除 Scope Box、改專案北、圖紙上的標題改為「Key Plan 平面」；平面／剖面隱藏其他剖面／立面／詳圖索引標記（平面保留本相機剖面）。寫入模型（一個交易「建立相機 Key Plan」），不刪除任何使用者元素。室內相機的等角預設切掉觀看者側兩道牆（近側兩面＝房間邊界往內 100 mm，遠側維持房間 +0.6 m）。觸發條件：一鍵 4 視圖、Key Plan、相機平面剖面等角、run keyplan。",
         inputSchema: {
             type: "object",
             properties: {
@@ -48,6 +48,11 @@ export const cameraManagerTools: Tool[] = [
                     type: "string",
                     enum: ["full", "current"],
                     description: "只影響這次執行的等角範圍：full＝整層（見上層樑）、current＝只到當層；省略＝沿用面板設定"
+                },
+                isoNearWalls: {
+                    type: "string",
+                    enum: ["cut", "keep"],
+                    description: "只影響這次執行的等角近側牆（室內相機）：cut＝觀看者側兩面切到房間邊界往內 100 mm（切掉最靠近觀看者的兩道牆）、keep＝四面都留房間 +0.6 m；省略＝沿用面板設定（預設 cut）。回傳 Decisions.IsoNearWalls／IsoNearWallsLog"
                 },
                 resetSection: {
                     type: "boolean",

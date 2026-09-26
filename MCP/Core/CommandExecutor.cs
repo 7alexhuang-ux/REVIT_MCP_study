@@ -670,6 +670,9 @@ namespace RevitMCP.Core
                     case "set_3d_section_box":
                         result = Set3DSectionBox(parameters);
                         break;
+                    case "set_section_box":
+                        result = SetSectionBox(parameters);
+                        break;
                     case "shift_view_cropbox":
                         result = ShiftViewCropBox(parameters);
                         break;

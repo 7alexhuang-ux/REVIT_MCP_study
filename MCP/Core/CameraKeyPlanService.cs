@@ -44,7 +44,8 @@ namespace RevitMCP.Core
         private const double SectionAboveSlabCm = 50.0;        // 剖面垂直上限：上層樓板底 +0.5m（規格 5.1 修訂）
         // 2026-09-24 第四輪（等角「看得到的房間」＋樓板下限，協調者轉述使用者回報）：
         private const double IsoFloorBelowClearanceMm = 50.0;  // 等角 Z 下限：本層樓板底再往下 50mm
-        private const double IsoRoomMarginMm = 500.0;          // 房間聯集外擴 0.5m
+        private const double IsoRoomMarginMm = 500.0;
+        private const double IsoNearWallInsetMm = 100.0;       // 2026-09-26 等角近側牆：房間邊界往內 100mm（切掉牆）          // 房間聯集外擴 0.5m
         private const double IsoRoomRayStepMm = 500.0;         // 視線取樣間距 0.5m
         private const double IsoRoomRayMaxMm = 15000.0;        // 視線取樣最遠 15m（再與遠裁剪取小）
         private const double IsoRoomRayGapStopMm = 1000.0;     // 連續離開所有房間超過 1m 就停這條射線
@@ -372,6 +373,9 @@ namespace RevitMCP.Core
             /// <summary>2026-09-26：剖面意圖 vs 讀回的世界範圍最大偏差（mm）；null＝未檢（例如保留手動調整）。</summary>
             public double? SectionExtentDeviationMm;
             public CameraIsoExtentMode IsoExtentMode;
+            /// <summary>2026-09-26：等角近側牆模式（Cut／Keep）與實際切了哪兩面、數值。</summary>
+            public CameraIsoNearWallsMode IsoNearWalls;
+            public string IsoNearWallsLog;
             public bool FadedStyle;
         }
 
@@ -386,6 +390,8 @@ namespace RevitMCP.Core
             public CameraIsoExtentMode? IsoMode;
             /// <summary>2026-09-25：相機標記型式單次覆寫（B／A／AB），不寫回面板設定。</summary>
             public CameraMarkerMode? MarkerMode;
+            /// <summary>2026-09-26：等角近側牆單次覆寫（Cut／Keep），不寫回面板設定。</summary>
+            public CameraIsoNearWallsMode? IsoNearWalls;
         }
 
         // Revit API 只在主執行緒執行，一次只會有一個一鍵 4 視圖在跑，靜態欄位即可。
@@ -525,7 +531,11 @@ namespace RevitMCP.Core
                     DrawMarkerSafely(doc, "HideForeignViewersSection",
                         () => HideForeignViewers(doc, sectionView, null, "剖面"));
 
-                    View3D isoView = GetOrCreateIsoView(doc, isoName, cid, geom, isoXY, storeyTop, forwardHoriz);
+                    CameraIsoNearWallsMode nearWalls = GetIsoNearWallsMode();
+                    View3D isoView = GetOrCreateIsoView(doc, isoName, cid, geom, isoXY, storeyTop, forwardHoriz,
+                        cp.IsOutdoor ? null : cp.Room, nearWalls, out string nearWallsLog);
+                    dec.IsoNearWalls = nearWalls;
+                    dec.IsoNearWallsLog = nearWallsLog;
                     result.IsoViewId = isoView.Id;
 
                     t.Commit();
@@ -1446,6 +1456,47 @@ namespace RevitMCP.Core
         }
 
         /// <summary>等角範圍模式：單次覆寫（MCP 工具）優先，否則面板設定。</summary>
+        private static CameraIsoNearWallsMode GetIsoNearWallsMode()
+        {
+            if (_runOptions?.IsoNearWalls != null) return _runOptions.IsoNearWalls.Value;
+            try { return ConfigManager.Instance.Settings.CameraManager.IsoNearWalls; }
+            catch { return CameraIsoNearWallsMode.Cut; }
+        }
+
+        /// <summary>
+        /// 2026-09-26（使用者：等角從角落看，最靠近觀看者的兩道牆擋住室內，例如電梯側那道牆；D-038）：
+        /// 室內相機的等角 forward＝(sx, sy, −1)/√3，觀看者在 −sx／−sy 側 → 近側＝X：sx&gt;0 ? MinX : MaxX、
+        /// Y：sy&gt;0 ? MinY : MaxY。這兩面改成「眼睛所在房間邊界線外接框（平面、軸向）往內 100 mm」——房間邊界＝
+        /// 牆內面，所以牆被切掉；遠側兩面維持房間 +0.6 m（牆保留），Z 不動。室外相機／找不到房間／Keep＝不動。
+        /// 直接改 box（Transform＝Identity 的世界座標框），回傳 log 字串。
+        /// </summary>
+        private static string ApplyIsoNearWallCut(BoundingBoxXYZ box, RoomCtx room, XYZ forwardHoriz, CameraIsoNearWallsMode mode)
+        {
+            if (mode == CameraIsoNearWallsMode.Keep) return "mode=Keep（保留，不切）";
+            if (room?.Room == null || room.Pts == null || room.Pts.Count < 3) return "mode=Cut 但無眼睛所在房間／室外 → 不切";
+            // 房間邊界線外接框（只用邊界點；不含最近房間 fallback 時為了含眼睛而外擴的 rc.MinX 等）
+            double rx0 = room.Pts.Min(q => q.X), rx1 = room.Pts.Max(q => q.X);
+            double ry0 = room.Pts.Min(q => q.Y), ry1 = room.Pts.Max(q => q.Y);
+            XYZ fh = forwardHoriz != null ? new XYZ(forwardHoriz.X, forwardHoriz.Y, 0) : XYZ.BasisY;
+            fh = fh.GetLength() > 1e-6 ? fh.Normalize() : XYZ.BasisY;
+            XYZ f = CameraMath.SnapToIsoCorner(fh, out double cornerYaw);
+            bool sxPos = f.X > 0, syPos = f.Y > 0;
+            double inset = CameraMath.MmToFeet(IsoNearWallInsetMm);
+            XYZ min = box.Min, max = box.Max;
+            double nMinX = min.X, nMaxX = max.X, nMinY = min.Y, nMaxY = max.Y;
+            string xSide, ySide;
+            if (sxPos) { nMinX = rx0 + inset; xSide = "MinX"; } else { nMaxX = rx1 - inset; xSide = "MaxX"; }
+            if (syPos) { nMinY = ry0 + inset; ySide = "MinY"; } else { nMaxY = ry1 - inset; ySide = "MaxY"; }
+            if (!(nMinX < nMaxX) || !(nMinY < nMaxY))
+                return $"mode=Cut 但房間太小（內縮後 min≥max）→ 不切 room X[{CameraMath.FeetToMm(rx0):F0},{CameraMath.FeetToMm(rx1):F0}] Y[{CameraMath.FeetToMm(ry0):F0},{CameraMath.FeetToMm(ry1):F0}]mm";
+            box.Min = new XYZ(nMinX, nMinY, min.Z);
+            box.Max = new XYZ(nMaxX, nMaxY, max.Z);
+            return $"mode=Cut corner yaw={cornerYaw:F0}° forward=({f.X:F3},{f.Y:F3},{f.Z:F3}) 切 {xSide}＋{ySide}（房間邊界內縮 {IsoNearWallInsetMm:F0}mm）" +
+                   $" room X[{CameraMath.FeetToMm(rx0):F0},{CameraMath.FeetToMm(rx1):F0}] Y[{CameraMath.FeetToMm(ry0):F0},{CameraMath.FeetToMm(ry1):F0}]mm" +
+                   $" → box X[{CameraMath.FeetToMm(nMinX):F0},{CameraMath.FeetToMm(nMaxX):F0}] Y[{CameraMath.FeetToMm(nMinY):F0},{CameraMath.FeetToMm(nMaxY):F0}]mm" +
+                   $"（原 X[{CameraMath.FeetToMm(min.X):F0},{CameraMath.FeetToMm(max.X):F0}] Y[{CameraMath.FeetToMm(min.Y):F0},{CameraMath.FeetToMm(max.Y):F0}]mm）";
+        }
+
         private static CameraIsoExtentMode GetIsoExtentMode()
         {
             if (_runOptions?.IsoMode != null) return _runOptions.IsoMode.Value;
@@ -1728,11 +1779,15 @@ namespace RevitMCP.Core
         // ══════════════════════════════════════════════════════════
 
         private static View3D GetOrCreateIsoView(Document doc, string isoName, string cid,
-            CameraMath.CameraGeometry geom, IsoXY isoXY, StoreyTop storeyTop, XYZ forwardHoriz)
+            CameraMath.CameraGeometry geom, IsoXY isoXY, StoreyTop storeyTop, XYZ forwardHoriz,
+            RoomCtx nearWallRoom, CameraIsoNearWallsMode nearWalls, out string nearWallsLog)
         {
             // 2026-09-24 第四輪：三個分支（ES 連結／同名既有／新建）一律「設定 SectionBox → 確保剖面框
             // 類別可見」，不改視圖的 DisplayStyle（使用者現況 FlatColors 維持不動）。
             BoundingBoxXYZ box = BuildIsoSectionBox(doc, geom, isoXY, storeyTop);
+            // 2026-09-26（D-038）：切掉等角觀看者側的兩道牆（dollhouse cutaway），只限室內相機。
+            nearWallsLog = ApplyIsoNearWallCut(box, nearWallRoom, forwardHoriz, nearWalls);
+            Logger.Info("相機 Key Plan：等角近側牆 " + nearWallsLog);
             ViewOrientation3D orientation = BuildIsoOrientation(box, forwardHoriz);
 
             View linked = FindLinkedView(doc, cid, "Iso");

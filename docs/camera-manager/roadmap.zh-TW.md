@@ -50,6 +50,15 @@
 - MCP 工具數 218 → 220（`create_camera_sheet`、`camera_version`）。
 - 版面比例（左 60%、右欄三等分）與圖紙邊界 15 mm 是常數／本機設定，沒有 UI；實測後再決定要不要開放。
 
+### 等角近側牆切除（D-038）＋`set_section_box`　⏳ 已編譯、待 MCP 複測（2026-09-26）
+
+| # | 情境 | 複測方式 | 預期 |
+|---|---|---|---|
+| a | 室內相機等角近側牆 | 對一台室內相機 `run_camera_keyplan`（預設設定）→ 讀 `Decisions.IsoNearWallsLog` 與 `Iso.SectionBox` | log 含「切 MinX／MaxX＋MinY／MaxY」；近側兩面＝房間邊界往內 100 mm、遠側＝房間 +0.6 m、Z 與前次相同；截圖看得到室內、近側兩道牆消失 |
+| b | 保留 | `run_camera_keyplan(isoNearWalls="keep")` | 四面皆房間 +0.6 m，log「mode=Keep」 |
+| c | 室外相機 | 室外相機 `run_camera_keyplan` | 等角範圍與前一版相同，log「不切」 |
+| d | `set_section_box` | 絕對模式設一個框、再用 `offsetsMm` 縮 minX −500 → 讀回 | `After_mm` 與要求一致；正交視圖 `CropBoxActive=false`；min ≥ max 時報錯且不修改 |
+
 ### MCP 自測第四輪修正　✅ 已由 MCP 複測（2026-09-26；a 通過，b 本輪未觸發，c 待重新截圖）
 
 第三輪實測：移動路徑方向／原點正確但深度偏差 2374 mm → 退到刪除重建 → `InvalidObjectException` 整筆回滾。第四輪 3 項已改、已編譯，並於 2026-09-26 由主線以 MCP 複測。
