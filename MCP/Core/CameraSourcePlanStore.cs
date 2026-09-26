@@ -109,7 +109,10 @@ namespace RevitMCP.Core
                 if (e == null || !e.IsValid()) return null;
                 string uid = e.Get<string>(schema.GetField(FieldPlanUniqueId));
                 if (string.IsNullOrEmpty(uid)) return null;
-                return camera.Document.GetElement(uid) as ViewPlan;
+                ViewPlan plan = camera.Document.GetElement(uid) as ViewPlan;
+                // 2026-09-26 第七輪：相機若放置在本工具產生的 Key Plan 平面／總覽上，不拿它當底圖來源（步驟 0 略過）。
+                if (plan != null && CameraKeyPlanService.IsToolGeneratedView(plan)) return null;
+                return plan;
             }
             catch (Exception ex)
             {

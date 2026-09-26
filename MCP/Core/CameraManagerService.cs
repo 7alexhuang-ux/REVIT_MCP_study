@@ -119,6 +119,8 @@ namespace RevitMCP.Core
                     .Where(v => !v.IsTemplate &&
                         (v.ViewType == ViewType.FloorPlan || v.ViewType == ViewType.CeilingPlan || v.ViewType == ViewType.AreaPlan) &&
                         v.CropBoxActive)
+                    // 2026-09-26 第七輪：本工具產生的 Key Plan 平面／總覽（ES 標記或「Key Plan-」開頭）不當底圖候選，連「全」模式也不列。
+                    .Where(v => !CameraKeyPlanService.IsToolGeneratedView(v))
                     .OrderBy(v => v.Name)
                     .ToList();
 
@@ -1181,6 +1183,11 @@ namespace RevitMCP.Core
         /// <summary>
         /// 2026-09-26 第四輪（使用者：清單改數字後透視圖有時沒跟著動）：相機被程式修改後，若它是作用中視圖 → RefreshActiveView；
         /// 若只是開著（非作用中）→ UpdateAllOpenViews。Revit API 沒有單一 UIView 的重繪方法。須在 API context、交易外；失敗只記 log。
+        /// 2026-09-26 第七輪（使用者：面板改高度後 log 顯示 RefreshActiveView 重繪=0~1ms，但透視圖沒變；MCP 改同一台時重繪=102ms 有變）：
+        /// 面板情境下 RefreshActiveView 形同空操作（焦點在面板／並排的 Key Plan 視窗），所以不再只靠它。改成：
+        /// 在 GetOpenUIViews 找相機本身的 UIView → UpdateAllOpenViews ＋ 對「那個」UIView 做 zoom-corner 原地輕推
+        /// （GetZoomCorners → ZoomAndCenterRectangle 同一組角點，會強迫 Revit 重繪該視窗）；若它剛好是作用中視圖再加 RefreshActiveView。
+        /// 回傳字串誠實標出實際用了哪些方法、各幾 ms、重繪的是哪個視圖（作用中視圖不是相機時也寫出作用中是誰）。
         /// </summary>
         internal static string RefreshCameraViewIfOpen(UIApplication uiApp, ElementId cameraId)
         {
@@ -1188,18 +1195,42 @@ namespace RevitMCP.Core
             {
                 UIDocument uiDoc = uiApp?.ActiveUIDocument;
                 if (uiDoc == null || cameraId == null) return "沒有作用中文件";
-                if (uiDoc.ActiveView?.Id == cameraId)
-                {
-                    uiDoc.RefreshActiveView();
-                    return "RefreshActiveView";
-                }
+                Document doc = uiDoc.Document;
+                string camName = (doc?.GetElement(cameraId) as View)?.Name ?? "?";
                 IList<UIView> open = uiDoc.GetOpenUIViews();
-                if (open != null && open.Any(u => u.ViewId == cameraId))
+                UIView camUi = open?.FirstOrDefault(u => u.ViewId == cameraId);
+                View active = uiDoc.ActiveView;
+                bool isActive = active?.Id == cameraId;
+                if (camUi == null)
+                    return $"相機視圖「{camName}」未開啟，未重繪（作用中視圖＝「{active?.Name ?? "-"}」）";
+
+                var parts = new List<string>();
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                try { uiDoc.UpdateAllOpenViews(); parts.Add($"UpdateAllOpenViews {sw.ElapsedMilliseconds}ms"); }
+                catch (Exception ex) { parts.Add("UpdateAllOpenViews 失敗：" + ex.Message); }
+
+                long t1 = sw.ElapsedMilliseconds;
+                try
                 {
-                    uiDoc.UpdateAllOpenViews();
-                    return "UpdateAllOpenViews";
+                    IList<XYZ> corners = camUi.GetZoomCorners();
+                    if (corners != null && corners.Count >= 2)
+                    {
+                        camUi.ZoomAndCenterRectangle(corners[0], corners[1]);
+                        parts.Add($"ZoomNudge「{camName}」{sw.ElapsedMilliseconds - t1}ms");
+                    }
+                    else parts.Add("ZoomNudge 無角點");
                 }
-                return "相機視圖未開啟";
+                catch (Exception ex) { parts.Add("ZoomNudge 失敗：" + ex.Message); }
+
+                if (isActive)
+                {
+                    long t2 = sw.ElapsedMilliseconds;
+                    try { uiDoc.RefreshActiveView(); parts.Add($"RefreshActiveView {sw.ElapsedMilliseconds - t2}ms"); }
+                    catch (Exception ex) { parts.Add("RefreshActiveView 失敗：" + ex.Message); }
+                }
+                else parts.Add($"相機非作用中（作用中＝「{active?.Name ?? "-"}」）");
+
+                return string.Join("＋", parts);
             }
             catch (Exception ex)
             {

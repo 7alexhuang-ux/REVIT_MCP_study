@@ -959,6 +959,7 @@ namespace RevitMCP.Core
         {
             List<ViewPlan> candidates = new FilteredElementCollector(doc).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
                 .Where(v => !v.IsTemplate && v.GenLevel != null && v.GenLevel.Id == levelId)
+                .Where(v => !IsToolGeneratedView(v)) // 2026-09-26 第七輪：不從本工具的 Key Plan 平面／總覽複製
                 .OrderBy(v => v.Name)
                 .ToList();
             if (candidates.Count == 0) return null;

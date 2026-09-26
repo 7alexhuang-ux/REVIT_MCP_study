@@ -63,6 +63,15 @@ namespace RevitMCP.Core
             try { return v != null && Schema.Lookup(SchemaGuid) != null && TryReadLink(v, out _, out _); } catch { return false; }
         }
 
+        /// <summary>2026-09-26 第七輪（list_cameras 回報底圖＝「Key Plan-總覽-L4」）：本工具產生的視圖一律不當底圖／複製來源——
+        /// ES 標記的 Key Plan 平面／總覽／剖面／等角／圖紙透視複本，或名稱以「Key Plan-」開頭（含使用者手動複製、ES 遺失者）。</summary>
+        internal static bool IsToolGeneratedView(View v)
+        {
+            if (v == null) return false;
+            try { if ((v.Name ?? "").StartsWith("Key Plan-", StringComparison.OrdinalIgnoreCase)) return true; } catch { }
+            return IsOwnTaggedView(v);
+        }
+
         internal const double RealignMoveMm = 300.0;
         internal const double RealignYawDeg = 5.0;
 

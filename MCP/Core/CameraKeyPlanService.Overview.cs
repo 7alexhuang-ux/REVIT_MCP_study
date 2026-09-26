@@ -198,7 +198,7 @@ namespace RevitMCP.Core
                 try
                 {
                     if (!pv.CropBoxActive) continue;
-                    if (TryReadLink(pv, out _, out _)) continue; // 本工具自建的 Key Plan 平面／總覽不當底圖
+                    if (IsToolGeneratedView(pv)) continue; // 本工具自建的 Key Plan 平面／總覽（ES 或「Key Plan-」名稱）不當底圖
                     var opt = new PlanViewOption
                     {
                         ViewId = pv.Id,
