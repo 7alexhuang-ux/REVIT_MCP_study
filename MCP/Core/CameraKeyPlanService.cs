@@ -939,11 +939,22 @@ namespace RevitMCP.Core
                         int before = p.AsInteger();
                         bool wasCause = planScale > 0 && before > 0 && before < planScale;
                         int applied = before;
-                        foreach (int cand in new[] { 5000, 2500, 2400, 2000, 1200, 1000, 500, 200 })
+                        // 2026-09-27 修正：section 與 viewer（及 METRIC／IMPERIAL）共用同一個值；不在下拉選項內的值
+                        // Set 會回 true 但讀回變 -1（無效＝剖面線全被藏）。原本沒還原，最後一輪把 2400 蓋成 -1。
+                        // 現在：已經 ≥ 平面比例就不動；每次嘗試讀回不符就立刻還原成 before。
+                        if (before >= planScale && planScale > 0) { applied = before; }
+                        else
                         {
-                            if (cand <= before) break;
-                            try { if (p.Set(cand) && p.AsInteger() == cand) { applied = cand; break; } }
-                            catch { /* 此值不在下拉選項內，試下一個 */ }
+                            foreach (int cand in new[] { 5000, 2500, 2400, 2000, 1200, 1000, 500, 200 })
+                            {
+                                if (cand <= before) break;
+                                try
+                                {
+                                    if (p.Set(cand) && p.AsInteger() == cand) { applied = cand; break; }
+                                }
+                                catch { /* 此值不在下拉選項內，試下一個 */ }
+                                try { if (p.AsInteger() != before) p.Set(before); } catch { }
+                            }
                         }
                         Logger.Info($"相機 Key Plan：剖面比例門檻 {name}（{who}）{before}→{p.AsInteger()}（{p.AsValueString()}），平面 1:{planScale}" +
                                     (wasCause ? "——原因①成立：門檻比平面比例細，剖面線原本被隱藏" : "——原因①不成立"));
@@ -963,6 +974,29 @@ namespace RevitMCP.Core
                 }
             }
             catch (Exception ex) { Logger.Error("相機 Key Plan：檢查平面 Sections 類別失敗", ex); }
+            // ⑤ 視圖篩選器（2026-09-27 使用者回報：平面仍看不到剖面線；MCP 診斷＝複製來源平面帶進的篩選器
+            //    「WV_Sections」Visible=false 把所有剖面標記藏掉）。其他剖面標記已由 HideOtherViewers 逐元素隱藏，
+            //    所以把「類別含 Sections／Viewers 且會抓到本剖面 viewer」的隱藏篩選器改回可見是安全的。
+            try
+            {
+                foreach (ElementId fid in plan.GetFilters())
+                {
+                    if (plan.GetFilterVisibility(fid)) continue;
+                    if (!(doc.GetElement(fid) is ParameterFilterElement pfe)) continue;
+                    ICollection<ElementId> cats = pfe.GetCategories();
+                    bool coversSections = cats.Any(c => c.GetIdValue() == (long)BuiltInCategory.OST_Sections
+                                                     || c.GetIdValue() == (long)BuiltInCategory.OST_Viewers);
+                    if (!coversSections) continue;
+                    ElementFilter ef = null;
+                    try { ef = pfe.GetElementFilter(); } catch { }
+                    bool catchesOurs = ef == null || viewerIds.Count == 0
+                        || viewerIds.Any(vid => { try { return ef.PassesFilter(doc, vid); } catch { return true; } });
+                    if (!catchesOurs) { Logger.Info($"相機 Key Plan：篩選器「{pfe.Name}」隱藏剖面但規則不命中本剖面，保留"); continue; }
+                    plan.SetFilterVisibility(fid, true);
+                    Logger.Info($"相機 Key Plan：篩選器「{pfe.Name}」在平面把剖面設為不可見——原因⑤成立，已改為可見（其他剖面已逐元素隱藏）");
+                }
+            }
+            catch (Exception ex) { Logger.Error("相機 Key Plan：檢查平面視圖篩選器失敗", ex); }
             // ③＋④
             // 2026-09-26 第七輪（使用者：剖面線要看得像一般剖面線，不要跟著淡化、也不要用標記色）：
             // 投影線色改深灰 64（KpDarkGrey）、線寬 6、有虛線圖案就用虛線；halftone 仍固定 false（不跟淡化走）。
@@ -1211,9 +1245,58 @@ namespace RevitMCP.Core
             if (sectionVft == null) throw new Exception("找不到任何剖面視圖類型 (ViewFamily.Section)。");
 
             ViewSection created = ViewSection.CreateSection(doc, sectionVft.Id, box);
+            // 2026-09-27（使用者：平面 Key Plan 看不到剖面線）：MCP 實測 CreateSection 產生的剖面與框方向相反——
+            // 讀回 BasisX＝−意圖軸、剖切面落在意圖框的遠裁剪面（眼睛 60 m 外），範圍相同所以範圍後檢仍報 0 mm。
+            // 讀回方向相反 → 刪掉，改用「同一個實體框、座標系繞鉛直軸轉 180°」重建（X、Z 軸與範圍都取反），
+            // 再檢一次方向與「意圖剖切面（Max.Z）通過原點」。
+            doc.Regenerate();
+            string orientLog = DescribeSectionOrientation(created, box, out bool flipped);
+            if (flipped)
+            {
+                doc.Delete(created.Id);
+                created = ViewSection.CreateSection(doc, sectionVft.Id, RotateSectionRequest180(box));
+                doc.Regenerate();
+                string again = DescribeSectionOrientation(created, box, out bool stillFlipped);
+                orientLog += "；已改用反向描述重建 → " + again;
+                if (stillFlipped) AddCropWarning($"Key Plan 剖面「{sectionName}」方向仍與意圖相反（剖切面未通過相機位置）");
+            }
+            Logger.Info($"相機 Key Plan：新建剖面方向檢查 {orientLog}");
             created.Name = MakeUniqueName(doc, sectionName, created.Id);
             TagLink(created, cid, "Section");
             return created;
+        }
+
+        /// <summary>同一個實體框，座標系繞鉛直軸轉 180°：BasisX、BasisZ 取反，X、Z 範圍鏡射（BasisY＝上不變）。</summary>
+        private static BoundingBoxXYZ RotateSectionRequest180(BoundingBoxXYZ box)
+        {
+            Transform t = Transform.Identity;
+            t.Origin = box.Transform.Origin;
+            t.BasisX = box.Transform.BasisX.Negate();
+            t.BasisY = box.Transform.BasisY;
+            t.BasisZ = box.Transform.BasisZ.Negate();
+            return new BoundingBoxXYZ
+            {
+                Transform = t,
+                Min = new XYZ(-box.Max.X, box.Min.Y, -box.Max.Z),
+                Max = new XYZ(-box.Min.X, box.Max.Y, -box.Min.Z)
+            };
+        }
+
+        /// <summary>讀回剖面方向：實際 BasisX 與意圖 BasisX 同向？意圖剖切面（意圖 Max.Z 面）上的點在實際座標系是否落在實際剖切面（Max.Z）。</summary>
+        private static string DescribeSectionOrientation(ViewSection section, BoundingBoxXYZ intended, out bool flipped)
+        {
+            flipped = false;
+            try
+            {
+                BoundingBoxXYZ act = section.CropBox;
+                double dot = act.Transform.BasisX.DotProduct(intended.Transform.BasisX);
+                XYZ cutPt = intended.Transform.OfPoint(new XYZ(0, 0, intended.Max.Z));
+                double cutZ = act.Transform.Inverse.OfPoint(cutPt).Z;
+                double offMm = CameraMath.FeetToMm(cutZ - act.Max.Z);
+                flipped = dot < 0 || Math.Abs(offMm) > SectionExtentToleranceMm;
+                return $"BasisX·意圖={dot:F3}、意圖剖切面距實際剖切面={offMm:F0}mm" + (flipped ? "（方向相反）" : "（正確）");
+            }
+            catch (Exception ex) { return "方向檢查失敗：" + ex.Message; }
         }
 
         /// <summary>本次一鍵 4 視圖的剖面套用紀錄（移動/旋轉/重建＋世界範圍後檢）；交易內寫、呼叫端讀出放進 Decisions。</summary>
