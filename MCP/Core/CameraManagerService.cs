@@ -867,6 +867,151 @@ namespace RevitMCP.Core
         }
 
         // ══════════════════════════════════════════════════════════
+        // 2026-09-26 第六輪：編輯快速路徑（使用者：「改離樓板高度後，相機視圖要很快改變——這是核心功能」）
+        // ══════════════════════════════════════════════════════════
+
+        /// <summary>快速路徑交易名稱（復原清單看到的名稱，與舊版一致）。</summary>
+        internal const string FastEditTransactionName = "編輯相機";
+
+        // 面板快速路徑已就地更新清單列的相機（Id 數值 → 到期時間）。Application 的 DocumentChanged 看到「只有這些相機、
+        // 交易名＝編輯相機」的變更時，不再排 live sync 整份快照重讀（清單已是最新）；標記更新照常排入去抖。
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, DateTime> _inPlaceEdits =
+            new System.Collections.Concurrent.ConcurrentDictionary<long, DateTime>();
+
+        /// <summary>DocumentChanged 端呼叫：這些被修改的相機是否都剛由面板快速路徑就地更新過（呼叫即消耗記號）。</summary>
+        internal static bool ConsumeInPlaceEdits(ICollection<ElementId> modifiedCameraIds)
+        {
+            try
+            {
+                if (modifiedCameraIds == null || modifiedCameraIds.Count == 0) return false;
+                DateTime now = DateTime.UtcNow;
+                bool all = true;
+                foreach (ElementId id in modifiedCameraIds)
+                {
+                    long k = id.GetIdValue();
+                    if (!_inPlaceEdits.TryRemove(k, out DateTime until) || until < now) all = false;
+                }
+                return all;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// 編輯快速路徑：一個小交易（自動存「A案」JSON＋一次 SetOrientation＋遠裁剪），交易後立刻重繪透視圖，
+        /// 再從相機實際姿態讀回新值（清單就地更新／MCP 回傳用）。不找房間、不讀其他相機、不碰 Key Plan／總覽／標記——
+        /// 那些由呼叫端排入 800 ms 去抖的後續更新（CameraKeyPlanService.UpdateCamerasAfterChange）。
+        /// 沒給的欄位一律沿用相機「目前實際」的值（不是清單列的值），所以清單列即使是舊資料也不會把別的欄位改回去。
+        /// markInPlace＝面板呼叫（清單列會就地更新，DocumentChanged 不必再排整份快照）。
+        /// source＝log 用（「面板」「MCP」）；queueWaitMs＝面板從按 Enter 到佇列開始執行的等待時間（MCP 為 0）。
+        /// 須在 API context、交易外。
+        /// </summary>
+        internal static CameraPoseEditResult ApplyPoseEditFast(UIApplication uiApp, Document doc, CameraPoseEdit edit,
+            string source, bool markInPlace, long queueWaitMs = 0)
+        {
+            var res = new CameraPoseEditResult { QueueWaitMs = queueWaitMs };
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            string what = edit?.What() ?? "相機";
+            try
+            {
+                if (doc == null) { res.Error = "目前沒有開啟中的文件。"; return res; }
+                View3D v = edit?.ViewId != null ? doc.GetElement(edit.ViewId) as View3D : null;
+                if (v == null || v.IsTemplate || !v.IsPerspective) { res.Error = "找不到這個相機視圖（可能已被刪除），請按重新整理。"; return res; }
+                res.CameraName = v.Name;
+                Level level = edit.LevelId != null ? doc.GetElement(edit.LevelId) as Level : null;
+                if (edit.HeightAboveLevelCm.HasValue && level == null) { res.Error = "這台相機沒有可用的樓層基準，無法改離樓板高度。"; return res; }
+
+                ViewOrientation3D o = v.GetOrientation();
+                XYZ eye = o.EyePosition, forward = o.ForwardDirection, up = o.UpDirection;
+                XYZ newEye = new XYZ(edit.EyeXFeet ?? eye.X, edit.EyeYFeet ?? eye.Y,
+                    edit.HeightAboveLevelCm.HasValue ? level.ProjectElevation + CameraMath.MmToFeet(edit.HeightAboveLevelCm.Value * 10.0) : eye.Z);
+                XYZ newForward = forward, newUp = up;
+                if (edit.YawDeg.HasValue || edit.PitchDeg.HasValue)
+                {
+                    double curYaw = Math.Atan2(forward.X, forward.Y) * 180.0 / Math.PI;
+                    double curPitch = Math.Asin(Math.Max(-1.0, Math.Min(1.0, forward.Z))) * 180.0 / Math.PI;
+                    newForward = CameraMath.DirectionFromAngles(edit.YawDeg ?? curYaw, edit.PitchDeg ?? curPitch);
+                    newUp = CameraMath.BuildLevelUp(newForward);
+                }
+                bool poseChanged = newEye.DistanceTo(eye) > CameraMath.MmToFeet(0.1) || newForward.DistanceTo(forward) > 1e-6 || newUp.DistanceTo(up) > 1e-6;
+
+                Parameter farParam = null;
+                double? farFeet = null;
+                if (edit.FarClipCm.HasValue)
+                {
+                    farParam = CameraMath.FindFarClipOffsetParameter(v);
+                    if (farParam == null || farParam.IsReadOnly) { res.Error = "這台相機的遠裁剪參數不可寫入。"; return res; }
+                    double f = CameraMath.MmToFeet(edit.FarClipCm.Value * 10.0);
+                    if (Math.Abs(farParam.AsDouble() - f) > CameraMath.MmToFeet(0.1)) farFeet = f;
+                }
+                res.Changed = poseChanged || farFeet.HasValue;
+
+                if (res.Changed)
+                {
+                    using (Transaction t = TransactionHelper.Begin(doc, FastEditTransactionName))
+                    {
+                        t.Start();
+                        try
+                        {
+                            // 第一次修改前自動存「A案」（只寫 ES JSON，同一交易、一起復原）。
+                            res.SavedOriginalVersion = CameraKeyPlanService.EnsureOriginalVersionInTransaction(v, what + "編輯（" + source + "）");
+                            if (poseChanged) v.SetOrientation(new ViewOrientation3D(newEye, newUp, newForward));
+                            if (farFeet.HasValue) farParam.Set(farFeet.Value);
+                            if (markInPlace) _inPlaceEdits[v.Id.GetIdValue()] = DateTime.UtcNow.AddSeconds(5);
+                            t.Commit();
+                        }
+                        catch
+                        {
+                            try { if (t.HasStarted() && !t.HasEnded()) t.RollBack(); } catch { }
+                            try { _inPlaceEdits.TryRemove(v.Id.GetIdValue(), out _); } catch { }
+                            throw;
+                        }
+                    }
+                }
+                res.TransactionMs = sw.ElapsedMilliseconds;
+
+                if (res.Changed)
+                {
+                    long t0 = sw.ElapsedMilliseconds;
+                    res.RefreshHow = RefreshCameraViewIfOpen(uiApp, v.Id);
+                    res.RefreshMs = sw.ElapsedMilliseconds - t0;
+                }
+                else res.RefreshHow = "數值與相機目前相同，未開交易";
+
+                // 讀回實際值（便宜：只讀這一台的 Orientation／遠裁剪參數）。
+                ViewOrientation3D a = v.GetOrientation();
+                res.EyeXFeet = a.EyePosition.X; res.EyeYFeet = a.EyePosition.Y; res.EyeZFeet = a.EyePosition.Z;
+                res.ForwardX = a.ForwardDirection.X; res.ForwardY = a.ForwardDirection.Y; res.ForwardZ = a.ForwardDirection.Z;
+                res.YawDeg = CameraMath.ComputeHorizontalAngleDeg(a.ForwardDirection);
+                res.PitchDeg = Math.Round(Math.Asin(Math.Max(-1.0, Math.Min(1.0, a.ForwardDirection.Z))) * 180.0 / Math.PI, 2);
+                if (level != null)
+                    res.HeightAboveLevelCm = Math.Round((CameraMath.FeetToMm(a.EyePosition.Z) - CameraMath.FeetToMm(level.ProjectElevation)) / 10.0, 1);
+                try
+                {
+                    Parameter fp = farParam ?? CameraMath.FindFarClipOffsetParameter(v);
+                    if (fp != null) res.FarClipCm = Math.Round(CameraMath.FeetToMm(fp.AsDouble()) / 10.0, 1);
+                }
+                catch { }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"相機編輯快速路徑失敗（{what}，{source}）", ex);
+                res.Error = "編輯相機失敗：" + ex.Message;
+            }
+            finally
+            {
+                res.TotalMs = sw.ElapsedMilliseconds;
+                try
+                {
+                    Logger.Info($"⏱ {what}編輯 → 視圖更新 total={res.TotalMs + res.QueueWaitMs}ms " +
+                                $"[排隊={res.QueueWaitMs}ms, 交易={res.TransactionMs}ms, 重繪={res.RefreshMs}ms（{res.RefreshHow ?? "-"}）]" +
+                                $"（{source}：「{res.CameraName ?? "?"}」{(res.SavedOriginalVersion ? "；先自動存 A案" : "")}{(res.Error != null ? "；失敗：" + res.Error : "")}）");
+                }
+                catch { }
+            }
+            return res;
+        }
+
+        // ══════════════════════════════════════════════════════════
         // Tab1 清單內編輯：重新命名（名稱欄可直接改）
         // ══════════════════════════════════════════════════════════
 

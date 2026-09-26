@@ -26,6 +26,11 @@ namespace RevitMCP.Core
             public double YawDeg;
             public CameraViewVersion Before;
             public string Source;
+            /// <summary>2026-09-26 第六輪：變動前的俯仰角（°）與樓層 Id（清單列值）；後續更新分級用。null＝不知道。</summary>
+            public double? PitchDeg;
+            public long? StoreyId;
+            /// <summary>這次變動是否改了裁剪框／遠裁剪（視野形狀）。null＝不知道（導覽監看），視為可能有改。</summary>
+            public bool? ShapeChanged;
         }
 
         private sealed class PoseRecord
@@ -34,6 +39,12 @@ namespace RevitMCP.Core
             public XYZ Eye;
             public double YawDeg;
             public long? StoreyId;
+            // 2026-09-26 第六輪：後續更新分級用。
+            public double? PitchDeg;
+            public string ShapeHash;
+            public long? RoomId;
+            /// <summary>眼睛所在房間的外框最大邊長（mm）；室外／沒有房間＝null。</summary>
+            public double? RoomSizeMm;
         }
 
         /// <summary>上次畫標記時的姿態（鍵＝文件＋相機 UniqueId）。</summary>
@@ -102,34 +113,51 @@ namespace RevitMCP.Core
         /// <summary>標記用雜湊＝姿態＋模型 epoch（房間變了扇形半徑也會變）＋標記型式（切換型式一律強制重畫，此處只是保險）。</summary>
         private static string MarkerHash(View3D cam) => ComputePoseHash(cam) + "|e" + ModelEpoch + "|m" + GetMarkerMode();
 
-        private static void RecordDrawn(Document doc, View3D cam, CameraParams cp)
+        private static PoseRecord BuildPoseRecord(View3D cam, CameraParams cp, string hash)
         {
+            var r = new PoseRecord
+            {
+                Hash = hash,
+                Eye = cp?.Geom?.Eye,
+                YawDeg = cp?.Geom?.Forward != null ? YawOf(cp.Geom.Forward) : 0,
+                PitchDeg = cp?.Geom?.PitchDeg,
+                StoreyId = cp?.Geom?.LevelBelow != null ? (long?)cp.Geom.LevelBelow.Id.GetIdValue() : null,
+                ShapeHash = ComputeShapeHash(cam)
+            };
             try
             {
-                _lastDrawn[PoseKey(doc, cam.UniqueId)] = new PoseRecord
+                RoomCtx rc = cp?.Room;
+                if (rc?.Room != null && !cp.IsOutdoor)
                 {
-                    Hash = MarkerHash(cam),
-                    Eye = cp?.Geom?.Eye,
-                    YawDeg = cp?.Geom?.Forward != null ? YawOf(cp.Geom.Forward) : 0,
-                    StoreyId = cp?.Geom?.LevelBelow != null ? (long?)cp.Geom.LevelBelow.Id.GetIdValue() : null
-                };
+                    r.RoomId = rc.Room.Id.GetIdValue();
+                    double size = Math.Max(rc.MaxX - rc.MinX, rc.MaxY - rc.MinY);
+                    if (size > 0 && !double.IsInfinity(size) && !double.IsNaN(size)) r.RoomSizeMm = CameraMath.FeetToMm(size);
+                }
             }
+            catch { }
+            return r;
+        }
+
+        private static void RecordDrawn(Document doc, View3D cam, CameraParams cp)
+        {
+            try { _lastDrawn[PoseKey(doc, cam.UniqueId)] = BuildPoseRecord(cam, cp, MarkerHash(cam)); }
             catch { }
         }
 
         private static void RecordKeyPlanPose(Document doc, View3D cam, CameraParams cp)
         {
-            try
-            {
-                _lastKeyPlan[PoseKey(doc, cam.UniqueId)] = new PoseRecord
-                {
-                    Hash = ComputePoseHash(cam),
-                    Eye = cp?.Geom?.Eye,
-                    YawDeg = cp?.Geom?.Forward != null ? YawOf(cp.Geom.Forward) : 0,
-                    StoreyId = cp?.Geom?.LevelBelow != null ? (long?)cp.Geom.LevelBelow.Id.GetIdValue() : null
-                };
-            }
+            try { _lastKeyPlan[PoseKey(doc, cam.UniqueId)] = BuildPoseRecord(cam, cp, ComputePoseHash(cam)); }
             catch { }
+        }
+
+        /// <summary>視野形狀雜湊：裁剪框啟用與 Min/Max（0.1 mm）＋遠裁剪（0.1 mm）。與眼睛／方向無關。</summary>
+        private static string ComputeShapeHash(View3D cam)
+        {
+            string h = ComputePoseHash(cam);
+            int i = h.IndexOf('|');                   // 眼睛之後
+            i = i >= 0 ? h.IndexOf('|', i + 1) : -1;  // 前方向之後
+            i = i >= 0 ? h.IndexOf('|', i + 1) : -1;  // 上方向之後
+            return i >= 0 ? h.Substring(i + 1) : h;
         }
 
         private static long? LastDrawnStorey(Document doc, string cid)
@@ -149,17 +177,55 @@ namespace RevitMCP.Core
             return false;
         }
 
+        /// <summary>2026-09-26 第六輪：相機變動後續更新的分級（由輕到重）。</summary>
+        internal enum FollowUpKind
+        {
+            /// <summary>只有高度變 → 只重畫剖面上的標記群組（樓層沒變，平面扇形／平面裁剪／等角框都不受影響）。</summary>
+            SectionOnly,
+            /// <summary>俯仰角變 → 剖面標記＋A 標記（A 標記族群有俯仰角參數）。</summary>
+            SectionPitch,
+            /// <summary>水平角／視野（裁剪框、遠裁剪）變，或無法分類 → 平面＋剖面標記（＋樓層總覽／A 標記）。</summary>
+            Markers,
+            /// <summary>平面移動、仍在同一房間且不超過房間大小 → 標記＋剖面重新對位（剖面框跟著眼睛移，不動平面／等角）。</summary>
+            SectionRealign,
+            /// <summary>換樓層、換房間或大幅移動 → 一鍵 4 視圖的更新路徑（不並排）。</summary>
+            Full
+        }
+
+        private static string KindText(FollowUpKind k)
+        {
+            switch (k)
+            {
+                case FollowUpKind.SectionOnly: return "只重畫剖面標記";
+                case FollowUpKind.SectionPitch: return "剖面標記＋A 標記";
+                case FollowUpKind.Markers: return "平面＋剖面標記";
+                case FollowUpKind.SectionRealign: return "標記＋剖面重新對位";
+                default: return "完整 Key Plan 更新";
+            }
+        }
+
         /// <summary>
-        /// 相機變動後的更新入口（面板去抖佇列、set_camera_pose 共用）。回傳摘要（狀態列／MCP 回傳）。
-        /// uiApp 可為 null（此時不做 Key Plan 範圍重算，只更新標記）。
+        /// 相機變動後的更新入口（面板去抖佇列、set_camera_pose 後續更新共用）。回傳摘要（狀態列／log）。
+        /// 2026-09-26 第六輪（使用者：改離樓板高度要快；舊版眼睛移動 &gt; 300 mm 就跑整個一鍵 4 視圖、好幾秒）：
+        /// 先依「與上次畫標記時的姿態」比對分級（見 <see cref="FollowUpKind"/>）——高度／俯仰角的編輯永遠不走完整 Key Plan。
+        /// 比較基準：上次畫標記的紀錄（本 session）→ 沒有時用呼叫端給的變動前姿態（清單列舊值）→ 都沒有＝重畫平面＋剖面標記。
+        /// uiApp 可為 null（此時不做 Key Plan 範圍／剖面重算，只更新標記）。
         /// </summary>
         internal static string UpdateCamerasAfterChange(UIApplication uiApp, Document doc, ICollection<ElementId> cameraIds,
             IDictionary<ElementId, CameraPoseHint> hints, out int updated)
+            => UpdateCamerasAfterChange(uiApp, doc, cameraIds, hints, out updated, out _);
+
+        /// <param name="storeyOrRoomChanged">有相機換了樓層／房間或大幅移動（走了完整 Key Plan 更新）——面板據此補一次清單重讀
+        /// （樓層欄、室內外）；其他分級時清單列已由編輯快速路徑就地更新，不必重讀。</param>
+        internal static string UpdateCamerasAfterChange(UIApplication uiApp, Document doc, ICollection<ElementId> cameraIds,
+            IDictionary<ElementId, CameraPoseHint> hints, out int updated, out bool storeyOrRoomChanged)
         {
             updated = 0;
+            storeyOrRoomChanged = false;
             if (doc == null || cameraIds == null || cameraIds.Count == 0) return "沒有相機需要更新。";
             var notes = new List<string>();
-            using (CameraPerf perf = CameraPerf.Begin($"相機變動後更新（{cameraIds.Count} 台）"))
+            var redrawn = new List<string>();
+            using (CameraPerf perf = CameraPerf.Begin($"相機變動後續更新（去抖；{cameraIds.Count} 台）"))
             {
                 // ④ 導覽前的姿態 → 自動「A案」（只在沒有任何版本時）
                 try
@@ -202,71 +268,282 @@ namespace RevitMCP.Core
                 catch (Exception ex) { Logger.Error("相機變動後更新：自動存原始版本失敗（略過）", ex); }
                 perf.Lap("自動存A案");
 
-                // ③ 決定哪些相機要重算 Key Plan 範圍
-                var realign = new List<(ElementId id, string why)>();
-                var markersOnly = new List<ElementId>();
+                // ③ 分級
+                var groups = new Dictionary<FollowUpKind, List<ElementId>>();
+                var why = new Dictionary<ElementId, string>();
+                List<Level> levels = null;
+                int unchanged = 0;
                 foreach (ElementId id in cameraIds)
                 {
+                    FollowUpKind kind;
+                    string reason;
                     try
                     {
                         if (!(doc.GetElement(id) is View3D cam) || cam.IsTemplate || !cam.IsPerspective || IsSheetPerspectiveCopy(cam)) continue;
-                        string why = null;
-                        if (uiApp != null && HasKeyPlanViews(doc, cam.UniqueId))
-                        {
-                            ViewOrientation3D o = cam.GetOrientation();
-                            string key = PoseKey(doc, cam.UniqueId);
-                            PoseRecord basis = _lastKeyPlan.TryGetValue(key, out PoseRecord kp) ? kp : null;
-                            string basisName = "上次 Key Plan";
-                            if (basis == null && hints != null && hints.TryGetValue(id, out CameraPoseHint h) && h?.Eye != null)
-                            { basis = new PoseRecord { Eye = h.Eye, YawDeg = h.YawDeg }; basisName = "變動前（" + (h.Source ?? "?") + "）"; }
-                            if (basis == null && _lastDrawn.TryGetValue(key, out PoseRecord dr) && dr.Eye != null)
-                            { basis = dr; basisName = "上次標記"; }
-                            if (basis?.Eye != null)
-                            {
-                                double moved = CameraMath.FeetToMm(Math.Sqrt(Math.Pow(o.EyePosition.X - basis.Eye.X, 2) + Math.Pow(o.EyePosition.Y - basis.Eye.Y, 2) + Math.Pow(o.EyePosition.Z - basis.Eye.Z, 2)));
-                                double dyaw = Math.Abs(NormalizeAngle((YawOf(o.ForwardDirection) - basis.YawDeg) * Math.PI / 180.0)) * 180.0 / Math.PI;
-                                if (moved > RealignMoveMm || dyaw > RealignYawDeg)
-                                    why = $"相對{basisName} 移動 {moved:F0}mm、水平角 {dyaw:F1}°";
-                            }
-                        }
-                        if (why != null) realign.Add((id, why)); else markersOnly.Add(id);
+                        if (levels == null) levels = CameraMath.GetStoreyLevelsSorted(doc);
+                        kind = ClassifyChange(uiApp, doc, cam, hints != null && hints.TryGetValue(id, out CameraPoseHint h) ? h : null, levels, out reason, out bool same, out bool storeyChanged);
+                        if (same) { unchanged++; continue; }
+                        if (storeyChanged) storeyOrRoomChanged = true;
                     }
                     catch (Exception ex)
                     {
-                        Logger.Error("相機變動後更新：判斷是否重算 Key Plan 失敗（改為只更新標記）", ex);
-                        markersOnly.Add(id);
+                        Logger.Error("相機變動後更新：分級失敗（改為重畫平面＋剖面標記）", ex);
+                        kind = FollowUpKind.Markers;
+                        reason = "分級失敗：" + ex.Message;
                     }
+                    if (!groups.TryGetValue(kind, out List<ElementId> list)) groups[kind] = list = new List<ElementId>();
+                    list.Add(id);
+                    why[id] = reason;
+                    Logger.Info($"相機變動後續更新：相機 id={id.GetIdValue()} → {KindText(kind)}（{reason}）");
                 }
-                perf.Lap("判斷重算");
+                perf.Lap("分級");
 
-                foreach (var (id, why) in realign)
+                List<ElementId> G(FollowUpKind k)
+                {
+                    if (!groups.TryGetValue(k, out List<ElementId> l)) groups[k] = l = new List<ElementId>();
+                    return l;
+                }
+
+                // 完整 Key Plan（換樓層／換房間／大幅移動）
+                if (G(FollowUpKind.Full).Count > 0) storeyOrRoomChanged = true;
+                foreach (ElementId id in G(FollowUpKind.Full).ToList())
                 {
                     try
                     {
-                        Logger.Info($"相機變動後更新：相機 id={id.GetIdValue()} {why} → 重算 Key Plan 範圍（一鍵 4 視圖更新路徑，不並排）");
+                        Logger.Info($"相機變動後更新：相機 id={id.GetIdValue()} {why[id]} → 重算 Key Plan 範圍（一鍵 4 視圖更新路徑，不並排）");
                         KeyPlanResult r = CreateOrUpdateFourViews(uiApp, doc, id);
-                        if (r.Error != null) { notes.Add("Key Plan 重算失敗：" + r.Error); markersOnly.Add(id); }
-                        else { updated++; notes.Add("已重算 Key Plan 範圍（" + why + "）"); }
+                        if (r.Error != null) { notes.Add("Key Plan 重算失敗：" + r.Error); G(FollowUpKind.Markers).Add(id); }
+                        else { updated++; notes.Add("已重算 Key Plan 範圍（" + why[id] + "）"); redrawn.Add("完整 Key Plan×1"); }
                     }
                     catch (Exception ex)
                     {
                         Logger.Error("相機變動後更新：重算 Key Plan 失敗（改為只更新標記）", ex);
                         CameraManagerDiagnostics.RecordCaught("RealignKeyPlan", ex);
-                        markersOnly.Add(id);
+                        G(FollowUpKind.Markers).Add(id);
                     }
                 }
-                perf.Lap("重算KeyPlan");
+                perf.Lap("完整KeyPlan");
 
-                if (markersOnly.Count > 0)
+                // 標記群組（各一個交易；姿態雜湊相同者在 UpdateMarkersForCameras 內自動略過）
+                int drawnCount = 0;
+                void Draw(FollowUpKind k, MarkerParts parts, string label)
                 {
-                    int n = UpdateMarkersForCameras(doc, markersOnly, false, out string mSummary);
-                    updated += n;
+                    List<ElementId> ids = G(k);
+                    if (ids.Count == 0) return;
+                    int n = UpdateMarkersForCameras(doc, ids, false, parts, out string mSummary);
+                    drawnCount += n;
+                    if (n > 0) redrawn.Add($"{label}×{n}");
                     if (!string.IsNullOrEmpty(mSummary)) notes.Add(mSummary);
                 }
-                perf.Lap("更新標記");
-                perf.Note(string.Join("；", notes));
+                Draw(FollowUpKind.Markers, MarkerParts.All, "平面＋剖面標記");
+                Draw(FollowUpKind.SectionPitch, MarkerParts.Section | MarkerParts.AMarker, "剖面標記＋A");
+                Draw(FollowUpKind.SectionOnly, MarkerParts.Section, "剖面標記");
+                // 剖面重新對位：平面／總覽／A 標記照常重畫，剖面標記留給對位後再畫（避免畫兩次）。
+                Draw(FollowUpKind.SectionRealign, MarkerParts.Plan | MarkerParts.Overview | MarkerParts.AMarker, "平面標記");
+                updated += drawnCount;
+                perf.Lap("標記");
+                foreach (ElementId id in G(FollowUpKind.SectionRealign))
+                {
+                    try
+                    {
+                        string r = RealignSectionForCamera(doc, id);
+                        notes.Add(r);
+                        redrawn.Add("剖面對位×1");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error("相機變動後更新：剖面重新對位失敗（略過）", ex);
+                        CameraManagerDiagnostics.RecordCaught("RealignSection", ex);
+                    }
+                }
+                perf.Lap("剖面對位");
+                if (unchanged > 0) notes.Add($"{unchanged} 台姿態未變，略過");
+                perf.Note("重畫：" + (redrawn.Count > 0 ? string.Join("、", redrawn) : "無") + (notes.Count > 0 ? "；" + string.Join("；", notes) : ""));
             }
             return notes.Count > 0 ? string.Join("；", notes) : "相機標記已是最新。";
+        }
+
+        /// <summary>
+        /// 分級一台相機的變動。same＝與上次畫標記時完全相同（整台略過）。只讀；房間查詢只在「平面有移動」時才做。
+        /// </summary>
+        private static FollowUpKind ClassifyChange(UIApplication uiApp, Document doc, View3D cam, CameraPoseHint hint, List<Level> levels,
+            out string reason, out bool same, out bool storeyChanged)
+        {
+            same = false;
+            storeyChanged = false;
+            string key = PoseKey(doc, cam.UniqueId);
+            _lastDrawn.TryGetValue(key, out PoseRecord rec);
+            if (rec != null && rec.Hash == MarkerHash(cam)) { same = true; reason = "姿態與上次標記相同"; return FollowUpKind.Markers; }
+
+            PoseRecord basis = rec?.Eye != null ? rec : null;
+            string basisName = "上次標記";
+            bool? shapeChanged = basis != null ? (bool?)(basis.ShapeHash != ComputeShapeHash(cam)) : null;
+            if (basis == null && hint?.Eye != null)
+            {
+                basis = new PoseRecord { Eye = hint.Eye, YawDeg = hint.YawDeg, PitchDeg = hint.PitchDeg, StoreyId = hint.StoreyId };
+                basisName = "變動前（" + (hint.Source ?? "?") + "）";
+                shapeChanged = hint.ShapeChanged;
+            }
+            if (basis == null) { reason = "沒有前次姿態可比對"; return FollowUpKind.Markers; }
+
+            ViewOrientation3D o = cam.GetOrientation();
+            XYZ e = o.EyePosition;
+            double dxy = CameraMath.FeetToMm(Math.Sqrt(Math.Pow(e.X - basis.Eye.X, 2) + Math.Pow(e.Y - basis.Eye.Y, 2)));
+            double dz = CameraMath.FeetToMm(Math.Abs(e.Z - basis.Eye.Z));
+            double dyaw = Math.Abs(NormalizeAngle((YawOf(o.ForwardDirection) - basis.YawDeg) * Math.PI / 180.0)) * 180.0 / Math.PI;
+            double pitch = Math.Asin(Math.Max(-1.0, Math.Min(1.0, o.ForwardDirection.Z))) * 180.0 / Math.PI;
+            double? dpitch = basis.PitchDeg.HasValue ? (double?)Math.Abs(pitch - basis.PitchDeg.Value) : null;
+            string delta = $"相對{basisName}：平面 {dxy:F0}mm、高度 {dz:F0}mm、水平角 {dyaw:F2}°、俯仰角 {(dpitch.HasValue ? dpitch.Value.ToString("F2") + "°" : "?")}" +
+                           $"{(shapeChanged == true ? "、視野形狀有變" : shapeChanged == null ? "、視野形狀未知" : "")}";
+
+            // 樓層（室內＝眼睛所在房間的 Level；有快取）
+            CameraMath.CameraGeometry geom = CameraMath.ComputeGeometry(cam, levels);
+            long? storey = geom.LevelBelow != null ? (long?)geom.LevelBelow.Id.GetIdValue() : null;
+            bool hasKp = uiApp != null && HasKeyPlanViews(doc, cam.UniqueId);
+            if (basis.StoreyId.HasValue && storey.HasValue && basis.StoreyId != storey)
+            {
+                storeyChanged = true;
+                reason = delta + $"；樓層 {basis.StoreyId}→{storey}";
+                return hasKp ? FollowUpKind.Full : FollowUpKind.Markers;
+            }
+            if (dxy > 1.0)
+            {
+                if (!hasKp) { reason = delta; return FollowUpKind.Markers; }
+                if (basis.RoomSizeMm.HasValue && basis.RoomId.HasValue)
+                {
+                    CameraParams cp = ComputeCameraParams(cam, levels);
+                    long? room = cp?.Room?.Room != null && !cp.IsOutdoor ? (long?)cp.Room.Room.Id.GetIdValue() : null;
+                    if (room != basis.RoomId) { reason = delta + $"；房間 {basis.RoomId}→{(room.HasValue ? room.ToString() : "室外/無")}"; return FollowUpKind.Full; }
+                    if (dxy > basis.RoomSizeMm.Value) { reason = delta + $"；超過房間大小 {basis.RoomSizeMm.Value:F0}mm"; return FollowUpKind.Full; }
+                    reason = delta + $"；同一房間（大小 {basis.RoomSizeMm.Value:F0}mm）";
+                    return dyaw > 0.05 || shapeChanged != false ? FollowUpKind.Full : FollowUpKind.SectionRealign;
+                }
+                // 沒有房間紀錄（本 session 尚未畫過、或室外）：沿用舊門檻
+                if (dxy > RealignMoveMm) { reason = delta + $"；無房間紀錄、移動 > {RealignMoveMm:F0}mm"; return FollowUpKind.Full; }
+                reason = delta + "；無房間紀錄、小幅移動";
+                return FollowUpKind.SectionRealign;
+            }
+            if (dyaw > 0.05 || shapeChanged != false) { reason = delta; return FollowUpKind.Markers; }
+            if (dpitch.HasValue && dpitch.Value > 0.01) { reason = delta; return FollowUpKind.SectionPitch; }
+            if (!dpitch.HasValue) { reason = delta + "（俯仰角未知，一併更新 A 標記）"; return FollowUpKind.SectionPitch; }
+            if (dz > 0.05) { reason = delta; return FollowUpKind.SectionOnly; }
+            reason = delta + "（其他變動，例如模型或標記型式）";
+            return FollowUpKind.Markers;
+        }
+
+        /// <summary>
+        /// 2026-09-26 第六輪：平面小幅移動（同一房間內）→ 只把這台相機的 Key Plan 剖面框重新對到新的眼睛位置，並重畫剖面標記。
+        /// 與一鍵 4 視圖同一套剖面規格（ComputeSectionSpec＋GetOrCreateSectionView；使用者手動移過的剖面照樣保留），
+        /// 但不動平面裁剪、等角框、樣式、並排。單一交易「更新相機標記」（DocumentChanged 端視為本工具自己的變更）。
+        /// </summary>
+        internal static string RealignSectionForCamera(Document doc, ElementId cameraId)
+        {
+            if (!(doc?.GetElement(cameraId) is View3D camera) || camera.IsTemplate || !camera.IsPerspective) return "剖面對位：找不到相機";
+            string cid = camera.UniqueId;
+            ViewSection section = FindLinkedView(doc, cid, "Section") as ViewSection;
+            if (section == null) return $"剖面對位：「{camera.Name}」沒有 Key Plan 剖面";
+            using (CameraPerf perf = CameraPerf.Begin($"剖面重新對位「{camera.Name}」"))
+            {
+                List<Level> levels = CameraMath.GetStoreyLevelsSorted(doc);
+                CameraParams cp = ComputeCameraParams(camera, levels);
+                CameraMath.CameraGeometry geom = cp.Geom;
+                if (geom.LevelBelow == null) return "剖面對位：找不到樓層";
+                ViewPlan plan = FindLinkedView(doc, cid, "Plan") as ViewPlan;
+                IsoXY isoXY = ComputeIsoXY(geom, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, cp);
+                StoreyTop storeyTop = ComputeStoreyTop(doc, geom, isoXY, levels, cp.Room, cp.IsOutdoor);
+                double? cutPlaneZ = plan != null ? GetPlanCutPlaneZ(doc, plan) : null;
+                XYZ planBasisX = null;
+                try { planBasisX = plan?.CropBox?.Transform?.BasisX; } catch { planBasisX = null; }
+                SectionSpec spec = ComputeSectionSpec(geom, cp, isoXY, storeyTop, GetSectionOrientationMode(), planBasisX, cutPlaneZ, GetSectionAnchorMode());
+                perf.Lap("剖面規格");
+                string sectionName = "Key Plan-" + camera.Name + "-剖面";
+                bool preserved = false;
+                IsUpdatingMarkers = true;
+                try
+                {
+                    using (Transaction t = TransactionHelper.Begin(doc, MarkerUpdateTransactionName))
+                    {
+                        t.Start();
+                        try
+                        {
+                            ViewSection sec = GetOrCreateSectionView(doc, sectionName, cid, geom, spec, false, out preserved);
+                            DrawMarkerSafely(doc, "RealignSectionMarker",
+                                () => DrawSectionMarker(doc, sec, geom, cp.CenterHoriz ?? cp.ForwardHoriz, cp.FanRadiusFeet, cp.DownRad, cp.UpRad, cid));
+                            t.Commit();
+                            BumpOwnViewsEpoch();
+                        }
+                        catch
+                        {
+                            try { if (t.HasStarted() && !t.HasEnded()) t.RollBack(); } catch { }
+                            throw;
+                        }
+                    }
+                }
+                finally { IsUpdatingMarkers = false; }
+                perf.Lap("交易");
+                RecordDrawn(doc, camera, cp);
+                string msg = preserved ? $"剖面對位：「{camera.Name}」剖面曾手動移過，範圍保留，只重畫標記"
+                                       : $"剖面對位：「{camera.Name}」剖面已跟著相機移動";
+                perf.Note(msg);
+                return msg;
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // 2026-09-26 第六輪：去抖後續更新排程（set_camera_pose 用；面板啟用時交給面板的同一個計時器）
+        // ══════════════════════════════════════════════════════════
+
+        internal const int FollowUpDebounceMs = 800;
+
+        /// <summary>面板註冊：(相機, 變動前姿態) → 面板已啟用就排進面板的去抖計時器並回傳 true。</summary>
+        internal static Func<ElementId, CameraPoseHint, bool> PanelFollowUpSink;
+
+        private static readonly object _followLock = new object();
+        private static readonly Dictionary<ElementId, CameraPoseHint> _followPending = new Dictionary<ElementId, CameraPoseHint>();
+        private static System.Threading.Timer _followTimer;
+
+        /// <summary>
+        /// 排入一台相機的後續更新（標記／剖面／Key Plan 依分級），最後一次排入後 800 ms 才執行，同一台合併（保留最早的變動前姿態）。
+        /// 面板已啟用 → 交給面板（它還會在完成後更新狀態列）；否則用這裡的計時器，到時經相機管理佇列（ExternalEvent）執行。
+        /// 呼叫端須在 Revit 主執行緒。
+        /// </summary>
+        internal static string ScheduleFollowUp(ElementId cameraId, CameraPoseHint hint)
+        {
+            if (cameraId == null) return "沒有相機";
+            try
+            {
+                if (PanelFollowUpSink != null && PanelFollowUpSink(cameraId, hint))
+                    return $"已排入面板的去抖後續更新（{FollowUpDebounceMs} ms 後，依變動分級重畫）";
+            }
+            catch (Exception ex) { Logger.Error("相機後續更新：交給面板失敗（改用內建排程）", ex); }
+            lock (_followLock)
+            {
+                if (!_followPending.ContainsKey(cameraId)) _followPending[cameraId] = hint;
+                if (_followTimer == null) _followTimer = new System.Threading.Timer(_ => OnFollowTimer(), null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+                _followTimer.Change(FollowUpDebounceMs, System.Threading.Timeout.Infinite);
+            }
+            return $"已排入去抖後續更新（{FollowUpDebounceMs} ms 後，依變動分級重畫）";
+        }
+
+        private static void OnFollowTimer()
+        {
+            Dictionary<ElementId, CameraPoseHint> batch;
+            lock (_followLock)
+            {
+                if (_followPending.Count == 0) return;
+                batch = new Dictionary<ElementId, CameraPoseHint>(_followPending);
+                _followPending.Clear();
+            }
+            // 計時器執行緒 → 相機管理佇列（ExternalEvent，thread-safe Raise）
+            CameraManagerEventQueue.Enqueue("CameraFollowUp", uiApp =>
+            {
+                Document doc = uiApp?.ActiveUIDocument?.Document;
+                if (doc == null) return;
+                var ids = batch.Keys.Where(id => doc.GetElement(id) is View3D).ToList();
+                if (ids.Count == 0) return;
+                string summary = UpdateCamerasAfterChange(uiApp, doc, ids, batch, out int n);
+                Logger.Info($"相機後續更新（內建排程）：{ids.Count} 台 → {summary}");
+            });
         }
     }
 }

@@ -230,6 +230,7 @@ namespace RevitMCP
 
                 // 規格 §4.4：透視相機本身被修改（拖曳裁剪框改 FOV、移動／旋轉相機）→ 只排入
                 // 「更新相機標記」（面板端 500ms 去抖、同一相機合併）。這裡只收集 Id，不修改模型。
+                bool inPlaceOnly = false;
                 try
                 {
                     System.Collections.Generic.List<ElementId> perspIds = null;
@@ -246,6 +247,20 @@ namespace RevitMCP
                             (aMarkerIds ?? (aMarkerIds = new System.Collections.Generic.List<ElementId>())).Add(id);
                     }
                     if (perspIds != null) _cameraManagerPanel.QueueCameraMarkerRefresh(perspIds);
+                    // 2026-09-26 第六輪（編輯快速路徑）：面板自己的「編輯相機」交易、只改了剛就地更新過清單列的相機
+                    // → 清單已是最新，不再排 live sync 整份快照重讀（標記更新已在上一行排入去抖）。
+                    try
+                    {
+                        System.Collections.Generic.ICollection<string> names = e.GetTransactionNames();
+                        inPlaceOnly = perspIds != null && aMarkerIds == null && !levelChanged &&
+                                      e.Operation == UndoOperation.TransactionCommitted &&
+                                      e.GetAddedElementIds().Count == 0 && e.GetDeletedElementIds().Count == 0 &&
+                                      perspIds.Count == e.GetModifiedElementIds().Count &&
+                                      names != null && names.Count > 0 &&
+                                      names.All(n => n == RevitMCP.Core.CameraManagerService.FastEditTransactionName) &&
+                                      RevitMCP.Core.CameraManagerService.ConsumeInPlaceEdits(perspIds);
+                    }
+                    catch { inPlaceOnly = false; }
                     if (levelChanged) _cameraManagerPanel.QueueLevelMarkRefresh();
                     if (aMarkerIds != null) _cameraManagerPanel.QueueMarkerToCameraSync(aMarkerIds);
                     // 2026-09-25 Wave 2：有元素被刪除（可能是相機）→ 去抖後清掉「相機已不存在」的標記（A／總覽）。
@@ -256,6 +271,11 @@ namespace RevitMCP
                     Logger.Error($"相機管理面板：收集透視相機變更失敗: {exMarker.Message}");
                 }
 
+                if (inPlaceOnly)
+                {
+                    Logger.Info("相機管理面板：DocumentChanged＝面板編輯快速路徑（清單列已就地更新），不排整份快照重讀。");
+                    return;
+                }
                 if (!IsCameraManagerRelevantChange(doc, e)) return;
 
                 Logger.Info("相機管理面板：DocumentChanged 命中相關元素變更，排入下次 Idling 刷新。");

@@ -3601,12 +3601,28 @@ namespace RevitMCP.Core
         /// force＝切換相機標記型式等需要全部重畫的情況。summary＝略過／重畫數量（狀態列、log）。
         /// </summary>
         internal static int UpdateMarkersForCameras(Document doc, ICollection<ElementId> cameraIds, bool force, out string summary)
+            => UpdateMarkersForCameras(doc, cameraIds, force, MarkerParts.All, out summary);
+
+        /// <summary>2026-09-26 第六輪（編輯後續更新分級）：只重畫指定的標記群組。高度／俯仰角變動只影響剖面上的標記
+        /// （垂直扇形）——平面扇形、平面裁剪、等角框、樓層總覽都不必動。出圖用透視複本一律同步（它就是相機的複本）。</summary>
+        [Flags]
+        internal enum MarkerParts
+        {
+            None = 0,
+            Plan = 1,
+            Section = 2,
+            Overview = 4,
+            AMarker = 8,
+            All = Plan | Section | Overview | AMarker
+        }
+
+        internal static int UpdateMarkersForCameras(Document doc, ICollection<ElementId> cameraIds, bool force, MarkerParts parts, out string summary)
         {
             summary = null;
             if (doc == null || cameraIds == null || cameraIds.Count == 0) return 0;
             if (Schema.Lookup(SchemaGuid) == null) return 0; // 從未建立過 Key Plan
 
-            using (CameraPerf perf = CameraPerf.Begin($"更新相機標記（要求 {cameraIds.Count} 台{(force ? "，強制" : "")}）"))
+            using (CameraPerf perf = CameraPerf.Begin($"更新相機標記（要求 {cameraIds.Count} 台{(force ? "，強制" : "")}{(parts != MarkerParts.All ? "，只畫 " + parts : "")}）"))
             {
                 var targets = new Dictionary<string, View3D>(StringComparer.Ordinal);
                 int skipped = 0;
@@ -3639,7 +3655,8 @@ namespace RevitMCP.Core
                     else if (role == SheetPerspectiveRole && v is View3D pc) sheetCopies[cid] = pc;
                 }
                 // 2026-09-25 Wave 2：有樓層總覽或 A 型標記時，沒有 Key Plan 的相機也要重畫（總覽標記／A 標記）。
-                bool syncA = MarkerModeIncludesA() && FindAMarkerSymbol(doc) != null;
+                bool syncA = (parts & MarkerParts.AMarker) != 0 && MarkerModeIncludesA() && FindAMarkerSymbol(doc) != null;
+                if ((parts & MarkerParts.Overview) == 0) anyOverview = false;
                 List<string> work = targets.Keys.Where(k => plans.ContainsKey(k) || sections.ContainsKey(k) || sheetCopies.ContainsKey(k) || anyOverview || syncA).ToList();
                 perf.Lap("找 Key Plan 視圖");
                 if (work.Count == 0) { perf.Note("沒有 Key Plan／總覽／A 標記"); return 0; }
@@ -3680,11 +3697,11 @@ namespace RevitMCP.Core
                                 // 2026-09-26 第五輪：標記更新交易不重建視圖；樓層不符只提示（一鍵 4 視圖時會重建 Key Plan 平面）。
                                 if (plan != null && (force || storeyChanged) && IsPlanLevelMismatch(plan, cp.Geom.LevelBelow.Id))
                                     Logger.Info($"相機 Key Plan：「{cam.Name}」Key Plan 平面樓層不符（平面 {plan.GenLevel?.Name ?? "?"}、相機 {cp.Geom.LevelBelow.Name}）→ 請重跑一鍵 4 視圖重建");
-                                if (plan != null)
+                                if (plan != null && (parts & MarkerParts.Plan) != 0)
                                     DrawMarkerSafely(doc, "UpdatePlanMarker",
                                         () => DrawPlanMarker(doc, plan, cp.Geom, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, cp.FanRadiusFeet, cid));
                                 sections.TryGetValue(cid, out ViewSection sec);
-                                if (sec != null)
+                                if (sec != null && (parts & MarkerParts.Section) != 0)
                                 {
                                     DrawMarkerSafely(doc, "UpdateSectionMarker",
                                         () => DrawSectionMarker(doc, sec, cp.Geom, cp.CenterHoriz ?? cp.ForwardHoriz, cp.FanRadiusFeet, cp.DownRad, cp.UpRad, cid));

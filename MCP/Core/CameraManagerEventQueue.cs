@@ -30,6 +30,33 @@ namespace RevitMCP.Core
     {
         private static ExternalEvent _event;
         private static readonly ConcurrentQueue<QueuedAction> Queue = new ConcurrentQueue<QueuedAction>();
+        /// <summary>2026-09-26 第六輪（使用者：「改離樓板高度後透視圖要馬上變」）：優先佇列。清單／地圖的相機編輯走這裡，
+        /// 每次 Execute 先清空優先佇列再做一般佇列——不再排在「讀快照／匯出底圖／讀剖面線／相機變動後更新（可能數秒）」後面。</summary>
+        private static readonly ConcurrentQueue<QueuedAction> PriorityQueue = new ConcurrentQueue<QueuedAction>();
+
+        /// <summary>排入一個「使用者正在等畫面」的小動作（相機編輯快速路徑），插隊到一般佇列之前。</summary>
+        public static void EnqueuePriority(string name, Action<UIApplication> action)
+        {
+            if (action == null) return;
+            if (_event == null)
+            {
+                Logger.Error($"相機管理佇列尚未初始化，丟棄優先動作：{name}");
+                return;
+            }
+            PriorityQueue.Enqueue(new QueuedAction { Name = name, Action = action });
+            int waiting = Queue.Count;
+            if (waiting > 0) Logger.Info($"相機管理佇列：優先動作 {name} 插隊（一般佇列尚有 {waiting} 個動作在等）。");
+            try
+            {
+                ExternalEventRequest r = _event.Raise();
+                if (r != ExternalEventRequest.Accepted && r != ExternalEventRequest.Pending)
+                    Logger.Info($"相機管理佇列：Raise 回傳 {r}（優先動作 {name} 仍在佇列中，下一次 Raise 時執行）。");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"相機管理佇列 Raise 失敗（{name}）: {ex.Message}");
+            }
+        }
 
         private sealed class QueuedAction
         {
@@ -69,28 +96,38 @@ namespace RevitMCP.Core
         {
             public void Execute(UIApplication app)
             {
+                // 優先佇列：先全部做完（相機編輯，每個只是一個小交易＋重繪）。
+                while (PriorityQueue.TryDequeue(out QueuedAction p)) Run(app, p);
+
                 int budget = Queue.Count;
                 for (int i = 0; i < budget; i++)
                 {
+                    // 一般動作之間若又有優先動作進來（使用者在前一個重量級動作執行中按了 Enter）→ 先做優先的。
+                    while (PriorityQueue.TryDequeue(out QueuedAction p)) Run(app, p);
                     if (!Queue.TryDequeue(out QueuedAction item)) break;
-                    using (CameraManagerDiagnostics.BeginOperation("queue:" + item.Name))
-                    {
-                        try
-                        {
-                            Logger.Info($"相機管理佇列：執行 {item.Name}。");
-                            item.Action(app);
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.Error($"相機管理佇列動作失敗（{item.Name}）", ex);
-                            CameraManagerDiagnostics.RecordCaught("queue:" + item.Name, ex);
-                        }
-                    }
+                    Run(app, item);
                 }
 
-                if (!Queue.IsEmpty)
+                if (!Queue.IsEmpty || !PriorityQueue.IsEmpty)
                 {
                     try { _event?.Raise(); } catch { }
+                }
+            }
+
+            private static void Run(UIApplication app, QueuedAction item)
+            {
+                using (CameraManagerDiagnostics.BeginOperation("queue:" + item.Name))
+                {
+                    try
+                    {
+                        Logger.Info($"相機管理佇列：執行 {item.Name}。");
+                        item.Action(app);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error($"相機管理佇列動作失敗（{item.Name}）", ex);
+                        CameraManagerDiagnostics.RecordCaught("queue:" + item.Name, ex);
+                    }
                 }
             }
 

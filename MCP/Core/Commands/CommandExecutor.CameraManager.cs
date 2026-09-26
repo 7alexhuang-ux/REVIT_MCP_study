@@ -20,7 +20,7 @@ namespace RevitMCP.Core
     /// 原則：
     ///   1. 不重複邏輯——讀清單用 CameraManagerService.ReadSnapshot／BuildCameraRow，一鍵 4 視圖用
     ///      CameraKeyPlanService.CreateOrUpdateFourViews（＋CameraManagerService.OpenAndTileFourViews），
-    ///      改相機用 CameraManagerService.BuildEditRequestFromRow＋ApplyDetailEdit，複製用 CopyCameraToLevels。
+    ///      改相機用 CameraManagerService.ApplyPoseEditFast（2026-09-26 第六輪，與面板同一條編輯快速路徑），複製用 CopyCameraToLevels。
     ///   2. 走既有 MCP ExternalEvent 路徑（CommandExecutor 在 ExternalEvent.Execute 內執行），不經面板的
     ///      CameraManagerEventQueue；上述服務方法全部不含 WPF 型別，各自開自己的 Transaction。
     ///   3. 所有長度輸出為 mm（內部原點座標系），角度為度。
@@ -430,38 +430,43 @@ namespace RevitMCP.Core
             if (far.HasValue && !before.FarClipEditable)
                 throw new Exception("這台相機的遠裁剪參數不可寫入（面板該欄同樣唯讀）。");
 
-            // 與面板清單編輯同一條路徑：用這一列的既有值補齊，再只覆寫給定欄位 → ApplyDetailEdit（一個交易「編輯相機」）。
-            CameraEditRequest req = CameraManagerService.BuildEditRequestFromRow(before);
-            if (h.HasValue) req.HeightAboveLevelCm = h.Value;
-            if (yaw.HasValue) req.HorizontalAngleDeg = yaw.Value;
-            if (pitch.HasValue) req.PitchDeg = pitch.Value;
-            if (x.HasValue) req.EyeXFeet = CameraMath.MmToFeet(x.Value * 10.0);
-            if (y.HasValue) req.EyeYFeet = CameraMath.MmToFeet(y.Value * 10.0);
-            if (far.HasValue) req.FarClipCm = far.Value;
+            // 2026-09-26 第六輪：與面板清單編輯同一條「編輯快速路徑」——一個小交易（自動存 A案＋一次 SetOrientation＋遠裁剪）
+            // ＋立刻重繪透視圖；沒給的欄位沿用相機目前實際值。標記／剖面／Key Plan 改為 800 ms 去抖的後續更新（依變動分級），
+            // 不在這個回應裡同步跑（回應的 Timing 只量快速路徑）。
+            var edit = new CameraPoseEdit
+            {
+                ViewId = camera.Id,
+                LevelId = before.LevelId,
+                HeightAboveLevelCm = h,
+                YawDeg = yaw,
+                PitchDeg = pitch,
+                EyeXFeet = x.HasValue ? (double?)CameraMath.MmToFeet(x.Value * 10.0) : null,
+                EyeYFeet = y.HasValue ? (double?)CameraMath.MmToFeet(y.Value * 10.0) : null,
+                FarClipCm = far
+            };
+            CameraPoseEditResult fast = CameraManagerService.ApplyPoseEditFast(_uiApp, doc, edit, "MCP set_camera_pose", markInPlace: false);
+            if (fast.Error != null) throw new Exception(fast.Error);
 
-            string err = CameraManagerService.ApplyDetailEdit(doc, req);
-            if (err != null) throw new Exception(err);
-
-            // 2026-09-26 第四輪（與面板清單編輯／導覽監看同一條更新路徑）：透視圖開著就重繪；更新標記／扇形，
-            // 眼睛移動 > 300 mm 或水平角變 > 5° 且有 Key Plan → 重算 Key Plan 範圍（不並排）。
-            string refreshed = CameraManagerService.RefreshCameraViewIfOpen(_uiApp, camera.Id);
             var hint = new CameraKeyPlanService.CameraPoseHint
             {
                 Eye = new XYZ(before.EyeXFeet, before.EyeYFeet, before.EyeZFeet),
                 YawDeg = before.HorizontalAngleDeg,
+                PitchDeg = before.PitchDeg,
+                StoreyId = before.LevelId != null ? (long?)before.LevelId.GetIdValue() : null,
+                ShapeChanged = far.HasValue,
                 Source = "set_camera_pose"
             };
             string update;
             try
             {
-                update = CameraKeyPlanService.UpdateCamerasAfterChange(_uiApp, doc, new List<ElementId> { camera.Id },
-                    new Dictionary<ElementId, CameraKeyPlanService.CameraPoseHint> { { camera.Id, hint } }, out _);
+                update = fast.Changed ? CameraKeyPlanService.ScheduleFollowUp(camera.Id, hint) : "數值與相機目前相同，未變更（不排後續更新）";
             }
             catch (Exception exUpd)
             {
-                Logger.Error("set_camera_pose：相機更新（標記／Key Plan）失敗（相機已修改）", exUpd);
-                update = "相機更新失敗：" + exUpd.Message;
+                Logger.Error("set_camera_pose：排入後續更新失敗（相機已修改）", exUpd);
+                update = "排入後續更新失敗：" + exUpd.Message;
             }
+            string refreshed = fast.RefreshHow;
 
             CameraRow after = CameraManagerService.BuildCameraRow(camera, storeys);
             object Pose(CameraRow r) => new
@@ -479,7 +484,11 @@ namespace RevitMCP.Core
             {
                 Success = true,
                 Camera = new { Id = camera.Id.GetIdValue(), camera.Name },
-                Note = "planXcm/planYcm 為內部原點座標系（與面板「平面 X/Y cm」欄相同）。2026-09-26 起：編輯後自動更新標記；眼睛移動 > 300 mm 或水平角變 > 5° 且已有 Key Plan 時自動重算 Key Plan 範圍（不並排）。第一次修改前若沒有任何視角版本，自動存「A案」。",
+                Note = "planXcm/planYcm 為內部原點座標系（與面板「平面 X/Y cm」欄相同）。2026-09-26 第六輪起：編輯快速路徑（一個小交易＋立刻重繪透視圖，Timing 為其耗時）；" +
+                       "標記／剖面／Key Plan 於最後一次編輯 800 ms 後依變動分級更新（高度＝只剖面標記、俯仰角＝剖面＋A 標記、水平角／視野＝平面＋剖面標記、同房間移動＝剖面對位、換樓層／房間＝完整 Key Plan），結果見 RevitMCP log 的「⏱ 相機變動後續更新」。第一次修改前若沒有任何視角版本，自動存「A案」。",
+                Timing = new { transactionMs = fast.TransactionMs, refreshMs = fast.RefreshMs, totalMs = fast.TotalMs },
+                Changed = fast.Changed,
+                SavedOriginalVersion = fast.SavedOriginalVersion,
                 ViewRefresh = refreshed,
                 CameraUpdate = update,
                 Before = Pose(before),

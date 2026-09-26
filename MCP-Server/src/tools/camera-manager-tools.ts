@@ -75,7 +75,7 @@ export const cameraManagerTools: Tool[] = [
     {
         name: "set_camera_pose",
         title: "修改相機姿態（相機管理）",
-        description: "修改透視相機的姿態，與相機管理面板清單就地編輯走同一條程式路徑（一個交易「編輯相機」）：可給離樓板高度 cm、水平角、俯仰角、平面 X/Y（cm，內部原點座標）、遠裁剪 cm，至少一項；未給的欄位維持原值。回傳修改前後的值。不會自動重算 Key Plan 視圖。觸發條件：調相機高度、改相機角度、移動相機、set camera pose。",
+        description: "修改透視相機的姿態，與相機管理面板清單就地編輯走同一條程式路徑（一個交易「編輯相機」）：可給離樓板高度 cm、水平角、俯仰角、平面 X/Y（cm，內部原點座標）、遠裁剪 cm，至少一項；未給的欄位維持原值（沿用相機目前實際值）。回傳修改前後的值與 Timing {transactionMs, refreshMs, totalMs}（編輯快速路徑：小交易＋立刻重繪透視圖）。Key Plan 標記／剖面於最後一次編輯 800 ms 後依變動分級自動更新（高度只重畫剖面標記；換樓層／房間才完整重算），不在回應中同步執行。觸發條件：調相機高度、改相機角度、移動相機、set camera pose。",
         inputSchema: {
             type: "object",
             properties: {

@@ -571,6 +571,52 @@ namespace RevitMCP.UI
             catch { }
         }
 
+        /// <summary>
+        /// 2026-09-26 第六輪（編輯快速路徑）：只更新這一列畫面（呼叫端已改好 CameraRow 的值）——不換 ItemsSource、
+        /// 不 Items.Refresh()。逐一 UpdateTarget 這一列儲存格內的 TextBox／TextBlock 繫結、重套列樣式（橘色＝高度警示）。
+        /// 使用者目前正在輸入的那一格（鍵盤焦點）不動，免得把打到一半的字蓋掉。row＝null 時以 Id 找，
+        /// 用於失敗時把文字還原成原值。編輯中也照做（這是單列、不重建儲存格）。
+        /// </summary>
+        public void UpdateRowInPlace(ElementId viewId, CameraRow row)
+        {
+            try
+            {
+                CameraRow target = row ?? _allRows?.FirstOrDefault(r => r.ViewId == viewId);
+                if (target == null) return;
+                if (!(_grid.ItemContainerGenerator.ContainerFromItem(target) is DataGridRow dataRow)) return; // 不在畫面上（虛擬化）：下次產生時自然讀新值
+                ApplyRowStyle(dataRow, target);
+                int n = 0;
+                var stack = new Stack<DependencyObject>();
+                stack.Push(dataRow);
+                while (stack.Count > 0)
+                {
+                    DependencyObject d = stack.Pop();
+                    if (d is TextBox tb)
+                    {
+                        if (!ReferenceEquals(tb, _activeCellTextBox) || !tb.IsKeyboardFocusWithin)
+                        {
+                            System.Windows.Data.BindingOperations.GetBindingExpression(tb, TextBox.TextProperty)?.UpdateTarget();
+                            _committedText.Remove(tb);
+                            n++;
+                        }
+                        continue;
+                    }
+                    if (d is TextBlock tbk)
+                    {
+                        System.Windows.Data.BindingOperations.GetBindingExpression(tbk, TextBlock.TextProperty)?.UpdateTarget();
+                        n++;
+                    }
+                    int count = VisualTreeHelper.GetChildrenCount(d);
+                    for (int i = 0; i < count; i++) stack.Push(VisualTreeHelper.GetChild(d, i));
+                }
+                Logger.Info($"相機清單：就地更新「{RowLabel(target)}」一列（{n} 個儲存格繫結，不重建清單）。");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("相機清單：就地更新單列失敗", ex);
+            }
+        }
+
         public void RefreshStatusColumn()
         {
             if (IsEditing) { _pendingStatusRefresh = true; return; }

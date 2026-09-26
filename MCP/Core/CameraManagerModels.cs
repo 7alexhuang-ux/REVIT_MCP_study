@@ -479,6 +479,60 @@ namespace RevitMCP.Core
     }
 
     /// <summary>
+    /// 2026-09-26 第六輪：編輯快速路徑的請求——只帶「使用者這次改的欄位」（null＝不動，保留相機目前實際值）。
+    /// 與 <see cref="CameraEditRequest"/> 不同：不從清單列補齊其他欄位，所以清單列即使是舊資料也不會把別的欄位改回去。
+    /// </summary>
+    internal class CameraPoseEdit
+    {
+        public ElementId ViewId { get; set; }
+        /// <summary>離樓板高度的基準樓層（清單列目前樓層）；只有 HeightAboveLevelCm 有值時需要。</summary>
+        public ElementId LevelId { get; set; }
+        public double? HeightAboveLevelCm { get; set; }
+        public double? YawDeg { get; set; }
+        public double? PitchDeg { get; set; }
+        public double? EyeXFeet { get; set; }
+        public double? EyeYFeet { get; set; }
+        public double? FarClipCm { get; set; }
+
+        /// <summary>log 用的欄位名稱（「高度」「水平角」…）；多欄時以「＋」連接。</summary>
+        public string What()
+        {
+            var parts = new List<string>();
+            if (HeightAboveLevelCm.HasValue) parts.Add("高度");
+            if (YawDeg.HasValue) parts.Add("水平角");
+            if (PitchDeg.HasValue) parts.Add("俯仰角");
+            if (EyeXFeet.HasValue || EyeYFeet.HasValue) parts.Add("平面位置");
+            if (FarClipCm.HasValue) parts.Add("遠裁剪");
+            return parts.Count > 0 ? string.Join("＋", parts) : "相機";
+        }
+    }
+
+    /// <summary>2026-09-26 第六輪：編輯快速路徑的結果（計時＋套用後的實際值，供清單就地更新／MCP 回傳）。</summary>
+    internal class CameraPoseEditResult
+    {
+        public string Error { get; set; }
+        public string CameraName { get; set; }
+        public long QueueWaitMs { get; set; }
+        public long TransactionMs { get; set; }
+        public long RefreshMs { get; set; }
+        public long TotalMs { get; set; }
+        public string RefreshHow { get; set; }
+        public bool SavedOriginalVersion { get; set; }
+        /// <summary>姿態真的有變（眼睛 0.1 mm／方向 1e-6／遠裁剪 0.1 mm 以上）。</summary>
+        public bool Changed { get; set; }
+        public double EyeXFeet { get; set; }
+        public double EyeYFeet { get; set; }
+        public double EyeZFeet { get; set; }
+        public double ForwardX { get; set; }
+        public double ForwardY { get; set; }
+        public double ForwardZ { get; set; }
+        public double? HeightAboveLevelCm { get; set; }
+        public double YawDeg { get; set; }
+        public double PitchDeg { get; set; }
+        public double? FarClipCm { get; set; }
+    }
+
+    /// <summary>
     /// 等角 Key Plan 視圖的範圍模式（規格 Change 2「工具」區的小 ComboBox）：
     ///   FullWithUpperBeams（預設）：頂面延伸到最近上層樓板底再退 10mm（含上層樑，找不到樓板時
     ///     退回下一樓層高程、再沒有就 eye 高度+3m）。

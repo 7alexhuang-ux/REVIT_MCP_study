@@ -125,6 +125,13 @@ namespace RevitMCP.UI
 
         public CameraManagerPanelControl()
         {
+            // 2026-09-26 第六輪：set_camera_pose（MCP）的去抖後續更新交給面板（面板已啟用時；同一個 800 ms 計時器、同一台合併）。
+            CameraKeyPlanService.PanelFollowUpSink = (id, hint) =>
+            {
+                if (!_armed) return false;
+                QueueCameraUpdate(id, hint);
+                return true;
+            };
             // 2026-09-24 第四輪版面（精簡、位置圖佔下半）：
             //   0 ① 工具列：搜尋｜重新整理｜從透視圖同步｜⋯（匯出 Excel、開啟預覽視窗）——單列
             //   1 ② 相機清單：預設約 1/3 高（CameraListFractionV3，可拖曳分割線、存檔）
@@ -850,7 +857,8 @@ namespace RevitMCP.UI
             _listSection.LevelEditCommitted += (row, levelId) => SafeUiAction(() => OnLevelEditCommitted(row, levelId), "LevelEditCommitted");
             _listSection.NumericFieldEditCommitted += OnNumericFieldEditCommitted;
             _listSection.PlaneFieldEditCommitted += OnPlaneFieldEditCommitted;
-            _listSection.FarClipEditCommitted += (row, valueCm) => OnGridFieldEditCommitted(row, req => req.FarClipCm = valueCm);
+            // 2026-09-26 第六輪：遠裁剪也走編輯快速路徑（一個小交易＋重繪＋就地更新這一列）。
+            _listSection.FarClipEditCommitted += (row, valueCm) => OnFastPoseEdit(row, new CameraPoseEdit { FarClipCm = valueCm });
 
             _presetsSection.ApplyHeightRequested += OnApplyHeightRequested;
             _presetsSection.CopyToLevelsRequested += OnCopyToLevelsRequested;
@@ -1418,18 +1426,14 @@ namespace RevitMCP.UI
 
         /// <summary>
         /// 2026-09-26 第四輪（使用者要求）：地圖上拖曳移動／旋轉相機，放開時送出一次編輯——與 set_camera_pose／清單編輯同一條路徑
-        /// （BuildEditRequestFromRow＋ApplyDetailEdit：離樓板高度與方向維持，只改 XY 或水平角），之後照常去抖更新標記／Key Plan。
+        /// （2026-09-26 第六輪起走編輯快速路徑 OnFastPoseEdit：離樓板高度與俯仰角沿用相機目前實際值，只改 XY 或水平角），之後照常去抖更新標記／Key Plan。
         /// 拖曳過程完全不呼叫 Revit；底圖不重新匯出（樓層沒變時沿用目前底圖）。
         /// </summary>
         private void OnMapDragCommitted(CameraRow row, double? x, double? y, double? yaw)
         {
             if (row == null) return;
-            OnGridFieldEditCommitted(row, req =>
-            {
-                if (x.HasValue) req.EyeXFeet = x.Value;
-                if (y.HasValue) req.EyeYFeet = y.Value;
-                if (yaw.HasValue) req.HorizontalAngleDeg = yaw.Value;
-            });
+            // 2026-09-26 第六輪：編輯快速路徑（高度／俯仰角沿用相機目前實際值）。
+            OnFastPoseEdit(row, new CameraPoseEdit { EyeXFeet = x, EyeYFeet = y, YawDeg = yaw });
         }
 
         /// <summary>選到的相機若不在目前底圖所在樓層、且該樓層有現成的裁剪平面可用，自動切換底圖
@@ -1501,16 +1505,13 @@ namespace RevitMCP.UI
             }, "RefreshSelectedSectionLine");
         }
 
-        /// <summary>選用欄「平面 X/Y cm」就地編輯：換算成 feet 後沿用既有的「用目前 row 值補齊剩餘
-        /// 欄位」交易組裝邏輯（<see cref="OnGridFieldEditCommitted"/>），不重複實作。</summary>
+        /// <summary>選用欄「平面 X/Y cm」就地編輯：換算成 feet 後走編輯快速路徑（<see cref="OnFastPoseEdit"/>）。
+        /// 2026-09-26 第六輪：舊的 OnGridFieldEditCommitted（用清單列補齊全部欄位＋ApplyDetailEdit）已移除。</summary>
         private void OnPlaneFieldEditCommitted(CameraRow row, string axis, double valueCm)
         {
             double feet = CameraMath.MmToFeet(valueCm * 10.0);
-            OnGridFieldEditCommitted(row, req =>
-            {
-                if (axis == "X") req.EyeXFeet = feet;
-                else req.EyeYFeet = feet;
-            });
+            // 2026-09-26 第六輪：編輯快速路徑（只改這一軸，其餘沿用相機目前實際值）。
+            OnFastPoseEdit(row, axis == "X" ? new CameraPoseEdit { EyeXFeet = feet } : new CameraPoseEdit { EyeYFeet = feet });
         }
 
         // ══════════════════════════════════════════════════════════
@@ -2073,100 +2074,107 @@ namespace RevitMCP.UI
         /// （沿用既有 ApplyDetailEdit 的「一次寫齊」交易，不必為單一欄位另外開一套寫入邏輯）。</summary>
         private void OnNumericFieldEditCommitted(CameraRow row, string fieldKey, double value)
         {
-            OnGridFieldEditCommitted(row, req =>
-            {
-                if (fieldKey == "Height") req.HeightAboveLevelCm = value;
-                else if (fieldKey == "HAngle") req.HorizontalAngleDeg = value;
-                else if (fieldKey == "Pitch") req.PitchDeg = value;
-            });
+            // 2026-09-26 第六輪（核心功能：改離樓板高度後透視圖要馬上變）：編輯快速路徑。
+            var edit = new CameraPoseEdit();
+            if (fieldKey == "Height") edit.HeightAboveLevelCm = value;
+            else if (fieldKey == "HAngle") edit.YawDeg = value;
+            else if (fieldKey == "Pitch") edit.PitchDeg = value;
+            else return;
+            OnFastPoseEdit(row, edit);
         }
 
-        /// <summary>DataGrid 就地編輯與「選取中相機」卡片共用的組裝邏輯：從目前 row 的既有值
-        /// 組一份完整 <see cref="CameraEditRequest"/>，讓呼叫端只覆寫剛剛改的欄位。</summary>
-        /// <param name="afterApply">選用：編輯成功後在同一個 ExternalEvent 內接著執行（交易外），回傳要附加在狀態列的文字。</param>
-        /// <param name="onDone">選用：不論成敗，最後在 UI 執行緒呼叫一次。</param>
-        private void OnGridFieldEditCommitted(CameraRow row, Action<CameraEditRequest> overrideField,
-            Func<UIApplication, Document, string> afterApply = null, Action onDone = null)
+        /// <summary>
+        /// 2026-09-26 第六輪：清單數字欄／平面 X/Y／遠裁剪／地圖拖曳共用的編輯快速路徑。
+        ///   ① 優先佇列（插隊到讀快照／匯出底圖／相機變動後更新之前）排一個小交易：自動存「A案」＋一次 SetOrientation（＋遠裁剪），
+        ///      交易後立刻重繪透視圖（CameraManagerService.ApplyPoseEditFast）。不找房間、不讀其他相機、不碰 Key Plan。
+        ///   ② 回到 UI：用讀回的實際值就地更新這一列（不重讀整份清單；DocumentChanged 端也不會再排整份快照）。
+        ///   ③ 排入 800 ms 去抖的後續更新（同一台合併）：依變動種類只重畫需要的標記（見 UpdateCamerasAfterChange）。
+        /// 沒給的欄位沿用相機「目前實際」值——不再用清單列補齊（舊版清單列是舊資料時會把前一次編輯改回去）。
+        /// </summary>
+        private void OnFastPoseEdit(CameraRow row, CameraPoseEdit edit)
         {
             try
             {
-                OnGridFieldEditCommittedCore(row, overrideField, afterApply, onDone);
+                if (row == null || edit == null) return;
+                edit.ViewId = row.ViewId;
+                edit.LevelId = row.LevelId;
+                if (edit.HeightAboveLevelCm.HasValue && edit.LevelId == null)
+                {
+                    SetStatus("這台相機沒有可用的樓層基準，無法改離樓板高度。");
+                    return;
+                }
+                var hint = new CameraKeyPlanService.CameraPoseHint
+                {
+                    Eye = new XYZ(row.EyeXFeet, row.EyeYFeet, row.EyeZFeet),
+                    YawDeg = row.HorizontalAngleDeg,
+                    PitchDeg = row.PitchDeg,
+                    StoreyId = row.LevelId != null ? (long?)row.LevelId.GetIdValue() : null,
+                    ShapeChanged = edit.FarClipCm.HasValue,
+                    Source = "清單／地圖編輯"
+                };
+                ElementId editedId = row.ViewId;
+                long enqueuedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+                string what = edit.What();
+                SetStatus("套用" + what + "...");
+                CameraManagerEventQueue.EnqueuePriority("FastPoseEdit", uiApp =>
+                {
+                    long waitMs = (System.Diagnostics.Stopwatch.GetTimestamp() - enqueuedAt) * 1000 / System.Diagnostics.Stopwatch.Frequency;
+                    CameraPoseEditResult res;
+                    try
+                    {
+                        res = CameraManagerService.ApplyPoseEditFast(uiApp, uiApp?.ActiveUIDocument?.Document, edit, "面板", markInPlace: true, queueWaitMs: waitMs);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error("相機管理面板：編輯快速路徑失敗", ex);
+                        res = new CameraPoseEditResult { Error = "編輯相機失敗：" + ex.Message };
+                    }
+                    RunOnUiThread(() => OnFastPoseEditDone(editedId, what, res, hint, enqueuedAt));
+                });
             }
             catch (Exception ex)
             {
-                Logger.Error("相機管理面板：套用清單編輯失敗", ex);
-                try { onDone?.Invoke(); } catch { }
+                Logger.Error("相機管理面板：排入編輯快速路徑失敗", ex);
             }
         }
 
-        private void OnGridFieldEditCommittedCore(CameraRow row, Action<CameraEditRequest> overrideField,
-            Func<UIApplication, Document, string> afterApply, Action onDone)
+        private void OnFastPoseEditDone(ElementId editedId, string what, CameraPoseEditResult res, CameraKeyPlanService.CameraPoseHint hint, long enqueuedAt)
         {
-            // 2026-09-25：組裝搬到 CameraManagerService.BuildEditRequestFromRow（set_camera_pose 共用）。
-            CameraEditRequest req = CameraManagerService.BuildEditRequestFromRow(row);
-            overrideField(req);
-
-            if (req.LevelId == null)
+            if (res.Error != null)
             {
-                SetStatus("這台相機沒有可用的樓層基準，無法編輯。");
-                onDone?.Invoke();
+                SetStatus(res.Error);
+                _listSection.UpdateRowInPlace(editedId, null); // 文字還原成原值
                 return;
             }
-
-            SetStatus("套用編輯中...");
-            // 2026-09-26 第四輪：變動前的姿態（清單列舊值）→ 相機更新判斷「移動 > 300 mm／轉 > 5°」要不要重算 Key Plan。
-            var hint = new CameraKeyPlanService.CameraPoseHint
+            // 就地更新：面板目前 _rows 裡那一列（清單可能已被別的快照換過，一律以 Id 找）。
+            CameraRow r = _rows?.FirstOrDefault(x => x.ViewId == editedId);
+            bool xyOrYaw = false;
+            if (r != null)
             {
-                Eye = new XYZ(row.EyeXFeet, row.EyeYFeet, row.EyeZFeet),
-                YawDeg = row.HorizontalAngleDeg,
-                Source = "清單／地圖編輯"
-            };
-            ElementId editedId = row.ViewId;
-            RunSuppressed(() => EnqueueRevit(uiApp =>
-            {
-                string err = null, extra = null;
-                try
+                xyOrYaw = Math.Abs(r.EyeXFeet - res.EyeXFeet) > 1e-6 || Math.Abs(r.EyeYFeet - res.EyeYFeet) > 1e-6 || Math.Abs(r.HorizontalAngleDeg - res.YawDeg) > 0.005;
+                r.EyeXFeet = res.EyeXFeet; r.EyeYFeet = res.EyeYFeet; r.EyeZFeet = res.EyeZFeet;
+                r.ForwardXFeet = res.ForwardX; r.ForwardYFeet = res.ForwardY; r.ForwardZFeet = res.ForwardZ;
+                r.HorizontalAngleDeg = res.YawDeg;
+                r.PitchDeg = res.PitchDeg;
+                if (res.HeightAboveLevelCm.HasValue)
                 {
-                    Document doc = uiApp?.ActiveUIDocument?.Document;
-                    err = CameraManagerService.ApplyDetailEdit(doc, req);
-                    // 2026-09-26 第四輪（使用者：改了數字透視圖有時沒動）：透視圖開著就重繪。
-                    if (err == null)
-                    {
-                        string how = CameraManagerService.RefreshCameraViewIfOpen(uiApp, editedId);
-                        Logger.Info($"相機管理面板：編輯後重繪透視圖（{how}）。");
-                    }
-                    if (err == null && afterApply != null && doc != null)
-                    {
-                        try { extra = afterApply(uiApp, doc); }
-                        catch (Exception ex)
-                        {
-                            Logger.Error("相機管理面板：編輯後續動作失敗", ex);
-                            extra = "；後續動作失敗：" + ex.Message;
-                        }
-                    }
+                    r.HeightAboveLevelCm = res.HeightAboveLevelCm;
+                    r.HeightWarning = res.HeightAboveLevelCm.Value < CameraManagerService.LowHeightWarningCm ? "偏低"
+                        : res.HeightAboveLevelCm.Value > CameraManagerService.HighHeightWarningCm ? "偏高" : "";
                 }
-                catch (Exception ex)
-                {
-                    Logger.Error("相機管理面板：套用編輯失敗", ex);
-                    err = err ?? ("套用編輯失敗：" + ex.Message);
-                }
-                RunOnUiThread(() =>
-                {
-                    try
-                    {
-                        SetStatus((err ?? "已套用編輯。") + (extra ?? ""));
-                        EndSuppressed();
-                        RefreshListOnly();
-                        // 2026-09-26 第四輪：與導覽監看同一條更新路徑（標記＋扇形；移動大時重算 Key Plan）。DocumentChanged 也會排入同一台，
-                        // 去抖合併；姿態雜湊相同的第二次自動略過。
-                        if (err == null) QueueCameraUpdate(editedId, hint);
-                    }
-                    finally
-                    {
-                        try { onDone?.Invoke(); } catch (Exception ex) { Logger.Error("相機管理面板：編輯完成回呼失敗", ex); }
-                    }
-                });
-            }));
+                if (res.FarClipCm.HasValue) r.FarClipCm = res.FarClipCm;
+                if (res.Changed) r.CurrentVersionName = null; // 已偏離任何版本（下一次快照會重算）
+                if (res.SavedOriginalVersion && r.VersionNames != null && !r.VersionNames.Contains(CameraKeyPlanService.OriginalVersionName))
+                    r.VersionNames.Add(CameraKeyPlanService.OriginalVersionName);
+            }
+            _listSection.UpdateRowInPlace(editedId, r);
+            if (xyOrYaw) _keyPlanSection.RedrawMarkers(_rows, _hasCroppedPlan);
+            long uiMs = (System.Diagnostics.Stopwatch.GetTimestamp() - enqueuedAt) * 1000 / System.Diagnostics.Stopwatch.Frequency;
+            Logger.Info($"⏱ {what}編輯 → 清單列就地更新 {uiMs}ms（自按下 Enter 起；Revit 端 total={res.TotalMs + res.QueueWaitMs}ms）");
+            SetStatus(res.Changed
+                ? $"已套用{what}（{res.TotalMs + res.QueueWaitMs} ms）；Key Plan 標記稍後自動更新。"
+                : "數值與相機目前相同，未變更。");
+            if (res.Changed) QueueCameraUpdate(editedId, hint);
         }
 
         // ══════════════════════════════════════════════════════════
@@ -2740,6 +2748,8 @@ namespace RevitMCP.UI
                 {
                     _markerRefreshPending.Add(cameraId);
                     if (hint != null && !_poseHints.ContainsKey(cameraId)) _poseHints[cameraId] = hint;
+                    else if (hint != null && _poseHints.TryGetValue(cameraId, out var first) && first != null && first.ShapeChanged == false)
+                        first.ShapeChanged = hint.ShapeChanged; // 2026-09-26 第六輪：去抖合併——任一次改了視野形狀就算有改（null＝未知）
                     // 導覽變動沒有 DocumentChanged → 清單（離樓板、角度）也不會自己刷新；更新後補一次輕量清單刷新。
                     if (hint?.Before != null) _listRefreshAfterUpdate = true;
                     EnsureMarkerRefreshTimer();
@@ -2830,7 +2840,12 @@ namespace RevitMCP.UI
                                 catch (Exception exO) { Logger.Error("相機管理面板：清除孤兒標記失敗", exO); }
                             }
                             // 2026-09-26 第四輪（D-041）：增量更新（姿態沒變的相機略過）；移動 > 300 mm 或轉 > 5° 且有 Key Plan → 重算 Key Plan 範圍。
-                            if (batch.Count > 0) updateSummary = CameraKeyPlanService.UpdateCamerasAfterChange(uiApp, doc, batch, hints, out n);
+                            // 2026-09-26 第六輪：分級（高度→只剖面標記、水平角→平面＋剖面標記、同房間移動→剖面對位、換樓層／房間→完整 Key Plan）。
+                            if (batch.Count > 0)
+                            {
+                                updateSummary = CameraKeyPlanService.UpdateCamerasAfterChange(uiApp, doc, batch, hints, out n, out bool storeyOrRoom);
+                                if (storeyOrRoom) _listRefreshAfterUpdate = true; // 樓層欄／室內外要重讀（清單列就地更新沒有算樓層）
+                            }
                             if (levelMarks)
                             {
                                 try { CameraKeyPlanService.UpdateLevelMarksFromLevels(doc); }
