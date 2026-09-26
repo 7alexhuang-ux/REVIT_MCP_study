@@ -34,12 +34,12 @@ namespace RevitMCP.UI
     ///   v4（2026-09-24 第三輪實測回報）：「選取中相機」卡片整個拿掉（DataGrid 單擊即編輯＋
     ///   新增「↗」欄取代雙擊跳轉，卡片欄位移進 DataGrid 選用欄位）。
     ///   v5（同日，第四輪）：拿掉「↗」欄；名稱欄改成唯讀，單擊直接觸發「開啟動作」（預設
-    ///   一鍵 4 視圖，跟動作列按鈕同一條路徑）；地圖標記左鍵單擊同樣行為；DataGrid 列與地圖
+    ///   一鍵 4 視圖，跟動作列按鈕同一條路徑）；（2026-09-26 起名稱／地圖標記都改為「雙擊」＝開啟動作、單擊＝只選取）；DataGrid 列與地圖
     ///   標記都新增右鍵選單（一鍵 4 視圖／僅打開透視圖／重新命名…／複製到其他樓層…／重設
     ///   剖面到視線），重新命名從「就地編輯」改成右鍵選單裡的小型主題化輸入 Popup（見
     ///   ShowRenamePopup）。版面固定：
     ///     標題列（搜尋、重新整理、從透視圖同步、匯出 Excel、開啟預覽視窗）
-    ///     → 相機 DataGrid（點名稱開 4 視圖、點數字直接修改、右鍵更多；右鍵標題可勾選選用欄位）
+    ///     → 相機 DataGrid（雙擊名稱開 4 視圖、點數字直接修改、右鍵更多；右鍵標題可勾選選用欄位）
     ///     → GridSplitter（可拖曳，位置存在 <see cref="CameraManagerSettings.CameraTabListFraction"/>）
     ///     → 迷你 key plan（底圖 combo 疊在右上角，支援滾輪縮放／拖曳平移／符合畫面）
     ///     → 動作列（一鍵 4 視圖＋等角範圍 combo＋重設剖面位置、並排、還原、複製到其他樓層）
@@ -418,6 +418,16 @@ namespace RevitMCP.UI
             _toolbarMenu = NewThemedMenu();
             _toolbarMenu.Items.Add(NewMenuItem("匯出 Excel", "① 匯出 Excel：把目前相機清單匯出成 Excel 檔", OnExportExcelRequested, "ExportExcel"));
             _toolbarMenu.Items.Add(NewMenuItem("開啟預覽視窗", "① 開啟預覽視窗：用獨立小視窗顯示選取相機的透視圖＋所在樓層平面兩格預覽", OpenPreviewWindow, "OpenPreview"));
+            // 2026-09-26 第四輪（使用者：橘色列是什麼意思？）：② 清單圖例（300 px 提示列放不下，改放這裡＋列 ToolTip）。
+            _toolbarMenu.Items.Add(new Separator());
+            WpfMenuItem legend = NewMenuItem("圖例：橘色列＝離樓板高度不在 120–200 cm",
+                "② 相機清單圖例：橘色底＝離樓板高度 < 120 cm 或 > 200 cm（人視高可能偏低／偏高）；粗體＋左側藍條＝目前正在看的透視相機；藍色底＝選取中", null, "LegendOrange");
+            legend.IsEnabled = false;
+            ToolTipService.SetShowOnDisabled(legend, true);
+            _toolbarMenu.Items.Add(legend);
+            WpfMenuItem legend2 = NewMenuItem("圖例：粗體＋左藍條＝目前正在看的相機", null, null, "LegendActive");
+            legend2.IsEnabled = false;
+            _toolbarMenu.Items.Add(legend2);
             return _toolbarMenu;
         }
 
@@ -432,11 +442,13 @@ namespace RevitMCP.UI
             _fourViewsMenu.Items.Add(_isoFullItem);
             _fourViewsMenu.Items.Add(_isoLevelItem);
             _fourViewsMenu.Items.Add(new Separator());
-            // 2026-09-26（使用者要求，D-038）：等角近側牆——室內相機觀看者側兩道牆切掉（預設）或保留
-            const string nearTip = "④ 等角近側牆（室內相機）：切掉（預設）＝等角是從角落看，最靠近觀看者的兩面剖面框改到房間邊界往內 100 mm，把擋住室內的兩道牆切掉；遠側兩面維持房間 +0.6 m（牆保留）。保留＝四面都留牆。室外相機不受影響（下次一鍵 4 視圖套用）";
-            _nearCutItem = NewMenuItem("等角近側牆：切掉（預設）", nearTip, () => SetIsoNearWalls(CameraIsoNearWallsMode.Cut), "IsoNearCut");
-            _nearKeepItem = NewMenuItem("等角近側牆：保留", nearTip, () => SetIsoNearWalls(CameraIsoNearWallsMode.Keep), "IsoNearKeep");
-            _nearCutItem.IsCheckable = false; _nearKeepItem.IsCheckable = false;
+            // 2026-09-26（D-038）→ 同日第四輪（使用者決策，D-039）：等角近側——相機位置（預設）／牆內側／保留
+            const string nearTip = "④ 等角近側（室內相機，等角從角落看）：相機位置（預設）＝最靠近觀看者的兩面剖面框剛好放在眼睛的 X／Y（不留後退距離）；牆內側＝兩面切到房間邊界往內 100 mm（切掉擋住室內的兩道牆）；保留＝不切。遠側兩面維持房間 +0.6 m。室外相機不受影響（下次一鍵 4 視圖套用）";
+            _nearCameraItem = NewMenuItem("等角近側：相機位置（預設）", nearTip, () => SetIsoNearWalls(CameraIsoNearWallsMode.Camera), "IsoNearCamera");
+            _nearCutItem = NewMenuItem("等角近側：牆內側", nearTip, () => SetIsoNearWalls(CameraIsoNearWallsMode.Wall), "IsoNearWall");
+            _nearKeepItem = NewMenuItem("等角近側：保留", nearTip, () => SetIsoNearWalls(CameraIsoNearWallsMode.Keep), "IsoNearKeep");
+            _nearCameraItem.IsCheckable = false; _nearCutItem.IsCheckable = false; _nearKeepItem.IsCheckable = false;
+            _fourViewsMenu.Items.Add(_nearCameraItem);
             _fourViewsMenu.Items.Add(_nearCutItem);
             _fourViewsMenu.Items.Add(_nearKeepItem);
             _fourViewsMenu.Items.Add(new Separator());
@@ -484,13 +496,14 @@ namespace RevitMCP.UI
             bool sight = ConfigManager.Instance.Settings.CameraManager.SectionOrientationMode == CameraSectionOrientationMode.AlongSightLine;
             if (_secRoomAxisItem != null) _secRoomAxisItem.IsChecked = !sight;
             if (_secSightItem != null) _secSightItem.IsChecked = sight;
-            bool keep = ConfigManager.Instance.Settings.CameraManager.IsoNearWalls == CameraIsoNearWallsMode.Keep;
-            if (_nearCutItem != null) _nearCutItem.IsChecked = !keep;
-            if (_nearKeepItem != null) _nearKeepItem.IsChecked = keep;
+            CameraIsoNearWallsMode near = ConfigManager.Instance.Settings.CameraManager.IsoNearWalls;
+            if (_nearCameraItem != null) _nearCameraItem.IsChecked = near == CameraIsoNearWallsMode.Camera;
+            if (_nearCutItem != null) _nearCutItem.IsChecked = near == CameraIsoNearWallsMode.Wall;
+            if (_nearKeepItem != null) _nearKeepItem.IsChecked = near == CameraIsoNearWallsMode.Keep;
         }
 
         private WpfMenuItem _secRoomAxisItem, _secSightItem;
-        private WpfMenuItem _nearCutItem, _nearKeepItem;
+        private WpfMenuItem _nearCameraItem, _nearCutItem, _nearKeepItem;
 
         private void SetIsoNearWalls(CameraIsoNearWallsMode mode)
         {
@@ -498,9 +511,9 @@ namespace RevitMCP.UI
             ConfigManager.Instance.SaveSettings();
             UpdateIsoMenuChecks();
             Logger.Info("相機管理面板：等角近側牆 → " + mode);
-            SetStatus(mode == CameraIsoNearWallsMode.Keep
-                ? "等角近側牆：保留——下次一鍵 4 視圖套用。"
-                : "等角近側牆：切掉——下次一鍵 4 視圖套用。");
+            SetStatus(mode == CameraIsoNearWallsMode.Keep ? "等角近側：保留——下次一鍵 4 視圖套用。"
+                : mode == CameraIsoNearWallsMode.Wall ? "等角近側：牆內側——下次一鍵 4 視圖套用。"
+                : "等角近側：相機位置——下次一鍵 4 視圖套用。");
         }
 
         private void SetSectionOrientationMode(CameraSectionOrientationMode mode)
@@ -821,17 +834,19 @@ namespace RevitMCP.UI
             _presetsSection.CopyToLevelsRequested += OnCopyToLevelsRequested;
 
             _keyPlanSection.PlanSelected += plan => RefreshBaseMap(plan.ViewId);
-            // 左鍵點地圖上的相機標記＝選取＋直接跑開啟動作（預設一鍵 4 視圖，規格 4.9 C）；
+            // 2026-09-26 第四輪（使用者決策）：地圖標記單擊＝只選取；雙擊＝開啟動作（一鍵 4 視圖）；
             // 右鍵點標記＝同一顆相機的右鍵選單（跟 DataGrid 列右鍵選單共用 ShowCameraContextMenu）。
+            _keyPlanSection.MarkerSelected += row => SafeUiAction(() => OnMarkerSelected(row), "MarkerSelected");
             _keyPlanSection.MarkerActivated += RunConfiguredOpenAction;
             _keyPlanSection.MarkerContextMenuRequested += ShowCameraContextMenu;
+            _keyPlanSection.CameraDragCommitted += (row, x, y, yaw) => SafeUiAction(() => OnMapDragCommitted(row, x, y, yaw), "MapDragCommitted");
 
             _multiView.SideBySideRequested += DoSideBySide;
             _multiView.RestoreRequested += DoRestore;
         }
 
         // ══════════════════════════════════════════════════════════
-        // 4.9 C：點名稱／點地圖標記＝直接開啟動作；右鍵＝更多動作選單
+        // 4.9 C：雙擊名稱／雙擊地圖標記＝直接開啟動作（2026-09-26 起，單擊＝只選取）；右鍵＝更多動作選單
         // ══════════════════════════════════════════════════════════
 
         /// <summary>2026-09-24 崩潰修復：跟底圖匯出（_baseMapRefreshInFlight）同一套道理——
@@ -840,7 +855,7 @@ namespace RevitMCP.UI
         private bool _fourViewsInFlight;
         private bool _schemaSelfChecked;
 
-        /// <summary>名稱欄單擊、地圖標記左鍵單擊、右鍵選單「一鍵 4 視圖」共用的進入點：先確保
+        /// <summary>名稱欄雙擊、地圖標記雙擊、右鍵選單「一鍵 4 視圖」共用的進入點：先確保
         /// 這台相機在清單裡被選取（DataGrid 選取狀態＋地圖高亮都要同步），再跑一鍵 4 視圖
         /// （沿用目前的等角範圍設定，跟動作列按鈕完全相同的程式路徑，見 RunOneClickFourViews）。</summary>
         private void RunConfiguredOpenAction(CameraRow row)
@@ -866,10 +881,10 @@ namespace RevitMCP.UI
                 // 2026-09-24 第四輪：只建立一次、重複使用（過去每次右鍵都 new 一個 ContextMenu）。
                 _cameraMenu = NewThemedMenu();
                 _cameraMenu.Items.Add(NewMenuItem("一鍵 4 視圖", "一鍵 4 視圖：建立或更新這台相機的 Key Plan 平面／剖面／等角並並排", () => RunConfiguredOpenAction(_cameraMenuRow), "CtxFourViews"));
-                _cameraMenu.Items.Add(NewMenuItem("僅打開透視圖", "僅打開透視圖：切換到這台相機的透視圖，不建立 Key Plan", () =>
+                _cameraMenu.Items.Add(NewMenuItem("僅打開透視圖", "僅打開透視圖：切換到這台相機的透視圖並關閉其他所有視圖（同一鍵 4 視圖的關閉邏輯），不建立 Key Plan", () =>
                 {
                     CameraRow r = _cameraMenuRow; if (r == null) return;
-                    _listSection.SelectByViewId(r.ViewId); JumpToView(r.ViewId);
+                    _listSection.SelectByViewId(r.ViewId); OpenPerspectiveOnly(r.ViewId);
                 }, "CtxOpenOnly"));
                 _cameraMenu.Items.Add(NewMenuItem("一鍵出圖紙", SheetTip, () =>
                 {
@@ -1143,8 +1158,9 @@ namespace RevitMCP.UI
                                   (skipped > 0 ? $"、略過 {skipped}" : "") + "）" + (r.RanFourViews ? "；已先建立 Key Plan" : "") +
                                   (r.Warnings.Count > 0 ? "。注意：" + string.Join("；", r.Warnings) : "。") +
                                   "提示：圖紙上的透視圖大小請在 Revit 選取視埠後「裁剪區域大小 → 縮放（鎖定比例）」手動調整。";
-                            try { uiApp.ActiveUIDocument.RequestViewChange(doc.GetElement(r.SheetId) as View); }
-                            catch (Exception exOpen) { Logger.Error("相機管理面板：開啟相機圖紙失敗", exOpen); }
+                            // 2026-09-26 第四輪（使用者：出完圖紙要直接看到圖紙）：啟動圖紙並關閉其他視圖（含 Key Plan 4 張）。
+                            string showErr = CameraManagerService.ShowOnlyView(uiApp, r.SheetId);
+                            if (showErr != null) msg += "（開啟圖紙失敗：" + showErr + "）";
                         }
                     }
                 }
@@ -1179,10 +1195,17 @@ namespace RevitMCP.UI
                 return;
             }
             _versionRoot.Items.Add(new Separator());
+            // 2026-09-26 第四輪：新到舊（快照已排序）；目前視角符合的版本打 ✓（眼睛 1 mm、方向 0.05° 內）。
+            string current = row?.CurrentVersionName;
             foreach (string n in names)
             {
                 string nn = n;
-                _versionRoot.Items.Add(NewMenuItem(nn, $"還原到版本「{nn}」（一個交易「還原相機視角：{nn}」，可復原）", () => DoRestoreVersion(_cameraMenuRow, nn), "VersionRestore"));
+                bool isCur = current != null && current == nn;
+                WpfMenuItem it = NewMenuItem(isCur ? nn + "  ✓ 目前" : nn,
+                    isCur ? $"「{nn}」＝目前視角（還原不會改變任何東西）" : $"還原到版本「{nn}」（一個交易「還原相機視角：{nn}」，可復原；目前視角不在任何版本裡時會先自動備份）",
+                    () => DoRestoreVersion(_cameraMenuRow, nn), "VersionRestore");
+                if (isCur) it.FontWeight = FontWeights.SemiBold;
+                _versionRoot.Items.Add(it);
             }
             _versionRoot.Items.Add(new Separator());
             WpfMenuItem del = NewMenuItem("刪除版本", "刪除版本：只移除儲存的版本資料，相機本身不動", null, "VersionDeleteRoot");
@@ -1194,17 +1217,8 @@ namespace RevitMCP.UI
             _versionRoot.Items.Add(del);
         }
 
-        private static string SuggestVersionName(CameraRow row)
-        {
-            int n = row?.VersionNames?.Count ?? 0;
-            var existing = new HashSet<string>(row?.VersionNames ?? new List<string>());
-            for (int i = n; i < n + 26; i++)
-            {
-                string s = i < 26 ? ((char)('A' + i)) + " 案" : "版本 " + (i + 1);
-                if (!existing.Contains(s)) return s;
-            }
-            return "版本 " + (n + 1);
-        }
+        /// <summary>2026-09-26 第四輪：下一個空的字母名稱（A案 已被自動存成原始視角時預設「B案」）。</summary>
+        private static string SuggestVersionName(CameraRow row) => CameraKeyPlanService.SuggestNextVersionName(row?.VersionNames);
 
         private void DoSaveVersion(CameraRow row, string name)
         {
@@ -1364,8 +1378,36 @@ namespace RevitMCP.UI
             CameraRow primary = selected.FirstOrDefault();
             _keyPlanSection.HighlightSelected(primary?.ViewId);
             if (!userInitiated) return;
+            // 2026-09-26 第四輪：單擊清單列＝只選取——地圖高亮、需要時換到該樓層底圖（底圖點陣有快取就不呼叫 Revit）、置中；
+            // 不做一鍵 4 視圖、不改模型。
             MaybeAutoSwitchBaseMapForSelection(primary);
+            try { if (primary?.ViewId != null) _keyPlanSection.CenterOnCamera(primary.ViewId); } catch (Exception ex) { Logger.Error("相機管理面板：選取後置中失敗", ex); }
             RefreshSelectedSectionLine(primary);
+        }
+
+        /// <summary>2026-09-26 第四輪：地圖標記單擊＝選取（同清單單擊，但相機已在目前底圖上 → 不換底圖）。</summary>
+        private void OnMarkerSelected(CameraRow row)
+        {
+            if (row == null) return;
+            _listSection.SelectByViewId(row.ViewId);
+            _keyPlanSection.HighlightSelected(row.ViewId);
+            RefreshSelectedSectionLine(row);
+        }
+
+        /// <summary>
+        /// 2026-09-26 第四輪（使用者要求）：地圖上拖曳移動／旋轉相機，放開時送出一次編輯——與 set_camera_pose／清單編輯同一條路徑
+        /// （BuildEditRequestFromRow＋ApplyDetailEdit：離樓板高度與方向維持，只改 XY 或水平角），之後照常去抖更新標記／Key Plan。
+        /// 拖曳過程完全不呼叫 Revit；底圖不重新匯出（樓層沒變時沿用目前底圖）。
+        /// </summary>
+        private void OnMapDragCommitted(CameraRow row, double? x, double? y, double? yaw)
+        {
+            if (row == null) return;
+            OnGridFieldEditCommitted(row, req =>
+            {
+                if (x.HasValue) req.EyeXFeet = x.Value;
+                if (y.HasValue) req.EyeYFeet = y.Value;
+                if (yaw.HasValue) req.HorizontalAngleDeg = yaw.Value;
+            });
         }
 
         /// <summary>選到的相機若不在目前底圖所在樓層、且該樓層有現成的裁剪平面可用，自動切換底圖
@@ -1459,6 +1501,7 @@ namespace RevitMCP.UI
         {
             if (_suppressLiveSync) return;
             _armed = true;
+            ClearBaseMapCache(); // 2026-09-26 第四輪：使用者明確「重新整理」＝底圖一定重新匯出
             if (!_schemaSelfChecked)
             {
                 // 面板第一次被使用者明確載入時做一次 ES Schema 自我檢查（需要 API context，所以不在
@@ -1483,13 +1526,26 @@ namespace RevitMCP.UI
             RequestSnapshot(exportBaseMap: false, reason: "RefreshListOnly");
         }
 
+        /// <summary>2026-09-26 第四輪：佇列中已有一個尚未開始的快照讀取 → 新要求合併進去（不重複讀）。</summary>
+        private volatile bool _snapshotQueued;
+        private bool _snapshotQueuedExport;
+
         private void RequestSnapshot(bool exportBaseMap, string reason)
         {
+            if (_snapshotQueued && (!exportBaseMap || _snapshotQueuedExport))
+            {
+                Logger.Info($"相機管理面板：{reason}——已有快照排在佇列中，合併（不重複讀）。");
+                return;
+            }
             Logger.Info($"相機管理面板：{reason} 開始。");
             SetStatus("讀取相機清單...");
             int gen = _generation;
+            _snapshotQueued = true;
+            _snapshotQueuedExport = exportBaseMap;
             EnqueueRevit(uiApp =>
             {
+                _snapshotQueued = false;
+                _snapshotQueuedExport = false;
                 Document doc = uiApp?.ActiveUIDocument?.Document;
                 CameraManagerSnapshot snapshot = CameraManagerService.ReadSnapshot(doc);
                 try { snapshot.ActiveViewId = uiApp?.ActiveUIDocument?.ActiveView?.Id; } catch { snapshot.ActiveViewId = null; }
@@ -1508,6 +1564,8 @@ namespace RevitMCP.UI
         public void OnRevitDocumentEvent(Document doc)
         {
             if (_suppressLiveSync || !_armed) return;
+            // 2026-09-26 第四輪：已經有一個快照排在佇列裡（例如一鍵 4 視圖結束的 RefreshListOnly）→ 那一個會讀到最新狀態，這次不重複讀。
+            if (_snapshotQueued) { Logger.Info("相機管理面板：live sync 略過（已有快照排在佇列中）。"); return; }
             Logger.Info("相機管理面板：live sync 讀取快照（僅更新清單）。");
             CameraManagerSnapshot snapshot = CameraManagerService.ReadSnapshot(doc);
             string key = GetDocumentKey(doc);
@@ -1535,8 +1593,11 @@ namespace RevitMCP.UI
             {
                 if (gen != _generation || !_armed || _followInProgress) return;
                 _followInProgress = true;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 try
                 {
+                    // 2026-09-26 第四輪：清單標示目前正在看的相機（粗體＋左側 accent 條）。
+                    _listSection.SetActiveCameraId(viewId);
                     CameraRow row = _rows?.FirstOrDefault(r => r.ViewId == viewId);
                     if (row == null)
                     {
@@ -1556,8 +1617,16 @@ namespace RevitMCP.UI
                 finally
                 {
                     _followInProgress = false;
+                    Logger.Info($"⏱ 跟隨作用中透視圖（UI 執行緒：選取＋地圖）{sw.ElapsedMilliseconds} ms");
                 }
             });
+        }
+
+        /// <summary>2026-09-26 第四輪：作用中視圖不是透視相機 → 清掉清單上的「目前檢視中」標示。</summary>
+        public void OnActiveViewIsNotCamera()
+        {
+            if (!_armed) return;
+            RunOnUiThread(() => { try { _listSection.SetActiveCameraId(null); } catch (Exception ex) { Logger.Error("相機管理面板：清除目前檢視標示失敗", ex); } });
         }
 
         /// <summary>待跟隨的新相機（不在清單時記下，快照套用後處理）。</summary>
@@ -1651,6 +1720,8 @@ namespace RevitMCP.UI
                 _sideBySidePreviousActiveViewId = null;
                 _multiView.SetRestoreEnabled(false);
                 _markerRefreshPending.Clear();
+                _poseHints.Clear();
+                ClearBaseMapCache();
                 _markerRefreshTimer?.Stop();
                 _presetsSection.CloseAllPopups();
                 foreach (WpfContextMenu m in new[] { _toolbarMenu, _fourViewsMenu, _moreMenu, _cameraMenu })
@@ -1740,6 +1811,14 @@ namespace RevitMCP.UI
                 _keyPlanSection.HighlightSelected(defaultRow.ViewId);
             }
 
+            try
+            {
+                // live sync 的快照沒有作用中視圖（null）→ 不動目前標示（由 ViewActivated 跟隨路徑維護）。
+                ElementId act = snapshot.ActiveViewId;
+                if (act != null) _listSection.SetActiveCameraId(_rows.Any(r => r.ViewId == act) ? act : null);
+            }
+            catch (Exception exAct) { Logger.Error("相機管理面板：標示目前檢視中的相機失敗", exAct); }
+
             // 2026-09-25：作用中透視圖是新相機時，快照套用後補跟隨（見 OnActivePerspectiveChanged）。
             try { TryFollowPendingAfterSnapshot(); }
             catch (Exception ex) { Logger.Error("相機管理面板：快照後跟隨新相機失敗", ex); }
@@ -1749,6 +1828,70 @@ namespace RevitMCP.UI
         // 4.8 底圖
         // ══════════════════════════════════════════════════════════
 
+        // ── 2026-09-26 第四輪（使用者：「每點一個視圖都會卡一下」）：底圖點陣快取 ──
+        // 鍵＝平面 Id；有效條件＝同一份文件、模型 epoch 沒變（相機以外的元素沒改）、底圖是本工具視圖時 OwnViewsEpoch 也沒變。
+        // 命中 → 直接用記憶體裡的點陣重畫，不呼叫 Revit（不匯出）。最多留 6 張（約 1600 px PNG 解碼後每張數 MB）。
+        private sealed class BaseMapCacheEntry
+        {
+            public BitmapSource Bitmap;
+            public BaseMapSnapshot Map;
+            public int ModelEpoch;
+            public int OwnEpoch;
+            public string DocKey;
+        }
+        private readonly Dictionary<long, BaseMapCacheEntry> _baseMapCache = new Dictionary<long, BaseMapCacheEntry>();
+        private readonly List<long> _baseMapCacheOrder = new List<long>();
+        private const int BaseMapCacheMax = 6;
+
+        private void ClearBaseMapCache()
+        {
+            _baseMapCache.Clear();
+            _baseMapCacheOrder.Clear();
+        }
+
+        private void PutBaseMapCache(long id, BaseMapCacheEntry e)
+        {
+            _baseMapCache[id] = e;
+            _baseMapCacheOrder.Remove(id);
+            _baseMapCacheOrder.Add(id);
+            while (_baseMapCacheOrder.Count > BaseMapCacheMax)
+            {
+                _baseMapCache.Remove(_baseMapCacheOrder[0]);
+                _baseMapCacheOrder.RemoveAt(0);
+            }
+        }
+
+        /// <summary>快取命中就直接畫（不呼叫 Revit）並回傳 true。</summary>
+        private bool TryDrawCachedBaseMap(ElementId planViewId)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            long id = planViewId.GetIdValue();
+            if (!_baseMapCache.TryGetValue(id, out BaseMapCacheEntry e)) return false;
+            bool valid = e.DocKey == _loadedDocKey && e.ModelEpoch == CameraKeyPlanService.ModelEpoch &&
+                         (!e.Map.IsOwnView || e.OwnEpoch == CameraKeyPlanService.OwnViewsEpoch);
+            if (!valid)
+            {
+                _baseMapCache.Remove(id);
+                _baseMapCacheOrder.Remove(id);
+                Logger.Info($"相機管理面板：底圖快取 planViewId={id} 已過期（模型或 Key Plan 視圖變了），重新匯出。");
+                return false;
+            }
+            _currentBaseMapPlanId = planViewId;
+            _keyPlanSection.DrawWithBaseMap(e.Bitmap, e.Map, _rows);
+            _listSection.RefreshStatusColumn();
+            if (_followCenterPendingViewId != null)
+            {
+                ElementId follow = _followCenterPendingViewId;
+                _followCenterPendingViewId = null;
+                try { _keyPlanSection.CenterOnCamera(follow); } catch (Exception exFollow) { Logger.Error("相機管理面板：跟隨置中失敗", exFollow); }
+            }
+            _keyPlanSection.HighlightSelected(GetPrimarySelectedRow()?.ViewId);
+            _baseMapCacheOrder.Remove(id);
+            _baseMapCacheOrder.Add(id);
+            Logger.Info($"⏱ 底圖快取命中 planViewId={id}（不匯出）重畫 {sw.ElapsedMilliseconds} ms");
+            return true;
+        }
+
         private void RefreshBaseMap(ElementId planViewId)
         {
             // 2026-09-24 崩潰修復：重入防護——選取變化很快（例如「預設選取」＋「自動切換底圖」
@@ -1757,6 +1900,8 @@ namespace RevitMCP.UI
             // 保證，一律以「目前這次為準，重複的先丟掉」處理，等目前這次跑完（見
             // OnBaseMapReady 的 finally）之後，使用者仍可用「重新整理」/「從透視圖同步」再要一次。
             if (planViewId == null || planViewId == ElementId.InvalidElementId) return;
+            try { if (!_baseMapRefreshInFlight && TryDrawCachedBaseMap(planViewId)) return; }
+            catch (Exception exCache) { Logger.Error("相機管理面板：底圖快取重畫失敗（改為匯出）", exCache); }
             if (_baseMapRefreshInFlight)
             {
                 // 2026-09-24 第二輪：不再丟掉——記下最後一個要求，目前這次結束後接著匯出。
@@ -1772,6 +1917,7 @@ namespace RevitMCP.UI
             EnqueueRevit(uiApp =>
             {
                 BaseMapSnapshot map = null;
+                int modelEpoch = CameraKeyPlanService.ModelEpoch, ownEpoch = CameraKeyPlanService.OwnViewsEpoch;
                 try
                 {
                     Document doc = uiApp?.ActiveUIDocument?.Document;
@@ -1787,12 +1933,12 @@ namespace RevitMCP.UI
                 {
                     // 不論成功失敗，一定要回到 UI 執行緒清掉 _baseMapRefreshInFlight。
                     BaseMapSnapshot result = map ?? new BaseMapSnapshot { ErrorMessage = "底圖匯出失敗。" };
-                    RunOnUiThread(() => OnBaseMapReady(result, planViewId, gen));
+                    RunOnUiThread(() => OnBaseMapReady(result, planViewId, gen, modelEpoch, ownEpoch));
                 }
             });
         }
 
-        private void OnBaseMapReady(BaseMapSnapshot map, ElementId planViewId, int generation)
+        private void OnBaseMapReady(BaseMapSnapshot map, ElementId planViewId, int generation, int modelEpoch = -1, int ownEpoch = -1)
         {
             if (generation != _generation)
             {
@@ -1829,9 +1975,13 @@ namespace RevitMCP.UI
                     return;
                 }
                 CameraManagerService.CleanupTempDir(map.TempDirectory);
+                if (modelEpoch >= 0)
+                    PutBaseMapCache(planViewId.GetIdValue(), new BaseMapCacheEntry { Bitmap = bitmap, Map = map, ModelEpoch = modelEpoch, OwnEpoch = ownEpoch, DocKey = _loadedDocKey });
 
+                var swDraw = System.Diagnostics.Stopwatch.StartNew();
                 _currentBaseMapPlanId = planViewId;
                 _keyPlanSection.DrawWithBaseMap(bitmap, map, _rows);
+                Logger.Info($"⏱ 底圖疊圖（WPF 重畫）{swDraw.ElapsedMilliseconds} ms");
                 _listSection.RefreshStatusColumn();
 
                 // 2026-09-25：作用中透視圖跟隨——換底圖是因為跟隨某台相機時，底圖畫好後再把地圖對準那台相機。
@@ -1942,6 +2092,14 @@ namespace RevitMCP.UI
             }
 
             SetStatus("套用編輯中...");
+            // 2026-09-26 第四輪：變動前的姿態（清單列舊值）→ 相機更新判斷「移動 > 300 mm／轉 > 5°」要不要重算 Key Plan。
+            var hint = new CameraKeyPlanService.CameraPoseHint
+            {
+                Eye = new XYZ(row.EyeXFeet, row.EyeYFeet, row.EyeZFeet),
+                YawDeg = row.HorizontalAngleDeg,
+                Source = "清單／地圖編輯"
+            };
+            ElementId editedId = row.ViewId;
             RunSuppressed(() => EnqueueRevit(uiApp =>
             {
                 string err = null, extra = null;
@@ -1949,6 +2107,12 @@ namespace RevitMCP.UI
                 {
                     Document doc = uiApp?.ActiveUIDocument?.Document;
                     err = CameraManagerService.ApplyDetailEdit(doc, req);
+                    // 2026-09-26 第四輪（使用者：改了數字透視圖有時沒動）：透視圖開著就重繪。
+                    if (err == null)
+                    {
+                        string how = CameraManagerService.RefreshCameraViewIfOpen(uiApp, editedId);
+                        Logger.Info($"相機管理面板：編輯後重繪透視圖（{how}）。");
+                    }
                     if (err == null && afterApply != null && doc != null)
                     {
                         try { extra = afterApply(uiApp, doc); }
@@ -1971,6 +2135,9 @@ namespace RevitMCP.UI
                         SetStatus((err ?? "已套用編輯。") + (extra ?? ""));
                         EndSuppressed();
                         RefreshListOnly();
+                        // 2026-09-26 第四輪：與導覽監看同一條更新路徑（標記＋扇形；移動大時重算 Key Plan）。DocumentChanged 也會排入同一台，
+                        // 去抖合併；姿態雜湊相同的第二次自動略過。
+                        if (err == null) QueueCameraUpdate(editedId, hint);
                     }
                     finally
                     {
@@ -2067,6 +2234,19 @@ namespace RevitMCP.UI
         // ══════════════════════════════════════════════════════════
         // 跳轉
         // ══════════════════════════════════════════════════════════
+
+        /// <summary>2026-09-26 第四輪：「僅打開透視圖」＝切到透視圖＋關閉其他所有視圖。</summary>
+        private void OpenPerspectiveOnly(ElementId viewId)
+        {
+            SetStatus("打開透視圖...");
+            EnqueueRevit(uiApp =>
+            {
+                string err;
+                try { err = CameraManagerService.OpenPerspectiveOnly(uiApp, viewId); }
+                catch (Exception ex) { Logger.Error("相機管理面板：僅打開透視圖失敗", ex); err = "打開透視圖失敗：" + ex.Message; }
+                RunOnUiThread(() => SetStatus(err ?? "已打開透視圖（其他視圖已關閉）。"));
+            }, "OpenPerspectiveOnly");
+        }
 
         private void JumpToView(ElementId viewId)
         {
@@ -2450,6 +2630,11 @@ namespace RevitMCP.UI
         // ══════════════════════════════════════════════════════════
 
         private readonly HashSet<ElementId> _markerRefreshPending = new HashSet<ElementId>();
+        /// <summary>2026-09-26 第四輪：變動前的姿態提示（同一台相機只留最早的一筆）；導覽監看／清單編輯／地圖拖曳提供。</summary>
+        private readonly Dictionary<ElementId, CameraKeyPlanService.CameraPoseHint> _poseHints = new Dictionary<ElementId, CameraKeyPlanService.CameraPoseHint>();
+        /// <summary>2026-09-26 第四輪（D-041）：相機變動去抖 ≥ 800 ms（連續變動合併成一次更新）。</summary>
+        private const int MarkerRefreshDebounceMs = 800;
+        private bool _listRefreshAfterUpdate;
         private DispatcherTimer _markerRefreshTimer;
         private bool _markerRefreshInFlight;
         /// <summary>2026-09-25（§5.1）：主體 Level 改高程／改名 → 同一個去抖計時器，重畫所有簡化樓層記號。</summary>
@@ -2515,12 +2700,36 @@ namespace RevitMCP.UI
         private void EnsureMarkerRefreshTimer()
         {
             if (_markerRefreshTimer != null) return;
-            _markerRefreshTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromMilliseconds(500) };
+            _markerRefreshTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromMilliseconds(MarkerRefreshDebounceMs) };
             _markerRefreshTimer.Tick += OnMarkerRefreshTimerTick;
         }
 
+        /// <summary>
+        /// 2026-09-26 第四輪（使用者：Navigation Wheel／繞行不觸發 DocumentChanged）：Application.cs 的 Idling 導覽監看偵測到
+        /// 作用中透視圖的姿態變了、且停住 1 秒 → 呼叫這裡排入相機更新（標記／扇形；移動 &gt; 300 mm 或轉 &gt; 5° 另重算 Key Plan）。
+        /// hint＝變動前的姿態（自動存「A案」、判斷移動量）。
+        /// </summary>
+        public void QueueCameraUpdate(ElementId cameraId, CameraKeyPlanService.CameraPoseHint hint)
+        {
+            try
+            {
+                if (cameraId == null || !_armed) return;
+                RunOnUiThread(() =>
+                {
+                    _markerRefreshPending.Add(cameraId);
+                    if (hint != null && !_poseHints.ContainsKey(cameraId)) _poseHints[cameraId] = hint;
+                    // 導覽變動沒有 DocumentChanged → 清單（離樓板、角度）也不會自己刷新；更新後補一次輕量清單刷新。
+                    if (hint?.Before != null) _listRefreshAfterUpdate = true;
+                    EnsureMarkerRefreshTimer();
+                    _markerRefreshTimer.Stop();
+                    _markerRefreshTimer.Start();
+                });
+            }
+            catch (Exception ex) { Logger.Error("相機管理面板：排入相機更新失敗", ex); }
+        }
+
         /// <summary>由 Application.cs 的 DocumentChanged 呼叫（只傳 Id，不在 DocumentChanged 內改模型）。
-        /// 同一相機多次變更合併；最後一次變更後 500ms 才排入「更新相機標記」。</summary>
+        /// 同一相機多次變更合併；最後一次變更後 800ms 才排入「更新相機標記」。</summary>
         public void QueueCameraMarkerRefresh(IEnumerable<ElementId> perspectiveViewIds)
         {
             try
@@ -2559,6 +2768,8 @@ namespace RevitMCP.UI
                 }
                 List<ElementId> batch = _markerRefreshPending.ToList();
                 _markerRefreshPending.Clear();
+                var hints = new Dictionary<ElementId, CameraKeyPlanService.CameraPoseHint>(_poseHints);
+                _poseHints.Clear();
                 bool levelMarks = _levelMarkRefreshPending;
                 _levelMarkRefreshPending = false;
                 List<ElementId> aMarkers = _markerToCameraPending.ToList();
@@ -2566,11 +2777,12 @@ namespace RevitMCP.UI
                 bool orphans = _orphanCleanupPending;
                 _orphanCleanupPending = false;
                 _markerRefreshInFlight = true;
-                Logger.Info($"相機管理面板：排入「更新相機標記」（{batch.Count} 台相機{(levelMarks ? "＋簡化樓層記號" : "")}，去抖 500ms）。");
+                Logger.Info($"相機管理面板：排入「相機變動後更新」（{batch.Count} 台相機{(hints.Count > 0 ? $"，{hints.Count} 台有變動前姿態" : "")}{(levelMarks ? "＋簡化樓層記號" : "")}，去抖 {MarkerRefreshDebounceMs}ms）。");
                 int gen = _generation;
                 EnqueueRevit(uiApp =>
                 {
                     int n = 0;
+                    string updateSummary = null;
                     try
                     {
                         Document doc = uiApp?.ActiveUIDocument?.Document;
@@ -2595,7 +2807,8 @@ namespace RevitMCP.UI
                                 try { CameraKeyPlanService.CleanupOrphanMarkers(doc); }
                                 catch (Exception exO) { Logger.Error("相機管理面板：清除孤兒標記失敗", exO); }
                             }
-                            if (batch.Count > 0) n = CameraKeyPlanService.UpdateMarkersForCameras(doc, batch);
+                            // 2026-09-26 第四輪（D-041）：增量更新（姿態沒變的相機略過）；移動 > 300 mm 或轉 > 5° 且有 Key Plan → 重算 Key Plan 範圍。
+                            if (batch.Count > 0) updateSummary = CameraKeyPlanService.UpdateCamerasAfterChange(uiApp, doc, batch, hints, out n);
                             if (levelMarks)
                             {
                                 try { CameraKeyPlanService.UpdateLevelMarksFromLevels(doc); }
@@ -2618,9 +2831,10 @@ namespace RevitMCP.UI
                         {
                             _markerRefreshInFlight = false;
                             if (gen != _generation) return;
+                            if (_listRefreshAfterUpdate) { _listRefreshAfterUpdate = false; RefreshListOnly(); }
                             if (n > 0)
                             {
-                                SetStatus($"已更新 {n} 台相機的 Key Plan 視野標記。");
+                                SetStatus(updateSummary ?? $"已更新 {n} 台相機的 Key Plan 視野標記。");
                                 // 選取中的相機若在這批裡，順手更新 ③ 位置圖上的剖面線（剖面本身不動，通常不變）。
                                 CameraRow primary = GetPrimarySelectedRow();
                                 if (primary != null && batch.Contains(primary.ViewId)) RefreshSelectedSectionLine(primary);

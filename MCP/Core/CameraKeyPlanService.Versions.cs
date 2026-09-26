@@ -28,6 +28,11 @@ namespace RevitMCP.Core
         internal const string VersionDeleteTransactionName = "刪除相機視角版本";
         internal const string VersionRestoreTransactionPrefix = "還原相機視角：";
         private const int VersionNameMaxLength = 60;
+        /// <summary>2026-09-26 第四輪（使用者規則）：相機第一次被任何路徑修改前（清單編輯、set_camera_pose、拖 A 標記、
+        /// 地圖拖曳、導覽、人視高套用）若沒有任何版本 → 自動把原始視角存成這個名稱。</summary>
+        internal const string OriginalVersionName = "A案";
+        private const double VersionMatchMm = 1.0;
+        private const double VersionMatchDeg = 0.05;
 
         internal sealed class CameraViewVersion
         {
@@ -101,7 +106,90 @@ namespace RevitMCP.Core
             return list;
         }
 
-        internal static List<string> ReadVersionNames(View3D camera) => ReadVersions(camera).Select(v => v.Name).ToList();
+        internal static List<string> ReadVersionNames(View3D camera) => ReadVersionsNewestFirst(camera).Select(v => v.Name).ToList();
+
+        /// <summary>2026-09-26 第四輪：版本依儲存時間「新到舊」排序（同時間依儲存順序新到舊）。</summary>
+        internal static List<CameraViewVersion> ReadVersionsNewestFirst(View3D camera)
+        {
+            List<CameraViewVersion> list = ReadVersions(camera);
+            return list.Select((v, i) => (v, i))
+                .OrderByDescending(x => x.v.SavedAt ?? "", StringComparer.Ordinal).ThenByDescending(x => x.i)
+                .Select(x => x.v).ToList();
+        }
+
+        private static double AngleDeg(XYZ a, XYZ b)
+        {
+            if (a == null || b == null || a.GetLength() < 1e-9 || b.GetLength() < 1e-9) return 180.0;
+            double c = Math.Max(-1.0, Math.Min(1.0, a.Normalize().DotProduct(b.Normalize())));
+            return Math.Acos(c) * 180.0 / Math.PI;
+        }
+
+        /// <summary>兩個視角是否相同：眼睛 ≤ 1 mm、前／上方向 ≤ 0.05°；兩邊都有裁剪框時 Min/Max ≤ 1 mm。</summary>
+        internal static bool VersionMatchesPose(CameraViewVersion v, CameraViewVersion cur)
+        {
+            if (v?.Eye == null || cur?.Eye == null) return false;
+            double tol = CameraMath.MmToFeet(VersionMatchMm);
+            if (v.Eye.DistanceTo(cur.Eye) > tol) return false;
+            if (AngleDeg(v.Forward, cur.Forward) > VersionMatchDeg) return false;
+            if (AngleDeg(v.Up, cur.Up) > VersionMatchDeg) return false;
+            if (v.CropMin != null && v.CropMax != null && cur.CropMin != null && cur.CropMax != null)
+            {
+                if (v.CropMin.DistanceTo(cur.CropMin) > tol || v.CropMax.DistanceTo(cur.CropMax) > tol) return false;
+            }
+            return true;
+        }
+
+        /// <summary>目前視角符合的版本名稱（新到舊第一個符合者）；都不符合＝null。</summary>
+        internal static string FindCurrentVersionName(View3D camera, List<CameraViewVersion> newestFirst = null)
+        {
+            try
+            {
+                List<CameraViewVersion> list = newestFirst ?? ReadVersionsNewestFirst(camera);
+                if (list.Count == 0) return null;
+                CameraViewVersion cur = CaptureVersion(camera, "");
+                return list.FirstOrDefault(v => VersionMatchesPose(v, cur))?.Name;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("相機視角版本：比對目前視角失敗", ex);
+                return null;
+            }
+        }
+
+        /// <summary>下一個「字母＋案」名稱：A案、B案…（「A 案」有空格的舊名也算已用）；26 個都用了 → 「版本 N」。</summary>
+        internal static string SuggestNextVersionName(IEnumerable<string> existingNames)
+        {
+            var existing = new HashSet<string>((existingNames ?? Enumerable.Empty<string>()).Select(n => (n ?? "").Replace(" ", "")), StringComparer.Ordinal);
+            for (int i = 0; i < 26; i++)
+            {
+                string s = ((char)('A' + i)) + "案";
+                if (!existing.Contains(s)) return s;
+            }
+            return "版本 " + (existing.Count + 1);
+        }
+
+        /// <summary>
+        /// 2026-09-26 第四輪：相機「第一次被修改前」自動存原始視角「A案」（沒有任何版本時才存）。須在呼叫端的交易內、
+        /// 在修改相機之前呼叫；before＝null 時讀相機目前視角。回傳是否存了。失敗只記 log（不影響後續修改）。
+        /// </summary>
+        internal static bool EnsureOriginalVersionInTransaction(View3D camera, string source, CameraViewVersion before = null)
+        {
+            try
+            {
+                if (camera == null || camera.IsTemplate || !camera.IsPerspective) return false;
+                if (ReadVersions(camera).Count > 0) return false;
+                CameraViewVersion v = before ?? CaptureVersion(camera, OriginalVersionName);
+                v.Name = OriginalVersionName;
+                WriteVersions(camera, new List<CameraViewVersion> { v });
+                Logger.Info($"相機視角版本：「{camera.Name}」第一次被修改（{source}）前自動存「{OriginalVersionName}」（原始視角）。");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"相機視角版本：自動存「{OriginalVersionName}」失敗（{source}；照常修改相機）", ex);
+                return false;
+            }
+        }
 
         private static void WriteVersions(View3D camera, List<CameraViewVersion> versions)
         {
@@ -137,13 +225,13 @@ namespace RevitMCP.Core
             try { return camera.get_Parameter(BuiltInParameter.VIEWER_BOUND_ACTIVE_FAR); } catch { return null; }
         }
 
-        private static CameraViewVersion CaptureVersion(View3D camera, string name)
+        internal static CameraViewVersion CaptureVersion(View3D camera, string name)
         {
             ViewOrientation3D o = camera.GetOrientation();
             var v = new CameraViewVersion
             {
                 Name = name,
-                SavedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+                SavedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                 Eye = o.EyePosition,
                 Forward = o.ForwardDirection,
                 Up = o.UpDirection,
@@ -246,15 +334,36 @@ namespace RevitMCP.Core
         {
             View3D cam = ResolveCameraForVersion(doc, cameraId, out string err);
             if (cam == null) return err;
-            CameraViewVersion v = ReadVersions(cam).FirstOrDefault(x => string.Equals(x.Name, (name ?? "").Trim(), StringComparison.Ordinal));
+            List<CameraViewVersion> all = ReadVersions(cam);
+            CameraViewVersion v = all.FirstOrDefault(x => string.Equals(x.Name, (name ?? "").Trim(), StringComparison.Ordinal));
             if (v == null) return $"找不到版本「{name}」。";
             try { if (cam.IsLocked) return "這個相機視圖已鎖定，無法還原視角（請先在 Revit 解除鎖定）。"; } catch { }
+
+            // 2026-09-26 第四輪（使用者規則）：還原前，目前視角若跟每個已存版本都不同（1 mm／0.05°）→ 先自動存「自動備份 HH:mm」。
+            string backupName = null;
+            try
+            {
+                CameraViewVersion cur = CaptureVersion(cam, "");
+                if (!all.Any(x => VersionMatchesPose(x, cur)))
+                {
+                    backupName = "自動備份 " + DateTime.Now.ToString("HH:mm", CultureInfo.InvariantCulture);
+                    if (all.Any(x => x.Name == backupName)) backupName = "自動備份 " + DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+                    cur.Name = backupName;
+                    all.Add(cur);
+                }
+            }
+            catch (Exception exB) { Logger.Error("相機視角版本：還原前自動備份判斷失敗（照常還原）", exB); backupName = null; }
 
             using (Transaction t = TransactionHelper.Begin(doc, VersionRestoreTransactionPrefix + v.Name))
             {
                 t.Start();
                 try
                 {
+                    if (backupName != null)
+                    {
+                        try { WriteVersions(cam, all); warnings?.Add($"還原前已自動備份目前視角為「{backupName}」"); }
+                        catch (Exception exW) { Logger.Error("相機視角版本：還原前自動備份寫入失敗（照常還原）", exW); }
+                    }
                     cam.SetOrientation(new ViewOrientation3D(v.Eye, v.Up, v.Forward));
 
                     try

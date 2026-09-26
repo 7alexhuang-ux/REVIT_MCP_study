@@ -27,6 +27,17 @@ namespace RevitMCP.Core
 
         internal static CameraManagerSnapshot ReadSnapshot(Document doc)
         {
+            // 2026-09-26 第四輪：快照讀取計時（⏱）＋房間／樓層快取命中率。
+            using (CameraPerf perf = CameraPerf.Begin("讀相機快照"))
+            {
+                CameraManagerSnapshot s = ReadSnapshotCore(doc, perf);
+                perf.Note($"{s?.Cameras?.Count ?? 0} 台；{CameraKeyPlanService.TakeStoreyCacheStats()}");
+                return s;
+            }
+        }
+
+        private static CameraManagerSnapshot ReadSnapshotCore(Document doc, CameraPerf perf)
+        {
             var snapshot = new CameraManagerSnapshot();
             if (doc == null)
             {
@@ -64,12 +75,20 @@ namespace RevitMCP.Core
                     camerasWithSection = new HashSet<string>();
                 }
 
+                perf?.Lap("樓層/相機清單/剖面連結");
                 foreach (View3D view in cameraViews)
                 {
                     CameraRow row = BuildCameraRow(view, levels);
                     row.HasKeyPlanSection = row.UniqueId != null && camerasWithSection.Contains(row.UniqueId);
                     // 2026-09-25 Wave 3：視角版本名稱（右鍵「視角版本 ▸」用；讀取失敗＝空清單，不影響清單）
-                    row.VersionNames = CameraKeyPlanService.ReadVersionNames(view);
+                    // 2026-09-26 第四輪：新到舊排序＋目前視角符合的版本（選單打 ✓）。
+                    try
+                    {
+                        List<CameraKeyPlanService.CameraViewVersion> vers = CameraKeyPlanService.ReadVersionsNewestFirst(view);
+                        row.VersionNames = vers.Select(v => v.Name).ToList();
+                        row.CurrentVersionName = vers.Count > 0 ? CameraKeyPlanService.FindCurrentVersionName(view, vers) : null;
+                    }
+                    catch (Exception exV) { Logger.Error("相機管理：讀取視角版本失敗（略過）", exV); }
                     snapshot.Cameras.Add(row);
 
                     if (row.LevelId != null)
@@ -88,6 +107,7 @@ namespace RevitMCP.Core
                 }
                 snapshot.Levels.Sort((a, b) => a.ProjectElevationFeet.CompareTo(b.ProjectElevationFeet));
 
+                perf?.Lap("每台相機（房間/FOV/版本）");
                 // 2026-09-25 Wave 3：圖框類型（④ ▾ 圖紙圖框 ▸）；失敗只記 log。
                 try { snapshot.TitleBlocks = CameraKeyPlanService.ListTitleBlockTypes(doc); }
                 catch (Exception exTb) { Logger.Error("相機管理：讀取圖框類型失敗（略過）", exTb); }
@@ -169,6 +189,7 @@ namespace RevitMCP.Core
                     snapshot.DefaultPlanViewId = chosenOpt.ViewId;
                     Logger.Info($"相機管理：預設底圖 {chosenOpt.CropLogText}（{why}）");
                 }
+                perf?.Lap("圖框/平面清單/預設底圖");
             }
             catch (Exception ex)
             {
@@ -177,6 +198,8 @@ namespace RevitMCP.Core
 
             return snapshot;
         }
+
+        private static readonly Dictionary<string, string> _lastIoLog = new Dictionary<string, string>(StringComparer.Ordinal);
 
         /// <summary>單一相機視圖 → CameraRow。給 ReadSnapshot 和 DocumentChanged 局部刷新共用。</summary>
         internal static CameraRow BuildCameraRow(View3D view, IList<Level> levelsSorted)
@@ -204,8 +227,15 @@ namespace RevitMCP.Core
 
             // 2026-09-25 室內／室外判定（同一鍵 4 視圖的 FindEyeRoom）；失敗＝null（清單顯示 ?），不影響其他欄位。
             bool? isOutdoor = CameraKeyPlanService.ClassifyIndoorOutdoor(view, geom, out double outdoorFanR, out string classLog);
-            Logger.Info($"相機管理：「{view.Name}」室內／室外＝{(isOutdoor.HasValue ? (isOutdoor.Value ? "室外" : "室內") : "?")}（{classLog}）" +
-                        (isOutdoor == true ? $" 扇形半徑={CameraMath.FeetToMm(outdoorFanR):F0}mm" : ""));
+            // 2026-09-26 第四輪：同一台相機判定內容沒變就不重複寫 log（每次快照 21 行 log 本身也有成本）。
+            string ioLine = $"相機管理：「{view.Name}」室內／室外＝{(isOutdoor.HasValue ? (isOutdoor.Value ? "室外" : "室內") : "?")}（{classLog}）" +
+                            (isOutdoor == true ? $" 扇形半徑={CameraMath.FeetToMm(outdoorFanR):F0}mm" : "");
+            string ioKey = view.UniqueId ?? view.Id.GetIdValue().ToString();
+            if (!_lastIoLog.TryGetValue(ioKey, out string prevIo) || prevIo != ioLine)
+            {
+                _lastIoLog[ioKey] = ioLine;
+                Logger.Info(ioLine);
+            }
 
             // 2026-09-25（§4.8 步驟 0）：相機放置時的平面（ES 記錄；沒有＝null）。
             ViewPlan src = CameraSourcePlanStore.TryGetSourcePlan(view);
@@ -234,6 +264,8 @@ namespace RevitMCP.Core
                 UniqueId = view.UniqueId,
                 Name = view.Name,
                 LevelName = geom.LevelBelow != null ? geom.LevelBelow.Name : "(找不到樓層)",
+                StoreySource = geom.StoreySource,
+                StoreyLog = geom.StoreyLog,
                 LevelId = geom.LevelBelow != null ? geom.LevelBelow.Id : null,
                 HeightAboveLevelCm = heightCm,
                 HorizontalAngleDeg = CameraMath.ComputeHorizontalAngleDeg(geom.Forward),
@@ -284,6 +316,17 @@ namespace RevitMCP.Core
         internal static bool IsExportingBaseMap { get; private set; }
 
         internal static BaseMapSnapshot ExportBaseMap(Document doc, ElementId planViewId)
+        {
+            using (CameraPerf perf = CameraPerf.Begin($"底圖匯出（planViewId={planViewId?.GetIdValue()}）"))
+            {
+                BaseMapSnapshot r = ExportBaseMapCore(doc, planViewId);
+                if (r?.ErrorMessage != null) perf.Note("失敗：" + r.ErrorMessage);
+                try { if (r != null) r.IsOwnView = CameraKeyPlanService.IsOwnTaggedView(doc?.GetElement(planViewId) as View); } catch { }
+                return r;
+            }
+        }
+
+        private static BaseMapSnapshot ExportBaseMapCore(Document doc, ElementId planViewId)
         {
             View source = doc?.GetElement(planViewId) as View;
             if (source == null || !(source is ViewPlan))
@@ -741,6 +784,7 @@ namespace RevitMCP.Core
                         Level levelBelow = CameraMath.ComputeGeometry(v, levels).LevelBelow;
                         if (levelBelow == null) { skippedCount++; continue; }
 
+                        CameraKeyPlanService.EnsureOriginalVersionInTransaction(v, "人視高套用"); // 2026-09-26：第一次修改前自動存 A案
                         v.SetOrientation(CameraMath.BuildOrientationForHeightAboveLevel(v, levelBelow, heightCm));
                         okCount++;
                     }
@@ -788,6 +832,9 @@ namespace RevitMCP.Core
                 using (Transaction t = TransactionHelper.Begin(doc, "編輯相機"))
                 {
                     t.Start();
+
+                    // 2026-09-26 第四輪：相機第一次被修改前（沒有任何視角版本）自動存原始視角「A案」，與這次編輯同一個交易（一起復原）。
+                    CameraKeyPlanService.EnsureOriginalVersionInTransaction(v, "編輯相機");
 
                     // 先套位置／樓層／高度（眼睛 X/Y/Z），再套角度（角度重建時眼睛位置不變，
                     // 所以順序對最終結果沒有影響，但先位置後角度比較符合「使用者由上往下填欄位」的直覺）。
@@ -986,6 +1033,68 @@ namespace RevitMCP.Core
         // 跳轉視圖
         // ══════════════════════════════════════════════════════════
 
+        /// <summary>
+        /// 2026-09-26 第四輪（使用者：清單改數字後透視圖有時沒跟著動）：相機被程式修改後，若它是作用中視圖 → RefreshActiveView；
+        /// 若只是開著（非作用中）→ UpdateAllOpenViews。Revit API 沒有單一 UIView 的重繪方法。須在 API context、交易外；失敗只記 log。
+        /// </summary>
+        internal static string RefreshCameraViewIfOpen(UIApplication uiApp, ElementId cameraId)
+        {
+            try
+            {
+                UIDocument uiDoc = uiApp?.ActiveUIDocument;
+                if (uiDoc == null || cameraId == null) return "沒有作用中文件";
+                if (uiDoc.ActiveView?.Id == cameraId)
+                {
+                    uiDoc.RefreshActiveView();
+                    return "RefreshActiveView";
+                }
+                IList<UIView> open = uiDoc.GetOpenUIViews();
+                if (open != null && open.Any(u => u.ViewId == cameraId))
+                {
+                    uiDoc.UpdateAllOpenViews();
+                    return "UpdateAllOpenViews";
+                }
+                return "相機視圖未開啟";
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("相機管理：重繪相機視圖失敗（略過）", ex);
+                return "重繪失敗：" + ex.Message;
+            }
+        }
+
+        /// <summary>
+        /// 2026-09-26 第四輪（使用者：「僅打開透視圖」要關掉其他視圖）：切換到相機透視圖，再關閉其他所有視圖視窗（同一鍵 4 視圖的
+        /// CloseOtherViews）。須在 ExternalEvent（交易外）。回傳錯誤或 null。
+        /// </summary>
+        internal static string OpenPerspectiveOnly(UIApplication uiApp, ElementId viewId)
+        {
+            string err = JumpToView(uiApp, viewId);
+            if (err != null) return err;
+            try { CloseOtherViews(uiApp, new List<ElementId> { viewId }); }
+            catch (Exception ex) { Logger.Error("相機管理：僅打開透視圖——關閉其他視圖失敗（透視圖已開啟）", ex); }
+            return null;
+        }
+
+        /// <summary>2026-09-26 第四輪（一鍵出圖紙）：把任一視圖（圖紙）設為作用中並關閉其他所有視圖。回傳錯誤或 null。</summary>
+        internal static string ShowOnlyView(UIApplication uiApp, ElementId viewId)
+        {
+            try
+            {
+                UIDocument uiDoc = uiApp?.ActiveUIDocument;
+                View v = uiDoc?.Document?.GetElement(viewId) as View;
+                if (v == null) return "找不到視圖";
+                uiDoc.ActiveView = v;
+                CloseOtherViews(uiApp, new List<ElementId> { viewId });
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("相機管理：開啟視圖並關閉其他視圖失敗", ex);
+                return ex.Message;
+            }
+        }
+
         internal static string JumpToView(UIApplication uiApp, ElementId viewId)
         {
             Document doc = uiApp?.ActiveUIDocument?.Document;
@@ -1077,12 +1186,35 @@ namespace RevitMCP.Core
         /// PostCommand 並排、排定並排後 ZoomToFit。須在 ExternalEvent（交易外）呼叫。回傳錯誤訊息或 null。</summary>
         internal static string OpenAndTileFourViews(UIApplication uiApp, Document doc, ElementId cameraViewId, CameraKeyPlanService.KeyPlanResult result)
         {
+            using (CameraPerf.Begin("一鍵 4 視圖：開啟／關閉其他／並排"))
+                return OpenAndTileFourViewsCore(uiApp, doc, cameraViewId, result);
+        }
+
+        private static string OpenAndTileFourViewsCore(UIApplication uiApp, Document doc, ElementId cameraViewId, CameraKeyPlanService.KeyPlanResult result)
+        {
             try
             {
                 View perspective = doc.GetElement(cameraViewId) as View;
                 View plan = doc.GetElement(result.PlanViewId) as View;
                 View section = doc.GetElement(result.SectionViewId) as View;
                 View iso = doc.GetElement(result.IsoViewId) as View;
+
+                // 2026-09-26 第四輪（使用者：重複點同一台相機每次都關閉／重開／重新並排，面板還越來越窄）：
+                // 目前開著的視圖剛好就是這 4 張 → 不關、不重開、不並排，只對 4 張 ZoomToFit。
+                try
+                {
+                    var want = new HashSet<long>(new[] { perspective, plan, section, iso }.Where(v => v != null).Select(v => (long)v.Id.GetIdValue()));
+                    IList<UIView> openNow = uiApp.ActiveUIDocument.GetOpenUIViews();
+                    var have = new HashSet<long>((openNow ?? new List<UIView>()).Select(u => (long)u.ViewId.GetIdValue()));
+                    if (want.Count == 4 && have.SetEquals(want))
+                    {
+                        // 透視圖 ZoomToFit 走 CameraViewZoomService 的防護式處理（比對方位、有變就還原）。
+                        int zoomed = CameraViewZoomService.ZoomAllNow(uiApp, new[] { perspective, plan, section, iso }.Where(v => v != null).Select(v => v.Id).ToList());
+                        Logger.Info($"相機管理面板：這 4 張視圖已開啟並排 → 不關閉／不重新並排，只 ZoomToFit {zoomed} 張。");
+                        return null;
+                    }
+                }
+                catch (Exception exSame) { Logger.Error("相機管理面板：比對已開啟視圖失敗（照常並排）", exSame); }
 
                 // 規格：依序啟動 4 張視圖，最後一步才 PostCommand TileViews
                 // （PostCommand 排入佇列，等這次 Execute() 整段結束、控制權還給 Revit 訊息迴圈後才真的執行）。

@@ -158,6 +158,7 @@ namespace RevitMCP.Core
                         finally { st.Dispose(); }
                     }
                     t.Commit();
+                    BumpOwnViewsEpoch();
                 }
                 catch (Exception ex)
                 {
@@ -427,8 +428,10 @@ namespace RevitMCP.Core
         {
             if (Schema.Lookup(SchemaGuid) == null) return 0;
             var set = new HashSet<string>(roles ?? new string[0], StringComparer.Ordinal);
-            List<ElementId> ids = new FilteredElementCollector(doc, view.Id).WhereElementIsNotElementType()
-                .Where(e => e.OwnerViewId == view.Id && TryReadLink(e, out string c, out string r) && set.Contains(r) && (cid == null || c == cid))
+            // 2026-09-26 第四輪：只掃「這張視圖擁有的、帶 ES 的」元素（OwnedByView＋ExtensibleStorageFilter），
+            // 不再用「視圖中所有可見元素」collector（大型模型每張總覽要數秒）。
+            List<ElementId> ids = new FilteredElementCollector(doc).OwnedByView(view.Id).WherePasses(new ExtensibleStorageFilter(SchemaGuid))
+                .Where(e => TryReadLink(e, out string c, out string r) && set.Contains(r) && (cid == null || c == cid))
                 .Select(e => e.Id).ToList();
             if (ids.Count > 0) doc.Delete(ids);
             return ids.Count;
@@ -463,21 +466,35 @@ namespace RevitMCP.Core
         /// 「更新相機標記」（去抖）用：這些相機在所有總覽上的標記重畫——先從每張總覽刪除這台相機的標記，
         /// 再畫到「目前下方樓層」的總覽（該層沒有總覽就不建）。不動總覽裁剪框。須在交易內。回傳重畫的總覽標記數。
         /// </summary>
-        private static int RedrawCamerasInOverviews(Document doc, IList<(View3D cam, CameraParams cp)> cams)
+        private static int RedrawCamerasInOverviews(Document doc, IList<(View3D cam, CameraParams cp)> cams,
+            IDictionary<string, long?> previousStorey = null)
         {
             if (cams == null || cams.Count == 0) return 0;
-            List<ViewPlan> overviews = new FilteredElementCollector(doc).OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
+            List<ViewPlan> overviews = new FilteredElementCollector(doc).OfClass(typeof(ViewPlan)).WherePasses(new ExtensibleStorageFilter(SchemaGuid)).Cast<ViewPlan>()
                 .Where(v => !v.IsTemplate && IsOverviewView(v)).ToList();
             if (overviews.Count == 0) return 0;
+            // 樓層 UniqueId → 總覽
+            var byLevel = new Dictionary<string, ViewPlan>(StringComparer.Ordinal);
+            foreach (ViewPlan v in overviews)
+                if (TryReadLink(v, out string luid, out _) && !string.IsNullOrEmpty(luid) && !byLevel.ContainsKey(luid)) byLevel[luid] = v;
             int n = 0;
             foreach (var c in cams)
             {
                 string cid = c.cam.UniqueId;
-                foreach (ViewPlan ov in overviews) DeleteMarkersInView(doc, ov, cid, "MarkerPlan", MarkerNameRole);
                 Level lb = c.cp.Geom?.LevelBelow;
+                // 2026-09-26 第四輪（D-041）：知道上次畫在哪一層 → 只清「舊樓層＋新樓層」兩張總覽上這台相機的標記；不知道才全部清。
+                List<ViewPlan> clear = overviews;
+                if (previousStorey != null && previousStorey.TryGetValue(cid, out long? prevId) && prevId.HasValue)
+                {
+                    clear = new List<ViewPlan>();
+                    Level prevLevel = null;
+                    try { prevLevel = doc.GetElement(new ElementId((IdType)prevId.Value)) as Level; } catch { prevLevel = null; }
+                    if (prevLevel != null && byLevel.TryGetValue(prevLevel.UniqueId, out ViewPlan pv)) clear.Add(pv);
+                    if (lb != null && byLevel.TryGetValue(lb.UniqueId, out ViewPlan nv) && !clear.Contains(nv)) clear.Add(nv);
+                }
+                foreach (ViewPlan ov in clear) DeleteMarkersInView(doc, ov, cid, "MarkerPlan", MarkerNameRole);
                 if (lb == null) continue;
-                ViewPlan target = overviews.FirstOrDefault(v => TryReadLink(v, out string luid, out _) && luid == lb.UniqueId);
-                if (target == null) continue;
+                if (!byLevel.TryGetValue(lb.UniqueId, out ViewPlan target)) continue;
                 double markerZ = target.GenLevel?.ProjectElevation ?? lb.ProjectElevation;
                 string camName = c.cam.Name;
                 DrawMarkerSafely(doc, "UpdateOverviewMarker", () => DrawOverviewCameraMarker(doc, target, c.cp, cid, camName, markerZ));
@@ -486,15 +503,45 @@ namespace RevitMCP.Core
             return n;
         }
 
-        /// <summary>一鍵 4 視圖後自動更新該相機所在樓層的總覽（獨立交易；失敗只記 log，不影響 4 視圖）。</summary>
+        /// <summary>2026-09-26 第四輪：上次自動更新總覽時，該樓層相機的雜湊（相機 UniqueId＋姿態，排序後串起來＋模型 epoch）。</summary>
+        private static readonly Dictionary<string, string> _overviewStoreyHash = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        private static string OverviewStoreyHash(Document doc, Level level)
+        {
+            List<Level> levels = CameraMath.GetStoreyLevelsSorted(doc);
+            var parts = new List<string>();
+            foreach (View3D v in new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>())
+            {
+                if (v.IsTemplate || !v.IsPerspective || IsSheetPerspectiveCopy(v)) continue;
+                CameraMath.CameraGeometry g;
+                try { g = CameraMath.ComputeGeometry(v, levels); } catch { continue; }
+                if (g.LevelBelow == null || g.LevelBelow.Id != level.Id) continue;
+                parts.Add(v.UniqueId + "=" + ComputePoseHash(v) + "|" + v.Name);
+            }
+            parts.Sort(StringComparer.Ordinal);
+            return ModelEpoch + "#" + string.Join(";", parts);
+        }
+
+        /// <summary>一鍵 4 視圖後自動更新該相機所在樓層的總覽（獨立交易；失敗只記 log，不影響 4 視圖）。
+        /// 2026-09-26 第四輪：該樓層的相機（位置／方向／裁剪／名稱）與模型 epoch 自上次自動更新後都沒變、總覽也還在 → 略過。</summary>
         private static ElementId TryUpdateOverviewForCamera(Document doc, Level levelBelow)
         {
             if (doc == null || levelBelow == null) return null;
             try
             {
+                string key = StoreyDocKey(doc) + "|" + levelBelow.UniqueId;
+                string hash = null;
+                try { hash = OverviewStoreyHash(doc, levelBelow); } catch (Exception exH) { Logger.Error("樓層總覽：計算略過判斷失敗（照常更新）", exH); }
+                ViewPlan existing = FindOverviewView(doc, levelBelow);
+                if (hash != null && existing != null && _overviewStoreyHash.TryGetValue(key, out string prev) && prev == hash)
+                {
+                    Logger.Info($"樓層總覽：「{existing.Name}」該樓層相機自上次更新後都沒變 → 略過（一鍵 4 視圖不重建總覽）");
+                    return existing.Id;
+                }
                 List<OverviewResult> r = CreateOrUpdateOverviews(doc, new List<ElementId> { levelBelow.Id });
                 OverviewResult one = r.FirstOrDefault();
                 if (one?.Error != null) Logger.Error("一鍵 4 視圖：自動更新樓層總覽失敗：" + one.Error);
+                else if (hash != null) _overviewStoreyHash[key] = hash;
                 return one?.ViewId;
             }
             catch (Exception ex)

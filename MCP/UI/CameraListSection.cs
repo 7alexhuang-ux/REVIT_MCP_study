@@ -26,7 +26,7 @@ namespace RevitMCP.UI
 {
     /// <summary>
     /// Tab1「相機」清單。
-    ///   v5（2026-09-24）：名稱欄唯讀，單擊名稱＝觸發「開啟動作」（面板端預設一鍵 4 視圖）；列右鍵選單
+    ///   v5（2026-09-24）：名稱欄唯讀，（2026-09-26 起）雙擊名稱＝觸發「開啟動作」（面板端預設一鍵 4 視圖）、單擊＝只選取；列右鍵選單
     ///     （一鍵 4 視圖／僅打開透視圖／重新命名…／複製到其他樓層…／重設剖面位置，見 RowContextMenuRequested）。
     ///   v6（2026-09-25，第三次修「數字改不了」）：DataGrid 全唯讀、永不進編輯模式。樓層／離樓板cm／水平角°／
     ///     俯仰角°（與選用的平面 X/Y、遠裁剪）是 DataGridTemplateColumn，儲存格內是常駐 TextBox／ComboBox：
@@ -103,7 +103,7 @@ namespace RevitMCP.UI
             _grid.SelectionChanged += Grid_SelectionChanged;
             // 2026-09-25 第三次修正：拿掉 CellEditEnding／RowEditEnding／BeginningEdit／PreparingCellForEdit／
             // PreviewKeyDown／LostKeyboardFocus——DataGrid 不再進編輯模式，編輯由儲存格內常駐控制項處理
-            // （見「編輯」區段）。PreviewMouseLeftButtonDown 只剩「點名稱＝開啟動作」。
+            // （見「編輯」區段）。PreviewMouseLeftButtonDown 只剩「雙擊名稱＝開啟動作」（2026-09-26）。
             _grid.PreviewMouseLeftButtonDown += Grid_PreviewMouseLeftButtonDown;
             _grid.PreviewMouseRightButtonDown += Grid_PreviewMouseRightButtonDown;
 
@@ -115,8 +115,10 @@ namespace RevitMCP.UI
                 // 2026-09-25：改樓層＝複製（不再就地改樓層）。字數比舊版短；300px 下估算放得下（未經實機像素驗證），
                 // 仍加省略號＋工具提示作為保險。
                 // 2026-09-25 Wave 3：縮短到約 20 字（11 px 字約 220 px），300 px 面板扣掉邊框仍放得下；完整說明在 ToolTip。
-                Text = "點名稱開 4 視圖・數字可直接改・右鍵更多",
-                ToolTip = "② 相機清單：點名稱＝一鍵 4 視圖・點數字直接修改（Enter 確定、Esc 還原）・改樓層＝在同位置複製一台相機到該樓層・右鍵＝出圖紙、視角版本、重新命名、複製等",
+                // 2026-09-26 第四輪（使用者決策）：單擊＝只選取；雙擊名稱＝一鍵 4 視圖。橘色列說明放 ToolTip＋① ⋯ 選單圖例（300 px 放不下）。
+                Text = "雙擊名稱開 4 視圖・點數字直接修改・右鍵更多",
+                ToolTip = "② 相機清單：單擊＝選取（地圖標出位置，不動 Revit）・雙擊名稱＝一鍵 4 視圖・點數字直接修改（Enter 確定、Esc 還原）・改樓層＝在同位置複製一台相機到該樓層・右鍵＝出圖紙、視角版本、重新命名、複製等" +
+                          Environment.NewLine + "橘色列＝離樓板高度不在 120–200 cm（可能偏低／偏高）；粗體＋左側藍條＝目前正在看的透視相機",
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 Foreground = CameraManagerTheme.SecondaryText,
                 FontFamily = CameraManagerTheme.UiFont,
@@ -373,7 +375,7 @@ namespace RevitMCP.UI
             menu.IsOpen = true;
         }
 
-        /// <summary>2026-09-24 v5：單擊名稱儲存格＝觸發開啟動作（不進編輯模式——名稱欄已經改
+        /// <summary>2026-09-24 v5（2026-09-26 改為雙擊）：雙擊名稱儲存格＝觸發開啟動作（不進編輯模式——名稱欄已經改
         /// 唯讀）。用 PreviewMouseLeftButtonDown 直接判斷點在哪個 DataGridCell，比
         /// CurrentCellChanged（只在「目前儲存格真的變了」才觸發）更精確地對應「使用者點了
         /// 一下」這個手勢——同一格連點兩次也都要能各自觸發一次開啟動作。不 e.Handled，讓
@@ -390,7 +392,12 @@ namespace RevitMCP.UI
                 if (!(cell.DataContext is CameraRow row)) return;
 
                 // 數字／樓層欄：儲存格內是常駐 TextBox／ComboBox，自己處理點擊（見 CellTextBox_PreviewMouseLeftButtonDown）。
-                if (cell.Column == _nameColumn) RowOpenActionRequested?.Invoke(row);
+                // 2026-09-26 第四輪（使用者決策）：單擊名稱＝只選取（DataGrid 照常選取）；雙擊名稱＝開啟動作（一鍵 4 視圖）。
+                if (cell.Column == _nameColumn && e.ClickCount >= 2)
+                {
+                    Logger.Info($"相機清單：雙擊名稱「{row.Name}」→ 開啟動作。");
+                    RowOpenActionRequested?.Invoke(row);
+                }
             }
             catch (Exception ex)
             {
@@ -654,7 +661,7 @@ namespace RevitMCP.UI
                 CameraRow row = tb.DataContext as CameraRow;
                 Logger.Info($"清單編輯：{RowLabel(row)} {FieldLabel(tb.Tag as string)} 取得鍵盤焦點");
                 // 選取該列（使用者操作 → SelectionChanged userInitiated=true → 地圖高亮）。
-                // 絕不觸發一鍵 4 視圖（那只由名稱欄單擊觸發）。
+                // 絕不觸發一鍵 4 視圖（那只由名稱欄雙擊觸發）。
                 if (row != null && (!ReferenceEquals(_grid.SelectedItem, row) || _grid.SelectedItems.Count != 1))
                     _grid.SelectedItem = row;
             }
@@ -998,9 +1005,53 @@ namespace RevitMCP.UI
             }
         }
 
+        // ── 2026-09-26 第四輪：目前正在看的透視相機（作用中視圖）在清單上的標示：粗體＋左側 accent 條＋淡 accent 底 ──
+        private ElementId _activeCameraId;
+
+        /// <summary>設定目前正在看的相機（null＝作用中視圖不是透視相機）。只重畫受影響的兩列，不整張清單重建。</summary>
+        public void SetActiveCameraId(ElementId viewId)
+        {
+            try
+            {
+                ElementId old = _activeCameraId;
+                if ((old == null && viewId == null) || (old != null && viewId != null && old.GetIdValue() == viewId.GetIdValue())) return;
+                _activeCameraId = viewId;
+                foreach (ElementId id in new[] { old, viewId })
+                {
+                    if (id == null) continue;
+                    CameraRow r = (_grid.ItemsSource as IEnumerable<CameraRow>)?.FirstOrDefault(x => x.ViewId != null && x.ViewId.GetIdValue() == id.GetIdValue());
+                    if (r == null) continue;
+                    if (_grid.ItemContainerGenerator.ContainerFromItem(r) is DataGridRow dr) ApplyRowStyle(dr, r);
+                }
+            }
+            catch (Exception ex) { Logger.Error("相機清單：標示目前檢視中的相機失敗", ex); }
+        }
+
+        private bool IsActiveCamera(CameraRow row) =>
+            _activeCameraId != null && row?.ViewId != null && row.ViewId.GetIdValue() == _activeCameraId.GetIdValue();
+
         private void Grid_LoadingRow(object sender, DataGridRowEventArgs e)
         {
             if (!(e.Row.Item is CameraRow row)) return;
+            ApplyRowStyle(e.Row, row);
+        }
+
+        private void ApplyRowStyle(DataGridRow dataRow, CameraRow row)
+        {
+            bool active = IsActiveCamera(row);
+            dataRow.FontWeight = active ? FontWeights.Bold : FontWeights.Normal;
+            if (active)
+            {
+                dataRow.BorderBrush = CameraManagerTheme.Accent;
+                dataRow.BorderThickness = new Thickness(4, 0, 0, 0);
+            }
+            else
+            {
+                dataRow.ClearValue(DataGridRow.BorderBrushProperty);
+                dataRow.ClearValue(DataGridRow.BorderThicknessProperty);
+            }
+            string activeNote = active ? "▶ 目前正在看的透視相機" + Environment.NewLine : "";
+            string storeyNote = string.IsNullOrEmpty(row.StoreyLog) ? "" : Environment.NewLine + "樓層判定：" + row.StoreyLog;
 
             // 2026-09-25：室內／室外判定放在列 ToolTip 前綴（300px 寬已無空間再加一欄，避免橫向捲動）。
             string io = row.IsOutdoor.HasValue
@@ -1011,15 +1062,17 @@ namespace RevitMCP.UI
 
             if (row.HeightWarning == "偏低" || row.HeightWarning == "偏高")
             {
-                e.Row.Background = new System.Windows.Media.SolidColorBrush(WpfColor.FromArgb(60, CameraManagerTheme.WarningColor.R, CameraManagerTheme.WarningColor.G, CameraManagerTheme.WarningColor.B));
-                e.Row.ToolTip = io + Environment.NewLine + (row.HeightWarning == "偏低"
-                    ? $"離樓板高度低於 {CameraManagerService.LowHeightWarningCm:F0} cm，可能偏低"
-                    : $"離樓板高度高於 {CameraManagerService.HighHeightWarningCm:F0} cm，可能偏高");
+                dataRow.Background = new System.Windows.Media.SolidColorBrush(WpfColor.FromArgb(60, CameraManagerTheme.WarningColor.R, CameraManagerTheme.WarningColor.G, CameraManagerTheme.WarningColor.B));
+                dataRow.ToolTip = activeNote + io + Environment.NewLine + "橘色列：離樓板高度不在 " +
+                    $"{CameraManagerService.LowHeightWarningCm:F0}–{CameraManagerService.HighHeightWarningCm:F0} cm（" + (row.HeightWarning == "偏低"
+                    ? $"低於 {CameraManagerService.LowHeightWarningCm:F0} cm，可能偏低）"
+                    : $"高於 {CameraManagerService.HighHeightWarningCm:F0} cm，可能偏高）") + storeyNote;
             }
             else
             {
-                e.Row.ClearValue(DataGridRow.BackgroundProperty);
-                e.Row.ToolTip = row.InMapRange ? io : io + Environment.NewLine + "此相機不在目前底圖的裁剪範圍內";
+                // 目前檢視中的相機不另上底色（本機底色會蓋掉樣式的「選取中」底色），只用粗體＋左側 accent 條區分。
+                dataRow.ClearValue(DataGridRow.BackgroundProperty);
+                dataRow.ToolTip = activeNote + (row.InMapRange ? io : io + Environment.NewLine + "此相機不在目前底圖的裁剪範圍內") + storeyNote;
             }
         }
     }

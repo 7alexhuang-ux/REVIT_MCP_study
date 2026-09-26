@@ -61,6 +61,11 @@ namespace RevitMCP.Core
 
         /// <summary>2026-09-25 Wave 3：這台相機已儲存的「視角版本」名稱（ES，依儲存順序）；右鍵「視角版本 ▸」用。</summary>
         public List<string> VersionNames { get; set; } = new List<string>();
+        /// <summary>2026-09-26 第四輪：目前視角符合的版本名稱（眼睛 1 mm、方向 0.05° 內；null＝都不符合）。右鍵選單打 ✓。</summary>
+        public string CurrentVersionName { get; set; }
+        /// <summary>2026-09-26 第四輪：樓層來源（room／roomSpan／surface／elevation）與挑選說明（ToolTip、list_cameras）。</summary>
+        public string StoreySource { get; set; }
+        public string StoreyLog { get; set; }
 
         /// <summary>2026-09-25 室內／室外判定（與一鍵 4 視圖同一套 FindEyeRoom）：true＝室外（眼睛不在任何房間），
         /// false＝室內，null＝判定失敗／找不到樓層。</summary>
@@ -429,6 +434,20 @@ namespace RevitMCP.Core
             localY = dx * BasisYX + dy * BasisYY + dz * BasisYZ;
         }
 
+        /// <summary>2026-09-26 第四輪：視圖自身座標 (X,Y) → 模型座標 XY（ModelToLocal 的反轉；剛體轉換，基底正交）。地圖拖曳用。</summary>
+        public void LocalToModel(double localX, double localY, out double x, out double y)
+        {
+            x = OriginX + localX * BasisXX + localY * BasisYX;
+            y = OriginY + localX * BasisXY + localY * BasisYY;
+        }
+
+        /// <summary>2026-09-26 第四輪：視圖自身座標向量 → 模型座標向量（XY）。</summary>
+        public void LocalVectorToModel(double localX, double localY, out double x, out double y)
+        {
+            x = localX * BasisXX + localY * BasisYX;
+            y = localX * BasisXY + localY * BasisYY;
+        }
+
         /// <summary>模型座標向量 → 視圖自身座標（只取 X/Y）。</summary>
         public void ModelVectorToLocal(double x, double y, double z, out double localX, out double localY)
         {
@@ -439,6 +458,8 @@ namespace RevitMCP.Core
         public ElementId GenLevelId { get; set; }
 
         public string ErrorMessage { get; set; }
+        /// <summary>2026-09-26 第四輪：底圖是本工具自己的視圖（Key Plan／樓層總覽）——點陣快取另外比對 OwnViewsEpoch。</summary>
+        public bool IsOwnView { get; set; }
         /// <summary>非致命提醒（例如底圖平面未啟用 CropBox，疊圖可能不準），匯出仍會繼續。</summary>
         public string Warning { get; set; }
     }
@@ -472,14 +493,17 @@ namespace RevitMCP.Core
     }
 
     /// <summary>
-    /// 2026-09-26（使用者要求，D-038）：等角 Key Plan 視圖「觀看者側」兩道牆（室內相機）。
-    ///   Cut（預設）＝近側兩面切到房間邊界往內 100 mm（dollhouse cutaway，牆被切掉看得到室內）；
-    ///   Keep＝舊行為（四面都是房間 +0.6 m，牆保留）。室外相機不受影響。
+    /// 2026-09-26（使用者要求，D-038；同日實測後改預設，D-039）：等角 Key Plan 視圖「觀看者側」兩面（室內相機）。
+    ///   Camera（預設，數值 0）＝近側兩面剛好放在眼睛的 X／Y（不留後退距離，不會誤切到牆後面的東西）；
+    ///   Keep（1）＝不切（四面都是房間 +0.6 m，牆保留）；
+    ///   Wall（2）＝D-038 舊規則：近側兩面切到房間邊界往內 100 mm。
+    /// 設定檔存整數：舊版預設 Cut＝0 讀進來會變成 Camera（即新預設），Keep 不變。室外相機不受影響。
     /// </summary>
     public enum CameraIsoNearWallsMode
     {
-        Cut = 0,
-        Keep = 1
+        Camera = 0,
+        Keep = 1,
+        Wall = 2
     }
 
     /// <summary>
@@ -527,8 +551,8 @@ namespace RevitMCP.Core
         /// <summary>等角 Key Plan 視圖的範圍模式，見 <see cref="CameraIsoExtentMode"/>。</summary>
         public CameraIsoExtentMode IsoExtentMode { get; set; } = CameraIsoExtentMode.FullWithUpperBeams;
 
-        /// <summary>2026-09-26：等角近側牆，見 <see cref="CameraIsoNearWallsMode"/>（預設切掉）。</summary>
-        public CameraIsoNearWallsMode IsoNearWalls { get; set; } = CameraIsoNearWallsMode.Cut;
+        /// <summary>2026-09-26：等角近側，見 <see cref="CameraIsoNearWallsMode"/>（預設＝相機位置，D-039）。</summary>
+        public CameraIsoNearWallsMode IsoNearWalls { get; set; } = CameraIsoNearWallsMode.Camera;
 
         /// <summary>Key Plan 剖面方向，見 <see cref="CameraSectionOrientationMode"/>（預設對齊房間長邊）。</summary>
         public CameraSectionOrientationMode SectionOrientationMode { get; set; } = CameraSectionOrientationMode.AlongRoomLongAxis;

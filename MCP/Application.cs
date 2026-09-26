@@ -212,6 +212,8 @@ namespace RevitMCP
         {
             // 2026-09-25（§4.8 步驟 0）：記錄「相機是從哪張平面放置的」——不管面板有沒有啟用都要記。
             CaptureCameraSourcePlan(e);
+            // 2026-09-26 第四輪：相機以外的元素變了 → 房間／樓層快取與底圖點陣快取失效（面板有沒有啟用都要記）。
+            NoteCameraModelEpoch(e);
             try
             {
                 // 使用者還沒按過重新整理＝live sync 未啟用，連過濾都不做（最便宜的早退）。
@@ -312,6 +314,41 @@ namespace RevitMCP
             }
         }
 
+        /// <summary>
+        /// 2026-09-26 第四輪（D-041）：模型 epoch。本工具自己的交易（標記、總覽、Key Plan、圖紙、版本…）與「只改了透視相機」的變更
+        /// 不算；其他任何新增／修改／刪除 → epoch +1（房間／樓層判定快取與 ③ 底圖點陣快取以此判斷過期）。只讀型別，不改模型。
+        /// </summary>
+        private static void NoteCameraModelEpoch(DocumentChangedEventArgs e)
+        {
+            try
+            {
+                if (RevitMCP.Core.CameraManagerService.IsExportingBaseMap || RevitMCP.Core.CameraSourcePlanStore.IsWriting) return;
+                if (RevitMCP.Core.CameraKeyPlanService.IsUpdatingMarkers || IsOwnMarkerTransaction(e)) return;
+                try
+                {
+                    System.Collections.Generic.ICollection<string> names = e.GetTransactionNames();
+                    if (names != null && names.Count > 0 && names.All(n => n == "建立相機 Key Plan" || n == "變更相機標記顏色")) return;
+                }
+                catch { }
+                Document doc = e.GetDocument();
+                if (!IsCameraManagerRelevantDocument(doc)) return;
+                if (e.GetDeletedElementIds().Count > 0) { RevitMCP.Core.CameraKeyPlanService.BumpModelEpoch(); return; }
+                var ids = e.GetAddedElementIds().Concat(e.GetModifiedElementIds()).ToList();
+                if (ids.Count > 200) { RevitMCP.Core.CameraKeyPlanService.BumpModelEpoch(); return; }
+                foreach (ElementId id in ids)
+                {
+                    Element el = doc.GetElement(id);
+                    if (el is View3D v3 && v3.IsPerspective) continue; // 相機姿態本身已在快取鍵裡
+                    RevitMCP.Core.CameraKeyPlanService.BumpModelEpoch();
+                    return;
+                }
+            }
+            catch
+            {
+                try { RevitMCP.Core.CameraKeyPlanService.BumpModelEpoch(); } catch { }
+            }
+        }
+
         /// <summary>這次 DocumentChanged 是否只來自相機管理的「更新相機標記」交易（以交易名稱判斷）。</summary>
         private static bool IsOwnMarkerTransaction(DocumentChangedEventArgs e)
         {
@@ -407,6 +444,9 @@ namespace RevitMCP
             try
             {
                 if (_cameraManagerIdlingUiApp == null) _cameraManagerIdlingUiApp = sender as UIApplication;
+                // 2026-09-26 第四輪（使用者：Navigation Wheel 移動相機不會觸發 DocumentChanged）：作用中透視相機的導覽監看。
+                try { CameraNavigationWatch(_cameraManagerIdlingUiApp ?? sender as UIApplication, e); }
+                catch (Exception exNav) { Logger.Error($"相機管理面板：導覽監看失敗: {exNav.Message}"); }
                 // 2026-09-25（§4.8 步驟 0）：把 DocumentChanged 排隊的「相機放置平面」寫進 ES（不受面板狀態影響）。
                 if (RevitMCP.Core.CameraSourcePlanStore.HasPending)
                 {
@@ -449,9 +489,13 @@ namespace RevitMCP
                     {
                         try
                         {
+                            var swFollow = System.Diagnostics.Stopwatch.StartNew();
                             View av = uiDoc.ActiveView;
                             if (av is View3D av3 && av3.IsPerspective && !av3.IsTemplate && IsCameraManagerPaneShown(uiApp))
                                 panel.OnActivePerspectiveChanged(av3.Id);
+                            else if (!(av is View3D pv && pv.IsPerspective && !RevitMCP.Core.CameraKeyPlanService.IsSheetPerspectiveCopy(pv)))
+                                panel.OnActiveViewIsNotCamera(); // 2026-09-26：清單「目前檢視中」標示清掉
+                            Logger.Info($"⏱ 視圖啟動跟隨（Idling 端：讀作用中視圖＋排入 UI）{swFollow.ElapsedMilliseconds} ms（{av?.Name}）");
                         }
                         catch (Exception exFollow)
                         {
@@ -491,6 +535,100 @@ namespace RevitMCP
             {
                 Logger.Error($"相機管理面板 Idling 刷新失敗: {ex.Message}");
                 CameraManagerDiagnostics.RecordCaught("OnCameraManagerIdling", ex);
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // 2026-09-26 第四輪（D-042）：導覽監看——Navigation Wheel／繞行／ViewCube 移動作用中透視相機時 Revit 不發 DocumentChanged，
+        // 所以在 Idling 比對姿態雜湊：每 ≥ 300 ms 讀一次（只讀方位＋裁剪框，便宜）；變了就記下時間並要求 Idling 立即再來
+        // （SetRaiseWithoutDelay，只在「變了、還沒停住」的這段期間）；停住 1 秒不再變 → 排入面板的相機更新
+        // （標記／扇形；移動 > 300 mm 或轉 > 5° 另重算 Key Plan）。使用者還在動的期間不開任何交易。
+        // ══════════════════════════════════════════════════════════
+        private static ElementId _navCamId;
+        private static string _navDocKey;
+        private static string _navHash, _navBaseHash;
+        private static XYZ _navBaseEye;
+        private static double _navBaseYaw;
+        private static RevitMCP.Core.CameraKeyPlanService.CameraViewVersion _navBaseVersion;
+        private static DateTime _navLastCheck = DateTime.MinValue, _navLastChange = DateTime.MinValue;
+        private static bool _navDirty;
+        private const int NavCheckIntervalMs = 300;
+        private const int NavSettleMs = 1000;
+
+        private static void ResetNavigationWatch()
+        {
+            _navCamId = null; _navDocKey = null; _navHash = null; _navBaseHash = null; _navBaseEye = null;
+            _navBaseVersion = null; _navDirty = false;
+        }
+
+        private static void CameraNavigationWatch(UIApplication uiApp, Autodesk.Revit.UI.Events.IdlingEventArgs e)
+        {
+            CameraManagerPanelControl panel = _cameraManagerPanel;
+            if (panel == null || !panel.IsLiveSyncArmed || uiApp == null) { if (_navCamId != null) ResetNavigationWatch(); return; }
+            DateTime now = DateTime.UtcNow;
+            if ((now - _navLastCheck).TotalMilliseconds < NavCheckIntervalMs)
+            {
+                if (_navDirty) e.SetRaiseWithoutDelay();
+                return;
+            }
+            _navLastCheck = now;
+            UIDocument uiDoc = uiApp.ActiveUIDocument;
+            Document doc = uiDoc?.Document;
+            if (!IsCameraManagerRelevantDocument(doc)) { ResetNavigationWatch(); return; }
+            if (!(uiDoc.ActiveView is View3D cam) || !cam.IsPerspective || cam.IsTemplate || RevitMCP.Core.CameraKeyPlanService.IsSheetPerspectiveCopy(cam))
+            {
+                if (_navCamId != null) ResetNavigationWatch();
+                return;
+            }
+            string docKey = CameraManagerPanelControl.GetDocumentKey(doc);
+            if (docKey == null || docKey != panel.LoadedDocumentKey) { ResetNavigationWatch(); return; }
+            // 本工具正在寫入（標記／還原／編輯）時不比對，避免把自己的修改當成使用者導覽。
+            if (RevitMCP.Core.CameraKeyPlanService.IsUpdatingMarkers) return;
+
+            string hash = RevitMCP.Core.CameraKeyPlanService.ComputePoseHash(cam);
+            if (_navCamId == null || _navCamId != cam.Id || _navDocKey != docKey)
+            {
+                _navCamId = cam.Id; _navDocKey = docKey;
+                _navHash = _navBaseHash = hash;
+                SetNavBaseline(cam);
+                _navDirty = false;
+                return;
+            }
+            if (hash != _navHash)
+            {
+                _navHash = hash;
+                _navLastChange = now;
+                _navDirty = true;
+                e.SetRaiseWithoutDelay();
+                return;
+            }
+            if (!_navDirty) return;
+            if ((now - _navLastChange).TotalMilliseconds < NavSettleMs) { e.SetRaiseWithoutDelay(); return; }
+            _navDirty = false;
+            if (hash == _navBaseHash) return; // 動了又回到原位
+            var hint = new RevitMCP.Core.CameraKeyPlanService.CameraPoseHint
+            {
+                Eye = _navBaseEye, YawDeg = _navBaseYaw, Before = _navBaseVersion, Source = "導覽（Navigation Wheel 等）"
+            };
+            Logger.Info($"相機管理面板：導覽監看——「{cam.Name}」姿態已改變且停住 {NavSettleMs} ms → 排入相機更新（DocumentChanged 不會通知這類變動）。");
+            panel.QueueCameraUpdate(cam.Id, hint);
+            _navBaseHash = hash;
+            SetNavBaseline(cam);
+        }
+
+        private static void SetNavBaseline(View3D cam)
+        {
+            try
+            {
+                ViewOrientation3D o = cam.GetOrientation();
+                _navBaseEye = o.EyePosition;
+                _navBaseYaw = RevitMCP.Core.CameraMath.ComputeHorizontalAngleDeg(o.ForwardDirection);
+                _navBaseVersion = RevitMCP.Core.CameraKeyPlanService.CaptureVersion(cam, RevitMCP.Core.CameraKeyPlanService.OriginalVersionName);
+            }
+            catch (Exception ex)
+            {
+                _navBaseEye = null; _navBaseVersion = null;
+                Logger.Error($"相機管理面板：導覽監看記錄基準失敗: {ex.Message}");
             }
         }
 

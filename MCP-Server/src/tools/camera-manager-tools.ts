@@ -51,8 +51,8 @@ export const cameraManagerTools: Tool[] = [
                 },
                 isoNearWalls: {
                     type: "string",
-                    enum: ["cut", "keep"],
-                    description: "只影響這次執行的等角近側牆（室內相機）：cut＝觀看者側兩面切到房間邊界往內 100 mm（切掉最靠近觀看者的兩道牆）、keep＝四面都留房間 +0.6 m；省略＝沿用面板設定（預設 cut）。回傳 Decisions.IsoNearWalls／IsoNearWallsLog"
+                    enum: ["camera", "wall", "keep"],
+                    description: "只影響這次執行的等角近側（室內相機）：camera＝觀看者側兩面剛好放在眼睛的 X／Y（預設，不留後退距離）、wall＝切到房間邊界往內 100 mm（切掉最靠近觀看者的兩道牆；舊名 cut 也接受）、keep＝不切（四面都留房間 +0.6 m）；省略＝沿用面板設定（預設 camera）。回傳 Decisions.IsoNearWalls／IsoNearWallsLog"
                 },
                 resetSection: {
                     type: "boolean",

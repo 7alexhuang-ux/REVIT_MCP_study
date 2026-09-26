@@ -111,9 +111,11 @@ namespace RevitMCP.Core
             if (string.IsNullOrWhiteSpace(s)) return null;
             switch (s.Trim().ToLowerInvariant())
             {
-                case "cut": return CameraIsoNearWallsMode.Cut;
+                case "camera": return CameraIsoNearWallsMode.Camera;
+                case "wall":
+                case "cut": return CameraIsoNearWallsMode.Wall; // 2026-09-26 D-039：cut＝舊名，等同 wall
                 case "keep": return CameraIsoNearWallsMode.Keep;
-                default: throw new Exception($"isoNearWalls「{s}」無效，請用 cut 或 keep。");
+                default: throw new Exception($"isoNearWalls「{s}」無效，請用 camera、wall 或 keep。");
             }
         }
 
@@ -195,6 +197,13 @@ namespace RevitMCP.Core
                     // 2026-09-25：room＝室內相機取房間的 Level；elevation＝眼睛正下方的建築樓層
                     LevelSource = geom.StoreySource,
                     LevelByElevation = geom.StoreyByElevation?.Name,
+                    // 2026-09-26 第四輪：樓層挑選說明（多層房間：roomSpan；室外站立面：surface）與站立面射線結果
+                    StoreyLog = geom.StoreyLog,
+                    StandingSurface = geom.StandingSurfaceResolved ? new
+                    {
+                        ZMm = geom.StandingSurfaceZ.HasValue ? (double?)CmMm(geom.StandingSurfaceZ.Value) : null,
+                        Log = geom.StandingSurfaceLog
+                    } : null,
                     HeightAboveLevelCm = row.HeightAboveLevelCm,
                     HeightAboveLevelMm = geom.AboveLevelBelowMm.HasValue ? (double?)Math.Round(geom.AboveLevelBelowMm.Value, 1) : null,
                     HeightWarning = row.HeightWarning,
@@ -245,7 +254,7 @@ namespace RevitMCP.Core
                 Success = true,
                 snap.DocumentTitle,
                 Count = cameras.Count,
-                Note = "長度為內部原點座標系 mm；樓層：室內相機＝眼睛所在房間的 Level（LevelSource=room），室外＝眼睛正下方的建築樓層（Building Story，LevelSource=elevation）；離樓板高度以該樓層計算；水平角 0°=+Y、順時針為正。",
+                Note = "長度為內部原點座標系 mm；樓層（2026-09-26）：室內＝{房間 Level}∪{房間垂直範圍內有樓層平面的 Level} 中高程 ≤ 眼睛−300mm 的最高者（LevelSource=room／roomSpan）；室外＝往下射線打到的站立面 +300mm 以下、有平面的最高 Level（LevelSource=surface），沒打到＝眼睛下方建築樓層（elevation）；離樓板高度以該樓層計算；水平角 0°=+Y、順時針為正。",
                 StoreyLevels = snap.Levels.Select(l => new { Id = l.LevelId.GetIdValue(), l.Name, ElevationMm = CmMm(l.ProjectElevationFeet) }).ToList(),
                 Cameras = cameras
             };
@@ -408,6 +417,27 @@ namespace RevitMCP.Core
             string err = CameraManagerService.ApplyDetailEdit(doc, req);
             if (err != null) throw new Exception(err);
 
+            // 2026-09-26 第四輪（與面板清單編輯／導覽監看同一條更新路徑）：透視圖開著就重繪；更新標記／扇形，
+            // 眼睛移動 > 300 mm 或水平角變 > 5° 且有 Key Plan → 重算 Key Plan 範圍（不並排）。
+            string refreshed = CameraManagerService.RefreshCameraViewIfOpen(_uiApp, camera.Id);
+            var hint = new CameraKeyPlanService.CameraPoseHint
+            {
+                Eye = new XYZ(before.EyeXFeet, before.EyeYFeet, before.EyeZFeet),
+                YawDeg = before.HorizontalAngleDeg,
+                Source = "set_camera_pose"
+            };
+            string update;
+            try
+            {
+                update = CameraKeyPlanService.UpdateCamerasAfterChange(_uiApp, doc, new List<ElementId> { camera.Id },
+                    new Dictionary<ElementId, CameraKeyPlanService.CameraPoseHint> { { camera.Id, hint } }, out _);
+            }
+            catch (Exception exUpd)
+            {
+                Logger.Error("set_camera_pose：相機更新（標記／Key Plan）失敗（相機已修改）", exUpd);
+                update = "相機更新失敗：" + exUpd.Message;
+            }
+
             CameraRow after = CameraManagerService.BuildCameraRow(camera, storeys);
             object Pose(CameraRow r) => new
             {
@@ -424,7 +454,9 @@ namespace RevitMCP.Core
             {
                 Success = true,
                 Camera = new { Id = camera.Id.GetIdValue(), camera.Name },
-                Note = "planXcm/planYcm 為內部原點座標系（與面板「平面 X/Y cm」欄相同）。Key Plan 視圖不會自動重算，需要時再跑 run_camera_keyplan。",
+                Note = "planXcm/planYcm 為內部原點座標系（與面板「平面 X/Y cm」欄相同）。2026-09-26 起：編輯後自動更新標記；眼睛移動 > 300 mm 或水平角變 > 5° 且已有 Key Plan 時自動重算 Key Plan 範圍（不並排）。第一次修改前若沒有任何視角版本，自動存「A案」。",
+                ViewRefresh = refreshed,
+                CameraUpdate = update,
                 Before = Pose(before),
                 After = Pose(after)
             };
@@ -654,10 +686,15 @@ namespace RevitMCP.Core
 
             List<Level> storeys = CameraMath.GetStoreyLevelsSorted(doc);
             CameraRow now = CameraManagerService.BuildCameraRow(camera, storeys);
+            // 2026-09-26 第四輪：版本新到舊；標出目前視角符合的版本（眼睛 1 mm、方向 0.05° 內）。
+            List<CameraKeyPlanService.CameraViewVersion> versions = CameraKeyPlanService.ReadVersionsNewestFirst(camera);
+            string currentName = CameraKeyPlanService.FindCurrentVersionName(camera, versions);
             return new
             {
                 Success = true,
                 Action = action,
+                CurrentMatchesVersion = currentName,
+                NextSuggestedName = CameraKeyPlanService.SuggestNextVersionName(versions.Select(v => v.Name)),
                 Message = message,
                 Warnings = warnings,
                 Camera = new
@@ -673,10 +710,11 @@ namespace RevitMCP.Core
                         now.FarClipCm
                     }
                 },
-                Versions = CameraKeyPlanService.ReadVersions(camera).Select(v => new
+                Versions = versions.Select(v => new
                 {
                     v.Name,
                     v.SavedAt,
+                    MatchesCurrent = currentName != null && v.Name == currentName,
                     EyeMm = CmPoint(v.Eye),
                     YawDeg = Math.Round(CameraMath.ComputeHorizontalAngleDeg(v.Forward), 2),
                     PitchDeg = Math.Round(Math.Asin(Math.Max(-1.0, Math.Min(1.0, v.Forward.Normalize().Z))) * 180.0 / Math.PI, 2),

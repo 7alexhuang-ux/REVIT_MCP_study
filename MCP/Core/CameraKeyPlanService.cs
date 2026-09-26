@@ -122,7 +122,9 @@ namespace RevitMCP.Core
 
         private static View FindLinkedView(Document doc, string cameraUniqueId, string role)
         {
-            foreach (View v in new FilteredElementCollector(doc).OfClass(typeof(View)).Cast<View>())
+            // 2026-09-26 第四輪：只看帶本 Schema 的視圖（ExtensibleStorageFilter），不逐一讀全部視圖的 ES。
+            if (Schema.Lookup(SchemaGuid) == null) return null;
+            foreach (View v in new FilteredElementCollector(doc).OfClass(typeof(View)).WherePasses(new ExtensibleStorageFilter(SchemaGuid)).Cast<View>())
             {
                 if (v.IsTemplate) continue;
                 if (TryReadLink(v, out string cid, out string r) && cid == cameraUniqueId && r == role)
@@ -311,8 +313,10 @@ namespace RevitMCP.Core
 
         private static void DeleteOldMarkers(Document doc, View view, string cameraUniqueId, string role)
         {
-            List<ElementId> toDelete = new FilteredElementCollector(doc, view.Id)
-                .WhereElementIsNotElementType()
+            if (Schema.Lookup(SchemaGuid) == null) return;
+            // 2026-09-26 第四輪：標記都是視圖專屬元素 → OwnedByView＋ExtensibleStorageFilter（不再掃視圖中所有可見元素）。
+            List<ElementId> toDelete = new FilteredElementCollector(doc).OwnedByView(view.Id)
+                .WherePasses(new ExtensibleStorageFilter(SchemaGuid))
                 .Where(e => TryReadLink(e, out string cid, out string r) && cid == cameraUniqueId && r == role)
                 .Select(e => e.Id)
                 .ToList();
@@ -415,6 +419,17 @@ namespace RevitMCP.Core
         /// </summary>
         internal static KeyPlanResult CreateOrUpdateFourViews(UIApplication uiApp, Document doc, ElementId cameraViewId, bool forceResetSection = false)
         {
+            // 2026-09-26 第四輪：各步驟計時（⏱ log），實機量測時間花在哪裡。
+            using (CameraPerf perf = CameraPerf.Begin("一鍵 4 視圖（Key Plan 建立/更新）"))
+            {
+                KeyPlanResult r = CreateOrUpdateFourViewsCore(uiApp, doc, cameraViewId, forceResetSection, perf);
+                if (r?.Error != null) perf.Note("失敗：" + r.Error);
+                return r;
+            }
+        }
+
+        private static KeyPlanResult CreateOrUpdateFourViewsCore(UIApplication uiApp, Document doc, ElementId cameraViewId, bool forceResetSection, CameraPerf perf)
+        {
             var result = new KeyPlanResult();
             if (doc == null) { result.Error = "目前沒有開啟中的文件。"; return result; }
 
@@ -428,6 +443,7 @@ namespace RevitMCP.Core
             List<Level> levels = CameraMath.GetStoreyLevelsSorted(doc);
             CameraParams cp = ComputeCameraParams(camera, levels);
             CameraMath.CameraGeometry geom = cp.Geom;
+            perf?.Lap("相機參數/房間");
             if (geom.LevelBelow == null)
             {
                 result.Error = "找不到這台相機正下方的樓層，無法產生 Key Plan（一鍵 4 視圖需要樓層基準）。";
@@ -456,6 +472,9 @@ namespace RevitMCP.Core
             // 本層「頂」：以房間頂為主（挑高房間），上層樓板只認房間頂以上者（夾層不算）。純查詢。
             StoreyTop storeyTop = ComputeStoreyTop(doc, geom, isoXY, levels, cp.Room, cp.IsOutdoor);
             Logger.Info("相機 Key Plan：本層頂判定 " + storeyTop.Log);
+            Logger.Info($"相機 Key Plan：「{camName}」樓層＝「{geom.LevelBelow.Name}」（來源 {geom.StoreySource}；{geom.StoreyLog ?? "-"}）" +
+                        (geom.StandingSurfaceResolved ? "；站立面 " + (geom.StandingSurfaceLog ?? "-") : ""));
+            perf?.Lap("範圍計算");
             CameraSectionOrientationMode sectionMode = GetSectionOrientationMode();
 
             // 2026-09-25：把判定也放進回傳值（MCP 測試工具用），數值與上面 log 同源。
@@ -500,6 +519,10 @@ namespace RevitMCP.Core
                     // 2026-09-25：複製來的平面可能鎖在 Scope Box（CropBox 設定會被忽略）→ 每次先解除，再設裁剪框。
                     NormalizeDuplicatedPlan(planView, "Key Plan 平面");
                     ConfigurePlanCropBox(planView, geom, forwardHoriz, leftRad, rightRad, fanRadiusFeet, isoXY, cp.IsOutdoor);
+                    // 2026-09-26 第四輪（使用者：屋頂花園相機的 Key Plan 拿到下一層的室內平面）：室外相機有站立面 →
+                    // 平面剖切面＝站立面 +1200 mm、底／視圖深度＝站立面 −1000 mm（屋面與女兒牆看得到）。
+                    if (cp.IsOutdoor && geom.StandingSurfaceZ.HasValue)
+                        DrawMarkerSafely(doc, "OutdoorPlanViewRange", () => ApplyOutdoorPlanViewRange(doc, planView, geom.LevelBelow, geom.StandingSurfaceZ.Value));
                     bool faded = IsKeyPlanFadedStyle();
                     dec.FadedStyle = faded;
                     Logger.Info("相機 Key Plan：表現法＝" + (faded ? "淡化背景" : "原始"));
@@ -539,6 +562,8 @@ namespace RevitMCP.Core
                     result.IsoViewId = isoView.Id;
 
                     t.Commit();
+                    BumpOwnViewsEpoch();
+                    perf?.Lap("Key Plan 交易");
                 }
                 catch (Exception ex)
                 {
@@ -553,8 +578,12 @@ namespace RevitMCP.Core
             result.Warnings.AddRange(TakeCropWarnings());
             if (result.Error == null)
             {
+                RecordKeyPlanPose(doc, camera, cp);
+                RecordDrawn(doc, camera, cp);
                 // 2026-09-25 Wave 2：自動更新本層總覽＋（A 啟用時）A 型標記；各自獨立交易，失敗只記 log，不影響 4 視圖。
+                // 2026-09-26 第四輪：該樓層相機（姿態＋模型 epoch）自上次自動更新後都沒變 → 略過總覽。
                 result.OverviewViewId = TryUpdateOverviewForCamera(doc, geom.LevelBelow);
+                perf?.Lap("樓層總覽");
                 if (MarkerModeIncludesA())
                 {
                     try { result.AMarkerLog = SyncAMarkers(doc, new List<ElementId> { camera.Id }, placeMissing: true); }
@@ -563,6 +592,11 @@ namespace RevitMCP.Core
                         result.AMarkerLog = "A 型標記同步失敗：" + ex.Message;
                         Logger.Error("一鍵 4 視圖：A 型標記同步失敗（4 視圖不受影響）", ex);
                     }
+                }
+                else if (!_markerModeOverride.HasValue)
+                {
+                    // 2026-09-26 第四輪：面板設定＝B → 不碰 A 標記（切換型式時 ApplyMarkerModeChange 已統一刪除全部 A 標記）。
+                    result.AMarkerLog = "標記型式＝B：略過 A 標記";
                 }
                 else
                 {
@@ -578,9 +612,39 @@ namespace RevitMCP.Core
                         Logger.Error("一鍵 4 視圖：刪除 A 型標記失敗（4 視圖不受影響）", ex);
                     }
                 }
+                perf?.Lap("A 標記");
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 2026-09-26 第四輪：室外相機的 Key Plan 平面視圖範圍——剖切面＝站立面 +1200 mm、底與視圖深度＝站立面 −1000 mm、
+        /// 頂＝剖切面 +1000 mm，全部以相機樓層為基準的偏移。須在交易內；失敗只記 log。
+        /// </summary>
+        private static void ApplyOutdoorPlanViewRange(Document doc, ViewPlan plan, Level level, double surfaceZ)
+        {
+            if (plan == null || level == null) return;
+            PlanViewRange vr = plan.GetViewRange();
+            double lz = level.ProjectElevation;
+            double cut = surfaceZ + CameraMath.MmToFeet(1200.0) - lz;
+            double bottom = surfaceZ - CameraMath.MmToFeet(1000.0) - lz;
+            double top = cut + CameraMath.MmToFeet(1000.0);
+            string before = "";
+            try
+            {
+                before = $"剖切 {CameraMath.FeetToMm(vr.GetOffset(PlanViewPlane.CutPlane)):F0}、底 {CameraMath.FeetToMm(vr.GetOffset(PlanViewPlane.BottomClipPlane)):F0}、深度 {CameraMath.FeetToMm(vr.GetOffset(PlanViewPlane.ViewDepthPlane)):F0}";
+            }
+            catch { }
+            foreach (PlanViewPlane pl in new[] { PlanViewPlane.TopClipPlane, PlanViewPlane.CutPlane, PlanViewPlane.BottomClipPlane, PlanViewPlane.ViewDepthPlane })
+                vr.SetLevelId(pl, level.Id);
+            vr.SetOffset(PlanViewPlane.TopClipPlane, top);
+            vr.SetOffset(PlanViewPlane.CutPlane, cut);
+            vr.SetOffset(PlanViewPlane.BottomClipPlane, bottom);
+            vr.SetOffset(PlanViewPlane.ViewDepthPlane, bottom);
+            plan.SetViewRange(vr);
+            Logger.Info($"相機 Key Plan：室外平面「{plan.Name}」視圖範圍（相對「{level.Name}」mm）：{before} → 頂 {CameraMath.FeetToMm(top):F0}、剖切 {CameraMath.FeetToMm(cut):F0}、" +
+                        $"底／深度 {CameraMath.FeetToMm(bottom):F0}（站立面 {CameraMath.FeetToMm(surfaceZ):F0}mm）");
         }
 
         // ══════════════════════════════════════════════════════════
@@ -1460,7 +1524,7 @@ namespace RevitMCP.Core
         {
             if (_runOptions?.IsoNearWalls != null) return _runOptions.IsoNearWalls.Value;
             try { return ConfigManager.Instance.Settings.CameraManager.IsoNearWalls; }
-            catch { return CameraIsoNearWallsMode.Cut; }
+            catch { return CameraIsoNearWallsMode.Camera; }
         }
 
         /// <summary>
@@ -1470,10 +1534,11 @@ namespace RevitMCP.Core
         /// 牆內面，所以牆被切掉；遠側兩面維持房間 +0.6 m（牆保留），Z 不動。室外相機／找不到房間／Keep＝不動。
         /// 直接改 box（Transform＝Identity 的世界座標框），回傳 log 字串。
         /// </summary>
-        private static string ApplyIsoNearWallCut(BoundingBoxXYZ box, RoomCtx room, XYZ forwardHoriz, CameraIsoNearWallsMode mode)
+        private static string ApplyIsoNearWallCut(BoundingBoxXYZ box, RoomCtx room, XYZ forwardHoriz, CameraIsoNearWallsMode mode, XYZ eye = null)
         {
             if (mode == CameraIsoNearWallsMode.Keep) return "mode=Keep（保留，不切）";
-            if (room?.Room == null || room.Pts == null || room.Pts.Count < 3) return "mode=Cut 但無眼睛所在房間／室外 → 不切";
+            if (mode == CameraIsoNearWallsMode.Camera) return ApplyIsoNearCutAtCamera(box, room, forwardHoriz, eye);
+            if (room?.Room == null || room.Pts == null || room.Pts.Count < 3) return "mode=Wall 但無眼睛所在房間／室外 → 不切";
             // 房間邊界線外接框（只用邊界點；不含最近房間 fallback 時為了含眼睛而外擴的 rc.MinX 等）
             double rx0 = room.Pts.Min(q => q.X), rx1 = room.Pts.Max(q => q.X);
             double ry0 = room.Pts.Min(q => q.Y), ry1 = room.Pts.Max(q => q.Y);
@@ -1488,11 +1553,53 @@ namespace RevitMCP.Core
             if (sxPos) { nMinX = rx0 + inset; xSide = "MinX"; } else { nMaxX = rx1 - inset; xSide = "MaxX"; }
             if (syPos) { nMinY = ry0 + inset; ySide = "MinY"; } else { nMaxY = ry1 - inset; ySide = "MaxY"; }
             if (!(nMinX < nMaxX) || !(nMinY < nMaxY))
-                return $"mode=Cut 但房間太小（內縮後 min≥max）→ 不切 room X[{CameraMath.FeetToMm(rx0):F0},{CameraMath.FeetToMm(rx1):F0}] Y[{CameraMath.FeetToMm(ry0):F0},{CameraMath.FeetToMm(ry1):F0}]mm";
+                return $"mode=Wall 但房間太小（內縮後 min≥max）→ 不切 room X[{CameraMath.FeetToMm(rx0):F0},{CameraMath.FeetToMm(rx1):F0}] Y[{CameraMath.FeetToMm(ry0):F0},{CameraMath.FeetToMm(ry1):F0}]mm";
             box.Min = new XYZ(nMinX, nMinY, min.Z);
             box.Max = new XYZ(nMaxX, nMaxY, max.Z);
-            return $"mode=Cut corner yaw={cornerYaw:F0}° forward=({f.X:F3},{f.Y:F3},{f.Z:F3}) 切 {xSide}＋{ySide}（房間邊界內縮 {IsoNearWallInsetMm:F0}mm）" +
+            return $"mode=Wall corner yaw={cornerYaw:F0}° forward=({f.X:F3},{f.Y:F3},{f.Z:F3}) 切 {xSide}＋{ySide}（房間邊界內縮 {IsoNearWallInsetMm:F0}mm）" +
                    $" room X[{CameraMath.FeetToMm(rx0):F0},{CameraMath.FeetToMm(rx1):F0}] Y[{CameraMath.FeetToMm(ry0):F0},{CameraMath.FeetToMm(ry1):F0}]mm" +
+                   $" → box X[{CameraMath.FeetToMm(nMinX):F0},{CameraMath.FeetToMm(nMaxX):F0}] Y[{CameraMath.FeetToMm(nMinY):F0},{CameraMath.FeetToMm(nMaxY):F0}]mm" +
+                   $"（原 X[{CameraMath.FeetToMm(min.X):F0},{CameraMath.FeetToMm(max.X):F0}] Y[{CameraMath.FeetToMm(min.Y):F0},{CameraMath.FeetToMm(max.Y):F0}]mm）";
+        }
+
+        /// <summary>
+        /// 2026-09-26 第四輪（使用者決策，D-039，取代 D-038 的預設）：等角近側「相機位置」——觀看者側兩面剛好放在
+        /// 眼睛的 X／Y（不留後退距離，避免在牆後面誤切）。同 D-038：forward＝(sx, sy, −1)/√3，近側＝X：sx&gt;0 ? MinX : MaxX、
+        /// Y：sy&gt;0 ? MinY : MaxY。夾限：新面不得越過對面（留 ≥ 100 mm），眼睛在框外（觀看側之外）時該軸不動（不會把框撐大）。
+        /// 只限室內相機（room!=null）；室外的等角本來就是扇形框，不切。
+        /// </summary>
+        private static string ApplyIsoNearCutAtCamera(BoundingBoxXYZ box, RoomCtx room, XYZ forwardHoriz, XYZ eye)
+        {
+            if (room?.Room == null) return "mode=Camera 但室外／無眼睛所在房間 → 不切";
+            if (eye == null) return "mode=Camera 但沒有眼睛座標 → 不切";
+            XYZ fh = forwardHoriz != null ? new XYZ(forwardHoriz.X, forwardHoriz.Y, 0) : XYZ.BasisY;
+            fh = fh.GetLength() > 1e-6 ? fh.Normalize() : XYZ.BasisY;
+            XYZ f = CameraMath.SnapToIsoCorner(fh, out double cornerYaw);
+            bool sxPos = f.X > 0, syPos = f.Y > 0;
+            double gap = CameraMath.MmToFeet(100.0);
+            XYZ min = box.Min, max = box.Max;
+            double nMinX = min.X, nMaxX = max.X, nMinY = min.Y, nMaxY = max.Y;
+            string xs, ys;
+            if (sxPos)
+            {
+                if (eye.X > min.X) { nMinX = Math.Min(eye.X, max.X - gap); xs = "MinX→眼睛X"; } else xs = "MinX 不動（眼睛在框外）";
+            }
+            else
+            {
+                if (eye.X < max.X) { nMaxX = Math.Max(eye.X, min.X + gap); xs = "MaxX→眼睛X"; } else xs = "MaxX 不動（眼睛在框外）";
+            }
+            if (syPos)
+            {
+                if (eye.Y > min.Y) { nMinY = Math.Min(eye.Y, max.Y - gap); ys = "MinY→眼睛Y"; } else ys = "MinY 不動（眼睛在框外）";
+            }
+            else
+            {
+                if (eye.Y < max.Y) { nMaxY = Math.Max(eye.Y, min.Y + gap); ys = "MaxY→眼睛Y"; } else ys = "MaxY 不動（眼睛在框外）";
+            }
+            if (!(nMinX < nMaxX) || !(nMinY < nMaxY)) return "mode=Camera 但夾限後 min≥max → 不切";
+            box.Min = new XYZ(nMinX, nMinY, min.Z);
+            box.Max = new XYZ(nMaxX, nMaxY, max.Z);
+            return $"mode=Camera corner yaw={cornerYaw:F0}° eye=({CameraMath.FeetToMm(eye.X):F0},{CameraMath.FeetToMm(eye.Y):F0})mm {xs}＋{ys}" +
                    $" → box X[{CameraMath.FeetToMm(nMinX):F0},{CameraMath.FeetToMm(nMaxX):F0}] Y[{CameraMath.FeetToMm(nMinY):F0},{CameraMath.FeetToMm(nMaxY):F0}]mm" +
                    $"（原 X[{CameraMath.FeetToMm(min.X):F0},{CameraMath.FeetToMm(max.X):F0}] Y[{CameraMath.FeetToMm(min.Y):F0},{CameraMath.FeetToMm(max.Y):F0}]mm）";
         }
@@ -1786,7 +1893,7 @@ namespace RevitMCP.Core
             // 類別可見」，不改視圖的 DisplayStyle（使用者現況 FlatColors 維持不動）。
             BoundingBoxXYZ box = BuildIsoSectionBox(doc, geom, isoXY, storeyTop);
             // 2026-09-26（D-038）：切掉等角觀看者側的兩道牆（dollhouse cutaway），只限室內相機。
-            nearWallsLog = ApplyIsoNearWallCut(box, nearWallRoom, forwardHoriz, nearWalls);
+            nearWallsLog = ApplyIsoNearWallCut(box, nearWallRoom, forwardHoriz, nearWalls, geom?.Eye);
             Logger.Info("相機 Key Plan：等角近側牆 " + nearWallsLog);
             ViewOrientation3D orientation = BuildIsoOrientation(box, forwardHoriz);
 
@@ -2127,26 +2234,51 @@ namespace RevitMCP.Core
                 Logger.Info($"相機 Key Plan：剖面「{view.Name}」找不到相機樓層（或相機 Id），不畫樓層記號（刪除舊記號 {removed} 個；隱藏他人文字 {hiddenText} 個）");
                 return;
             }
-            List<Level> keep = ComputeSectionKeepLevels(doc, levelBelow, outdoor);
+            List<Level> keep = ComputeSectionKeepLevels(doc, levelBelow, outdoor, view);
             int drawn = DrawSectionLevelMarks(doc, view, keep, cid);
-            Logger.Info($"相機 Key Plan：剖面「{view.Name}」樓層類別整類隱藏（主體＋連結）；簡化樓層記號（{(outdoor ? "室外：只留下方樓層" : "室內：下方＋高差≥1m 上一個建築樓層")}）" +
+            Logger.Info($"相機 Key Plan：剖面「{view.Name}」樓層類別整類隱藏（主體＋連結）；簡化樓層記號（{(outdoor ? "室外：剖面高度範圍內的所有建築樓層" : "室內：樓層下一層＋樓層＋高差≥1m 上一個建築樓層")}）" +
                         $" [{string.Join(", ", keep.Select(l => $"{l.Name}@{CameraMath.FeetToMm(l.ProjectElevation):F0}mm"))}] 畫了 {drawn} 個元素；隱藏他人文字 {hiddenText} 個");
         }
 
-        /// <summary>剖面要標的主體樓層：下方樓層＋（室內）高差 ≥ 1.0 m 的下一個建築樓層。</summary>
-        private static List<Level> ComputeSectionKeepLevels(Document doc, Level levelBelow, bool outdoor)
+        /// <summary>
+        /// 剖面要標的主體樓層（2026-09-26 第四輪，使用者規則）：
+        ///   室內＝相機樓層的「下一個建築樓層」（高差 ≥ 1 m）＋相機樓層＋高差 ≥ 1 m 的上一個建築樓層；
+        ///   室外＝剖面裁剪框高度範圍內的所有建築樓層（讀不到範圍＝只有相機樓層）。
+        /// 記號仍連結真的 Level（改高程／改名自動重畫）。記號落在剖面裁剪框外時會被裁掉（範圍不因此外擴）。
+        /// </summary>
+        private static List<Level> ComputeSectionKeepLevels(Document doc, Level levelBelow, bool outdoor, View section = null)
         {
             var keep = new List<Level>();
             if (levelBelow == null) return keep;
-            keep.Add(levelBelow);
-            if (!outdoor)
+            List<Level> storeys = CameraMath.GetStoreyLevelsSorted(doc);
+            double gap = CameraMath.MmToFeet(SectionLevelMinGapMm);
+            if (outdoor)
             {
-                double gap = CameraMath.MmToFeet(SectionLevelMinGapMm);
-                Level above = CameraMath.GetStoreyLevelsSorted(doc)
-                    .FirstOrDefault(l => l.ProjectElevation >= levelBelow.ProjectElevation + gap);
-                if (above != null) keep.Add(above);
+                if (section != null && TryGetViewWorldZRange(section, out double z0, out double z1))
+                    keep.AddRange(storeys.Where(l => l.ProjectElevation >= z0 - 1e-6 && l.ProjectElevation <= z1 + 1e-6));
+                if (!keep.Any(l => l.Id == levelBelow.Id) && keep.Count == 0) keep.Add(levelBelow);
+                return keep.OrderBy(l => l.ProjectElevation).ToList();
             }
+            Level below = storeys.LastOrDefault(l => l.Id != levelBelow.Id && l.ProjectElevation <= levelBelow.ProjectElevation - gap);
+            if (below != null) keep.Add(below);
+            keep.Add(levelBelow);
+            Level above = storeys.FirstOrDefault(l => l.Id != levelBelow.Id && l.ProjectElevation >= levelBelow.ProjectElevation + gap);
+            if (above != null) keep.Add(above);
             return keep;
+        }
+
+        /// <summary>視圖裁剪框（含 Transform）八個角的世界 Z 範圍。</summary>
+        private static bool TryGetViewWorldZRange(View view, out double z0, out double z1)
+        {
+            z0 = double.MaxValue; z1 = double.MinValue;
+            try
+            {
+                BoundingBoxXYZ cb = view.CropBox;
+                if (cb == null) return false;
+                foreach (XYZ p in WorldCorners(cb)) { z0 = Math.Min(z0, p.Z); z1 = Math.Max(z1, p.Z); }
+                return z1 > z0;
+            }
+            catch { return false; }
         }
 
         // ── 簡化樓層記號（ES 連結真的 Level）──
@@ -2204,7 +2336,7 @@ namespace RevitMCP.Core
         private static int DeleteLevelMarks(Document doc, View view, string cid)
         {
             if (Schema.Lookup(LevelMarkSchemaGuid) == null) return 0;
-            List<ElementId> ids = new FilteredElementCollector(doc, view.Id).WhereElementIsNotElementType()
+            List<ElementId> ids = new FilteredElementCollector(doc).OwnedByView(view.Id).WherePasses(new ExtensibleStorageFilter(LevelMarkSchemaGuid))
                 .Where(e => TryReadLevelMark(e, out string c, out _) && (cid == null || c == cid))
                 .Select(e => e.Id).ToList();
             if (ids.Count > 0) doc.Delete(ids);
@@ -2411,6 +2543,7 @@ namespace RevitMCP.Core
                             done++;
                         }
                         t.Commit();
+                        BumpOwnViewsEpoch();
                     }
                     catch
                     {
@@ -3195,6 +3328,8 @@ namespace RevitMCP.Core
             public List<KeyValuePair<XYZ, XYZ>> Segs = new List<KeyValuePair<XYZ, XYZ>>();
             public double MinX, MinY, MaxX, MaxY;
             public double? TopZ;
+            /// <summary>2026-09-26 第四輪：房間垂直範圍 [底, 頂]（底＝Level＋底部偏移；頂＝底＋UnboundedHeight），多層房間樓層規則用。</summary>
+            public double? SpanBaseZ, SpanTopZ;
             public string Log;
         }
 
@@ -3345,114 +3480,158 @@ namespace RevitMCP.Core
         /// 回傳重畫的相機數；沒有 Key Plan 的相機直接略過。
         /// </summary>
         internal static int UpdateMarkersForCameras(Document doc, ICollection<ElementId> cameraIds)
+            => UpdateMarkersForCameras(doc, cameraIds, false, out _);
+
+        /// <summary>
+        /// 2026-09-26 第四輪（D-041，使用者：A 標記模式每次變動都重畫全部相機、每台約 3 秒、當機）：增量版。
+        ///   · 姿態雜湊（眼睛／方向／裁剪框／遠裁剪＋模型 epoch＋標記型式）與上次畫標記時相同的相機整台略過（force＝true 除外）。
+        ///   · 只掃帶 ES 的視圖（ExtensibleStorageFilter）找 Key Plan 平面／剖面。
+        ///   · 簡化樓層記號只在相機樓層變了（或沒有紀錄、或 force）才重畫；「只留本相機剖面／隱藏其他 viewer」只在 force 時重做。
+        ///   · 樓層總覽只清「舊樓層＋新樓層」兩張；A 標記只同步變了的相機（輕量：不重驗扇形樣式、沒有新放置就不重跑透視圖隱藏）。
+        /// force＝切換相機標記型式等需要全部重畫的情況。summary＝略過／重畫數量（狀態列、log）。
+        /// </summary>
+        internal static int UpdateMarkersForCameras(Document doc, ICollection<ElementId> cameraIds, bool force, out string summary)
         {
+            summary = null;
             if (doc == null || cameraIds == null || cameraIds.Count == 0) return 0;
             if (Schema.Lookup(SchemaGuid) == null) return 0; // 從未建立過 Key Plan
 
-            // 一次掃描所有視圖，找出 cid → (Plan, Section)
-            var targets = new Dictionary<string, View3D>(StringComparer.Ordinal);
-            foreach (ElementId id in cameraIds)
+            using (CameraPerf perf = CameraPerf.Begin($"更新相機標記（要求 {cameraIds.Count} 台{(force ? "，強制" : "")}）"))
             {
-                if (doc.GetElement(id) is View3D v && !v.IsTemplate && v.IsPerspective && !IsSheetPerspectiveCopy(v)) targets[v.UniqueId] = v;
-            }
-            if (targets.Count == 0) return 0;
-
-            var plans = new Dictionary<string, ViewPlan>(StringComparer.Ordinal);
-            var sections = new Dictionary<string, ViewSection>(StringComparer.Ordinal);
-            var sheetCopies = new Dictionary<string, View3D>(StringComparer.Ordinal); // 2026-09-25：出圖用透視複本
-            foreach (View v in new FilteredElementCollector(doc).OfClass(typeof(View)).Cast<View>())
-            {
-                if (v.IsTemplate) continue;
-                if (!TryReadLink(v, out string cid, out string role) || cid == null || !targets.ContainsKey(cid)) continue;
-                if (role == "Plan" && v is ViewPlan vp) plans[cid] = vp;
-                else if (role == "Section" && v is ViewSection vs) sections[cid] = vs;
-                else if (role == SheetPerspectiveRole && v is View3D pc) sheetCopies[cid] = pc;
-            }
-            // 2026-09-25 Wave 2：有樓層總覽或 A 型標記時，沒有 Key Plan 的相機也要重畫（總覽標記／A 標記）。
-            bool anyOverview = new FilteredElementCollector(doc).OfClass(typeof(ViewPlan)).Cast<ViewPlan>().Any(v => !v.IsTemplate && IsOverviewView(v));
-            bool syncA = MarkerModeIncludesA() && FindAMarkerSymbol(doc) != null;
-            List<string> work = targets.Keys.Where(k => plans.ContainsKey(k) || sections.ContainsKey(k) || sheetCopies.ContainsKey(k) || anyOverview || syncA).ToList();
-            if (work.Count == 0) return 0;
-
-            List<Level> levels = CameraMath.GetStoreyLevelsSorted(doc);
-            var overviewCams = new List<(View3D cam, CameraParams cp)>();
-            int done = 0;
-            IsUpdatingMarkers = true;
-            try
-            {
-                using (Transaction t = TransactionHelper.Begin(doc, MarkerUpdateTransactionName))
+                var targets = new Dictionary<string, View3D>(StringComparer.Ordinal);
+                int skipped = 0;
+                foreach (ElementId id in cameraIds)
                 {
-                    t.Start();
-                    try
-                    {
-                        foreach (string cid in work)
-                        {
-                            View3D cam = targets[cid];
-                            if (sheetCopies.TryGetValue(cid, out View3D sheetCopy))
-                            {
-                                string synced = null;
-                                DrawMarkerSafely(doc, "SyncSheetPerspectiveCopy", () => synced = SyncSheetPerspectiveCopy(cam, sheetCopy));
-                                Logger.Info($"相機 Key Plan：出圖用透視複本「{sheetCopy.Name}」已同步（{synced}）");
-                            }
-                            CameraParams cp = ComputeCameraParams(cam, levels);
-                            if (cp.Geom.LevelBelow == null)
-                            {
-                                Logger.Info($"相機 Key Plan：更新標記略過「{cam.Name}」（找不到下方樓層）。");
-                                continue;
-                            }
-                            overviewCams.Add((cam, cp));
-                            plans.TryGetValue(cid, out ViewPlan plan);
-                            if (plan != null)
-                                DrawMarkerSafely(doc, "UpdatePlanMarker",
-                                    () => DrawPlanMarker(doc, plan, cp.Geom, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, cp.FanRadiusFeet, cid));
-                            sections.TryGetValue(cid, out ViewSection sec);
-                            if (sec != null)
-                            {
-                                DrawMarkerSafely(doc, "UpdateSectionMarker",
-                                    () => DrawSectionMarker(doc, sec, cp.Geom, cp.CenterHoriz ?? cp.ForwardHoriz, cp.FanRadiusFeet, cp.DownRad, cp.UpRad, cid));
-                                // 2026-09-25（§5.1）：淡化樣式下，簡化樓層記號跟著相機目前樓層重畫。
-                                if (IsKeyPlanFadedStyle())
-                                    DrawMarkerSafely(doc, "UpdateSectionLevelMarks",
-                                        () => DrawSectionLevelMarks(doc, sec, ComputeSectionKeepLevels(doc, cp.Geom.LevelBelow, cp.IsOutdoor), cid));
-                            }
-                            if (plan != null && sec != null)
-                                DrawMarkerSafely(doc, "UpdateHideOtherSections",
-                                    () => HideOtherSectionMarkers(doc, plan, sec));
-                            if (sec != null)
-                                DrawMarkerSafely(doc, "UpdateHideForeignViewersSection",
-                                    () => HideForeignViewers(doc, sec, null, "剖面"));
-                            done++;
-                            Logger.Info($"相機 Key Plan：更新標記「{cam.Name}」hFOV={(cp.FovDeg.HasValue ? cp.FovDeg.Value.ToString("F1") : "?")}° " +
-                                $"vFOV={(cp.VFovDeg.HasValue ? cp.VFovDeg.Value.ToString("F1") : "?")}° edges[{cp.EdgesLog}] farClip={CameraMath.FeetToMm(cp.FarClipFeet):F0}mm " +
-                                $"fanR={CameraMath.FeetToMm(cp.FanRadiusFeet):F0}mm ({cp.FanLog}) room={(cp.Room?.Room != null ? cp.Room.Room.Id.GetIdValue().ToString() : "none")} " +
-                                $"plan={(plan != null ? plan.Id.GetIdValue().ToString() : "-")} section={(sec != null ? sec.Id.GetIdValue().ToString() : "-")} | FOV[{cp.FovLog}]");
-                        }
-                        if (anyOverview)
-                        {
-                            int ov = 0;
-                            DrawMarkerSafely(doc, "UpdateOverviewMarkers", () => ov = RedrawCamerasInOverviews(doc, overviewCams));
-                            if (ov > 0) Logger.Info($"相機 Key Plan：更新樓層總覽上 {ov} 台相機的標記");
-                        }
-                        if (syncA)
-                        {
-                            string aLog = null;
-                            DrawMarkerSafely(doc, "UpdateAMarkers", () => aLog = SyncAMarkersInTransaction(doc, overviewCams, placeMissing: true));
-                            if (aLog != null) Logger.Info("相機 Key Plan：更新 A 型標記 " + aLog);
-                        }
-                        t.Commit();
-                    }
-                    catch
-                    {
-                        try { if (t.HasStarted() && !t.HasEnded()) t.RollBack(); } catch { }
-                        throw;
-                    }
+                    if (!(doc.GetElement(id) is View3D v) || v.IsTemplate || !v.IsPerspective || IsSheetPerspectiveCopy(v)) continue;
+                    if (!force && _lastDrawn.TryGetValue(PoseKey(doc, v.UniqueId), out PoseRecord rec) && rec.Hash == MarkerHash(v)) { skipped++; continue; }
+                    targets[v.UniqueId] = v;
                 }
+                perf.Lap("比對姿態");
+                if (targets.Count == 0)
+                {
+                    summary = skipped > 0 ? $"相機標記：{skipped} 台姿態未變，略過" : null;
+                    perf.Note(summary ?? "沒有相機");
+                    return 0;
+                }
+
+                var plans = new Dictionary<string, ViewPlan>(StringComparer.Ordinal);
+                var sections = new Dictionary<string, ViewSection>(StringComparer.Ordinal);
+                var sheetCopies = new Dictionary<string, View3D>(StringComparer.Ordinal); // 2026-09-25：出圖用透視複本
+                bool anyOverview = false;
+                foreach (View v in new FilteredElementCollector(doc).OfClass(typeof(View)).WherePasses(new ExtensibleStorageFilter(SchemaGuid)).Cast<View>())
+                {
+                    if (v.IsTemplate) continue;
+                    if (!TryReadLink(v, out string cid, out string role) || cid == null) continue;
+                    if (role == OverviewRole) { anyOverview = true; continue; }
+                    if (!targets.ContainsKey(cid)) continue;
+                    if (role == "Plan" && v is ViewPlan vp) plans[cid] = vp;
+                    else if (role == "Section" && v is ViewSection vs) sections[cid] = vs;
+                    else if (role == SheetPerspectiveRole && v is View3D pc) sheetCopies[cid] = pc;
+                }
+                // 2026-09-25 Wave 2：有樓層總覽或 A 型標記時，沒有 Key Plan 的相機也要重畫（總覽標記／A 標記）。
+                bool syncA = MarkerModeIncludesA() && FindAMarkerSymbol(doc) != null;
+                List<string> work = targets.Keys.Where(k => plans.ContainsKey(k) || sections.ContainsKey(k) || sheetCopies.ContainsKey(k) || anyOverview || syncA).ToList();
+                perf.Lap("找 Key Plan 視圖");
+                if (work.Count == 0) { perf.Note("沒有 Key Plan／總覽／A 標記"); return 0; }
+
+                List<Level> levels = CameraMath.GetStoreyLevelsSorted(doc);
+                var overviewCams = new List<(View3D cam, CameraParams cp)>();
+                var prevStorey = new Dictionary<string, long?>(StringComparer.Ordinal);
+                int done = 0, levelMarkRedraw = 0;
+                IsUpdatingMarkers = true;
+                try
+                {
+                    using (Transaction t = TransactionHelper.Begin(doc, MarkerUpdateTransactionName))
+                    {
+                        t.Start();
+                        try
+                        {
+                            foreach (string cid in work)
+                            {
+                                View3D cam = targets[cid];
+                                if (sheetCopies.TryGetValue(cid, out View3D sheetCopy))
+                                {
+                                    string synced = null;
+                                    DrawMarkerSafely(doc, "SyncSheetPerspectiveCopy", () => synced = SyncSheetPerspectiveCopy(cam, sheetCopy));
+                                    Logger.Info($"相機 Key Plan：出圖用透視複本「{sheetCopy.Name}」已同步（{synced}）");
+                                }
+                                CameraParams cp = ComputeCameraParams(cam, levels);
+                                if (cp.Geom.LevelBelow == null)
+                                {
+                                    Logger.Info($"相機 Key Plan：更新標記略過「{cam.Name}」（找不到下方樓層）。");
+                                    continue;
+                                }
+                                bool hadRecord = HasLastDrawnRecord(doc, cid);
+                                long? prev = LastDrawnStorey(doc, cid);
+                                if (hadRecord) prevStorey[cid] = prev;
+                                bool storeyChanged = !hadRecord || prev != cp.Geom.LevelBelow.Id.GetIdValue();
+                                overviewCams.Add((cam, cp));
+                                plans.TryGetValue(cid, out ViewPlan plan);
+                                if (plan != null)
+                                    DrawMarkerSafely(doc, "UpdatePlanMarker",
+                                        () => DrawPlanMarker(doc, plan, cp.Geom, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, cp.FanRadiusFeet, cid));
+                                sections.TryGetValue(cid, out ViewSection sec);
+                                if (sec != null)
+                                {
+                                    DrawMarkerSafely(doc, "UpdateSectionMarker",
+                                        () => DrawSectionMarker(doc, sec, cp.Geom, cp.CenterHoriz ?? cp.ForwardHoriz, cp.FanRadiusFeet, cp.DownRad, cp.UpRad, cid));
+                                    // 2026-09-25（§5.1）：淡化樣式下，簡化樓層記號跟著相機目前樓層重畫（2026-09-26：只在樓層變了才重畫）。
+                                    if (IsKeyPlanFadedStyle() && (force || storeyChanged))
+                                    {
+                                        DrawMarkerSafely(doc, "UpdateSectionLevelMarks",
+                                            () => DrawSectionLevelMarks(doc, sec, ComputeSectionKeepLevels(doc, cp.Geom.LevelBelow, cp.IsOutdoor, sec), cid));
+                                        levelMarkRedraw++;
+                                    }
+                                }
+                                if (force)
+                                {
+                                    if (plan != null && sec != null)
+                                        DrawMarkerSafely(doc, "UpdateHideOtherSections", () => HideOtherSectionMarkers(doc, plan, sec));
+                                    if (sec != null)
+                                        DrawMarkerSafely(doc, "UpdateHideForeignViewersSection", () => HideForeignViewers(doc, sec, null, "剖面"));
+                                }
+                                done++;
+                                Logger.Info($"相機 Key Plan：更新標記「{cam.Name}」hFOV={(cp.FovDeg.HasValue ? cp.FovDeg.Value.ToString("F1") : "?")}° " +
+                                    $"vFOV={(cp.VFovDeg.HasValue ? cp.VFovDeg.Value.ToString("F1") : "?")}° edges[{cp.EdgesLog}] farClip={CameraMath.FeetToMm(cp.FarClipFeet):F0}mm " +
+                                    $"fanR={CameraMath.FeetToMm(cp.FanRadiusFeet):F0}mm ({cp.FanLog}) room={(cp.Room?.Room != null ? cp.Room.Room.Id.GetIdValue().ToString() : "none")} " +
+                                    $"storey={cp.Geom.LevelBelow.Name}{(storeyChanged ? "（變更／首次）" : "")} " +
+                                    $"plan={(plan != null ? plan.Id.GetIdValue().ToString() : "-")} section={(sec != null ? sec.Id.GetIdValue().ToString() : "-")} | FOV[{cp.FovLog}]");
+                            }
+                            perf.Lap("Key Plan 標記");
+                            if (anyOverview)
+                            {
+                                int ov = 0;
+                                DrawMarkerSafely(doc, "UpdateOverviewMarkers", () => ov = RedrawCamerasInOverviews(doc, overviewCams, force ? null : prevStorey));
+                                if (ov > 0) Logger.Info($"相機 Key Plan：更新樓層總覽上 {ov} 台相機的標記");
+                            }
+                            perf.Lap("總覽標記");
+                            if (syncA)
+                            {
+                                string aLog = null;
+                                DrawMarkerSafely(doc, "UpdateAMarkers", () => aLog = SyncAMarkersInTransaction(doc, overviewCams, placeMissing: true, light: !force));
+                                if (aLog != null) Logger.Info("相機 Key Plan：更新 A 型標記 " + aLog);
+                            }
+                            perf.Lap("A 標記");
+                            t.Commit();
+                            BumpOwnViewsEpoch();
+                            perf.Lap("Commit");
+                        }
+                        catch
+                        {
+                            try { if (t.HasStarted() && !t.HasEnded()) t.RollBack(); } catch { }
+                            throw;
+                        }
+                    }
+                    foreach (var (cam, cp) in overviewCams) RecordDrawn(doc, cam, cp);
+                }
+                finally
+                {
+                    IsUpdatingMarkers = false;
+                }
+                summary = $"相機標記：重畫 {done} 台" + (skipped > 0 ? $"、姿態未變略過 {skipped} 台" : "") + (levelMarkRedraw > 0 ? $"、樓層記號 {levelMarkRedraw} 台" : "");
+                perf.Note(summary);
+                return done;
             }
-            finally
-            {
-                IsUpdatingMarkers = false;
-            }
-            return done;
         }
 
         /// <summary>

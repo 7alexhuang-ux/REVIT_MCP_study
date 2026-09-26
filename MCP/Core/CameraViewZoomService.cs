@@ -42,6 +42,7 @@ namespace RevitMCP.Core
             public int Ticks;
             public bool ExpectTile;
             public EventHandler<IdlingEventArgs> Handler;
+            public System.Diagnostics.Stopwatch Watch = System.Diagnostics.Stopwatch.StartNew(); // 2026-09-26 第四輪：⏱
         }
 
         private static PendingZoom _pending;
@@ -106,7 +107,7 @@ namespace RevitMCP.Core
 
                 CancelPending();
                 ZoomAllNow(p.UiApp, p.ViewIds);
-                Logger.Info($"相機管理面板：並排後 ZoomToFit 完成（tick={p.Ticks}, allOpen={allOpen}, timeout={timeout}）。");
+                Logger.Info($"相機管理面板：並排後 ZoomToFit 完成（tick={p.Ticks}, allOpen={allOpen}, timeout={timeout}）。⏱ 排程到完成 {p.Watch.ElapsedMilliseconds} ms");
             }
             catch (Exception ex)
             {

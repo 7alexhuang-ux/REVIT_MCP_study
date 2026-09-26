@@ -133,6 +133,13 @@ namespace RevitMCP.Core
             public string StoreySource = "elevation";
             /// <summary>依高程判定的建築樓層（改用房間樓層前的值，僅供 log／比對）。</summary>
             public Level StoreyByElevation;
+            /// <summary>2026-09-26 第四輪：眼睛正下方的「站立面」高程（feet；ReferenceIntersector 往下打樓板／屋頂／地形），
+            /// 只在需要時（室外相機、房間頂以上的候選）才算；Resolved＝已算過（Z 可能是 null＝沒打到）。</summary>
+            public double? StandingSurfaceZ;
+            public bool StandingSurfaceResolved;
+            public string StandingSurfaceLog;
+            /// <summary>2026-09-26 第四輪：樓層挑選說明（多層房間／室外站立面規則），供 log 與 list_cameras。</summary>
+            public string StoreyLog;
         }
 
         /// <summary>

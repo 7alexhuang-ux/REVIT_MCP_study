@@ -76,6 +76,15 @@ namespace RevitMCP.Core
             catch { return false; }
         }
 
+        /// <summary>2026-09-26 第四輪：只收帶 ES 的 FamilyInstance／DirectShape（A 實例與扇形）。</summary>
+        private static List<Element> CollectTaggedAMarkers(Document doc)
+        {
+            if (Schema.Lookup(SchemaGuid) == null) return new List<Element>();
+            return new FilteredElementCollector(doc).WhereElementIsNotElementType()
+                .WherePasses(new ElementMulticlassFilter(new List<Type> { typeof(FamilyInstance), typeof(DirectShape) }))
+                .WherePasses(new ExtensibleStorageFilter(SchemaGuid)).ToList();
+        }
+
         private static List<Element> CollectTagged(Document doc)
         {
             if (Schema.Lookup(SchemaGuid) == null) return new List<Element>();
@@ -347,7 +356,7 @@ namespace RevitMCP.Core
 
         /// <summary>A 型標記同步本體（須在交易內）：每台相機只留一個族群實例＋一個扇形 DirectShape，位置／旋轉／參數跟著相機；
         /// 並確保所有透視圖隱藏子類別「相機標記」。回傳摘要。</summary>
-        private static string SyncAMarkersInTransaction(Document doc, IList<(View3D cam, CameraParams cp)> cams, bool placeMissing)
+        private static string SyncAMarkersInTransaction(Document doc, IList<(View3D cam, CameraParams cp)> cams, bool placeMissing, bool light = false)
         {
             FamilySymbol sym = FindAMarkerSymbol(doc);
             if (sym == null) return "族群未載入，略過";
@@ -358,9 +367,12 @@ namespace RevitMCP.Core
 
             var instByCam = new Dictionary<string, List<FamilyInstance>>(StringComparer.Ordinal);
             var fanByCam = new Dictionary<string, List<DirectShape>>(StringComparer.Ordinal);
-            foreach (Element e in CollectTagged(doc))
+            // 2026-09-26 第四輪：只收 FamilyInstance／DirectShape（A 實例與扇形），不讀其他帶 ES 的視圖／詳圖元素。
+            var wanted = new HashSet<string>(cams.Select(c => c.cam.UniqueId), StringComparer.Ordinal);
+            foreach (Element e in CollectTaggedAMarkers(doc))
             {
                 if (!TryReadLink(e, out string cid, out string role) || string.IsNullOrEmpty(cid)) continue;
+                if (light && !wanted.Contains(cid)) continue;
                 if (role == AMarkerRole && e is FamilyInstance fi)
                 {
                     if (!instByCam.TryGetValue(cid, out var l)) instByCam[cid] = l = new List<FamilyInstance>();
@@ -417,6 +429,7 @@ namespace RevitMCP.Core
                     Solid solid = BuildFanSolid(eye, cp.ForwardHoriz, cp.LeftRad, cp.RightRad, cp.FanRadiusFeet, matId, gsId);
                     if (solid != null)
                     {
+                        bool newFan = fan == null;
                         if (fan == null)
                         {
                             fan = DirectShape.CreateElement(doc, new ElementId(BuiltInCategory.OST_GenericModel));
@@ -427,8 +440,12 @@ namespace RevitMCP.Core
                         fan.SetShape(new List<GeometryObject> { solid });
                         try { fan.Pinned = true; } catch { }
                         fans++;
-                        if (!VerifyFanGraphicsStyle(fan, gsId, out string fanStyleLog)) fanStyleBad++;
-                        if (fanStyleLog != null && fanStyleSample == null) fanStyleSample = fanStyleLog;
+                        // 2026-09-26 第四輪：扇形樣式讀回驗證要 Regenerate＋讀幾何（慢）→ 即時更新（light）只驗新建的扇形。
+                        if (!light || newFan)
+                        {
+                            if (!VerifyFanGraphicsStyle(fan, gsId, out string fanStyleLog)) fanStyleBad++;
+                            if (fanStyleLog != null && fanStyleSample == null) fanStyleSample = fanStyleLog;
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -438,8 +455,11 @@ namespace RevitMCP.Core
                 }
             }
 
-            int hidden = HideAMarkersInPerspectiveViews(doc, sub, out int hideFail, out string hideLog);
-            return $"A 標記 放置 {placed}、移動/旋轉 {moved}、不變 {same}、扇形 {fans}（子類別樣式 gs={gsId.GetIdValue()}，不符 {fanStyleBad}{(fanStyleSample != null ? "：" + fanStyleSample : "")}）、刪除重複 {dupDeleted}、失敗 {failed}；" +
+            int hidden = 0, hideFail = 0;
+            string hideLog = "";
+            if (!light || placed > 0) hidden = HideAMarkersInPerspectiveViews(doc, sub, out hideFail, out hideLog);
+            else hideLog = "（即時更新：略過透視圖隱藏檢查）";
+            return $"A 標記{(light ? "（即時，只處理變動相機）" : "")} 放置 {placed}、移動/旋轉 {moved}、不變 {same}、扇形 {fans}（子類別樣式 gs={gsId.GetIdValue()}，不符 {fanStyleBad}{(fanStyleSample != null ? "：" + fanStyleSample : "")}）、刪除重複 {dupDeleted}、失敗 {failed}；" +
                    $"透視圖隱藏子類別 新增 {hidden} 張（失敗 {hideFail}）{hideLog}";
         }
 
@@ -757,7 +777,7 @@ namespace RevitMCP.Core
             else aMsg = $"已刪除 A 標記 {RemoveAllAMarkers(doc)} 個";
             List<ElementId> all = new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>()
                 .Where(v => !v.IsTemplate && v.IsPerspective && !IsSheetPerspectiveCopy(v)).Select(v => v.Id).ToList();
-            int n = all.Count > 0 ? UpdateMarkersForCameras(doc, all) : 0;
+            int n = all.Count > 0 ? UpdateMarkersForCameras(doc, all, true, out _) : 0; // 切換型式＝全部強制重畫
             string label = mode == CameraMarkerMode.A ? "A 模型" : mode == CameraMarkerMode.AB ? "A+B" : "B 詳圖";
             return $"相機標記＝{label}：{aMsg}；已重畫 {n} 台相機的 Key Plan／總覽標記。";
         }
@@ -808,6 +828,7 @@ namespace RevitMCP.Core
                 {
                     foreach (var x in plan)
                     {
+                        EnsureOriginalVersionInTransaction(x.cam, "拖 A 標記"); // 2026-09-26：第一次修改前自動存 A案
                         x.cam.SetOrientation(x.o);
                         changed.Add(x.cam.Id);
                     }

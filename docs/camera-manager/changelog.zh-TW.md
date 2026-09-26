@@ -6,6 +6,18 @@
 
 ## 2026-09-26
 
+### 09:40｜使用者實測第四輪修正（14 項＋效能／互動追加，已編譯、已部署 Revit 2024、待複測）
+- **效能（D-041）**：相機變動後改為增量更新——姿態雜湊沒變的相機整台略過；總覽只清舊／新樓層兩張；A 標記只同步變了的相機（不重驗扇形、不重跑透視圖隱藏）；樓層記號只在樓層變了才重畫；標記刪除改 `OwnedByView`＋ES 過濾；去抖 800 ms。房間／樓層判定以「相機＋眼睛＋模型 epoch」快取；③ 底圖點陣快取（6 張）；佇列中已有快照時合併；一鍵 4 視圖同樓層相機沒變就略過總覽、面板標記型式＝B 不碰 A 標記。各步驟 `⏱` 計時寫 log（`CameraPerf`）。
+- **Navigation Wheel 不同步（D-042）**：Idling 導覽監看作用中透視相機（每 ≥ 300 ms 比對姿態雜湊，停住 1 秒後排入更新；移動 > 300 mm 或轉 > 5° 重算 Key Plan）。
+- **清單／`set_camera_pose` 編輯後**：透視圖重繪（RefreshActiveView／UpdateAllOpenViews），並走同一條更新路徑（含 Key Plan 重算判斷）；`set_camera_pose` 回傳 `ViewRefresh`、`CameraUpdate`。
+- **樓層（D-040）**：多層房間取「房間範圍內、有平面、≤ 眼睛−300 mm」的最高 Level（大廳樓梯→L3、樓中樓→上層）；房間頂以上且中間隔著樓板的候選排除；室外以往下射線找站立面決定樓層，Key Plan 平面剖切面＝站立面 +1200 mm、底／深度＝−1000 mm。
+- **等角近側（D-039）**：預設改「相機位置」（近側兩面在眼睛 X／Y），另有「牆內側」（D-038 舊規則）與「保留」；`isoNearWalls` 接受 camera／wall／keep（cut＝wall）。
+- **剖面樓層記號**：室內＝樓層下一層＋樓層＋上一層（≥ 1 m）；室外＝剖面高度範圍內所有建築樓層。
+- **視圖**：「僅打開透視圖」關閉其他視圖；同一台相機的 4 張視圖已開著 → 只 ZoomToFit、不重新並排；一鍵出圖紙完成後啟動圖紙並關閉其他視圖。停靠面板寬度：API 無法讀寫目前寬度 → 無法還原，改為不重複並排＋宣告 `MinimumWidth = 300`（D-043）。
+- **視角版本**：第一次修改前自動存「A案」；儲存建議名稱＝下一個空字母（B案…）；還原前目前視角不在任何版本 → 自動存「自動備份 HH:mm」；選單新到舊、目前符合者 ✓；`camera_version` 回傳 `CurrentMatchesVersion`／`MatchesCurrent`／`NextSuggestedName`。
+- **清單**：目前正在看的相機＝粗體＋左側 accent 條；橘色列說明寫進列 ToolTip 與 ① ⋯ 選單圖例；提示列改「雙擊名稱開 4 視圖・點數字直接修改・右鍵更多」。
+- **互動（D-043）**：清單／地圖單擊＝只選取、雙擊＝一鍵 4 視圖；③ 地圖上按住已選取相機的圓點拖曳＝移動、Shift＋拖曳或拖視線末端把手＝旋轉，拖曳中不呼叫 Revit、放開送出一次編輯、Esc 取消。
+
 ### 08:23｜等角近側牆切除＋新通用工具 `set_section_box`（已編譯、待 MCP 複測）
 - **等角 Key Plan 切掉觀看者側兩道牆**（使用者要求，D-038）：室內相機的等角剖面框，近側兩面（依等角角落方向：sx > 0 → MinX 否則 MaxX；sy > 0 → MinY 否則 MaxY）改為房間邊界往內 100 mm，遠側兩面維持房間 +0.6 m，Z 不變；④ ▾ 新增「等角近側牆：切掉（預設）／保留」（本機設定），`run_camera_keyplan` 加 `isoNearWalls`（cut／keep），回傳 `Decisions.IsoNearWalls`／`IsoNearWallsLog`。室外相機不變。
 - **新 MCP 工具 `set_section_box`**（通用，view-cropbox-tools）：直接設定 3D 視圖 Section Box——絕對 `minMm`＋`maxMm` 或相對 `offsetsMm`（各面正＝外擴、負＝內縮），`enable` 預設 true；正交視圖同時關閉 CropBox；交易「設定剖面框」，回傳前後世界 min/max 與尺寸。工具數 220 → 221。

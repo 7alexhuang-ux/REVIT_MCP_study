@@ -94,6 +94,9 @@ namespace RevitMCP.UI
         private XYZ _sectionP1, _sectionP2;
         private WpfLine _sectionLineVisual;
         private Func<XYZ, WpfPoint> _currentProject;
+        /// <summary>2026-09-26 第四輪：畫布內容座標 → 模型 XY（feet）；畫布角度（rad，Y 向下）→ 模型水平角（°，0＝北、順時針）。地圖拖曳用。</summary>
+        private Func<WpfPoint, (double x, double y)> _currentUnproject;
+        private Func<double, double> _currentCanvasAngleToYawDeg;
 
         /// <summary>一台相機在畫布上畫出的標記群組：獨立小 Canvas（錨點在標記位置、套用 1/scale
         /// 反向縮放，讓標記在任何縮放層級下維持固定螢幕大小），群組內含四個圖元（點／方向桿／
@@ -107,16 +110,27 @@ namespace RevitMCP.UI
             /// <summary>2026-09-25：眼睛處的實心小楔形（取代舊的朝前三角形箭頭）。</summary>
             public WpfPath Head;
             public WpfPath Fan;
+            /// <summary>2026-09-26 第四輪：扇形／視線／楔形放在可旋轉的子層（地圖上拖曳旋轉用）；Handle＝視線末端的旋轉把手（選取中才顯示）。</summary>
+            public RotateTransform Rot;
+            public WpfEllipse Handle;
+            public CameraRow Row;
+            public double PlanarAngleRad;
+            public WpfPoint Anchor;
         }
         private readonly Dictionary<ElementId, MarkerVisual> _markersByViewId = new Dictionary<ElementId, MarkerVisual>();
 
         public event Action<PlanViewOption> PlanSelected;
-        /// <summary>左鍵單擊相機標記（2026-09-24 v5：語意從「只選取」改成「選取＋觸發開啟動作」，
+        /// <summary>左鍵「雙擊」相機標記（2026-09-26 起；2026-09-24 v5 曾是單擊＝選取＋觸發開啟動作），
         /// 由 CameraManagerPanelControl.RunConfiguredOpenAction 決定實際動作，本類別不知道
         /// 「一鍵 4 視圖」這件事）。</summary>
         public event Action<CameraRow> MarkerActivated;
         /// <summary>右鍵單擊相機標記：(row, 這個標記的視覺元素，供選單 PlacementTarget 用)。</summary>
         public event Action<CameraRow, UIElement> MarkerContextMenuRequested;
+        /// <summary>2026-09-26 第四輪（使用者決策）：左鍵「單擊」標記＝只選取（雙擊才是 MarkerActivated＝一鍵 4 視圖）。</summary>
+        public event Action<CameraRow> MarkerSelected;
+        /// <summary>2026-09-26 第四輪：在地圖上拖曳（移動）或旋轉選取中的相機，放開滑鼠時送出一次：
+        /// (row, 新眼睛 X feet 或 null, 新眼睛 Y feet 或 null, 新水平角 ° 或 null)。拖曳過程完全不呼叫 Revit。</summary>
+        public event Action<CameraRow, double?, double?, double?> CameraDragCommitted;
 
         private static CameraManagerSettings Settings => ConfigManager.Instance.Settings.CameraManager;
 
@@ -158,6 +172,10 @@ namespace RevitMCP.UI
             _viewport.PreviewMouseDown += (s, e) => { if (e.ChangedButton == MouseButton.Middle) TryStartPan(e); };
             _viewport.PreviewMouseMove += Viewport_PreviewMouseMove;
             _viewport.PreviewMouseUp += Viewport_PreviewMouseUp;
+            // 2026-09-26 第四輪：地圖拖曳相機時 Esc 取消；捕捉被搶走（例如跳出對話框）也取消。
+            _viewport.Focusable = true;
+            _viewport.PreviewKeyDown += (s, e) => { if (_camDrag != null && e.Key == Key.Escape) { e.Handled = true; SafeUi(() => CameraDragEnd(commit: false), "CameraDragEsc"); } };
+            _viewport.LostMouseCapture += (s, e) => { if (_camDrag != null && !_camDragEnding) SafeUi(() => CameraDragEnd(commit: false), "CameraDragLostCapture"); };
             // 2026-09-24 第四輪：拿掉「右鍵地圖＝除錯選單」（每次右鍵都 new 一個 ContextMenu），
             // 「顯示對位框」改成右上角浮動工具列上的切換鈕。
             WpfGrid.SetRow(_viewport, 0);
@@ -401,6 +419,8 @@ namespace RevitMCP.UI
         /// 重畫標記並保留使用者目前的縮放平移。沒有底圖時什麼都不畫（不會自己去匯出）。</summary>
         public void RedrawMarkers(List<CameraRow> rows, bool hasCroppedPlan)
         {
+            // 2026-09-26 第四輪：地圖拖曳中不重畫（會把正在拖的標記換掉）；記下資料，放開後的快照會再畫一次。
+            if (_camDrag != null) { _rows = rows ?? new List<CameraRow>(); Logger.Info("相機管理面板：③ 拖曳中，延後重畫標記。"); return; }
             if (_currentMap != null && _mapLayer.Background is ImageBrush ib && ib.ImageSource is BitmapSource bmp)
                 DrawWithBaseMap(bmp, _currentMap, rows, preserveView: true);
             else if (!hasCroppedPlan && _currentMap == null && _currentProject != null)
@@ -484,7 +504,7 @@ namespace RevitMCP.UI
             Canvas.SetLeft(_hintText, 10);
             Canvas.SetTop(_hintText, 10);
             _mapLayer.Children.Add(_hintText);
-            _currentProject = null;
+            _currentProject = null; _currentUnproject = null; _currentCanvasAngleToYawDeg = null;
             _userAdjustedView = false;
             SetOffImageNotice(false, null);
             FitToView();
@@ -542,12 +562,24 @@ namespace RevitMCP.UI
 
             double widthFeet = map.CropMaxXFeet - map.CropMinXFeet;
             double heightFeet = map.CropMaxYFeet - map.CropMinYFeet;
-            if (!(widthFeet > 1e-6) || !(heightFeet > 1e-6) || !IsFinite(widthFeet) || !IsFinite(heightFeet)) { _currentProject = null; FitToView(); return; }
+            if (!(widthFeet > 1e-6) || !(heightFeet > 1e-6) || !IsFinite(widthFeet) || !IsFinite(heightFeet)) { _currentProject = null; _currentUnproject = null; _currentCanvasAngleToYawDeg = null; FitToView(); return; }
 
             double scaleX = bitmap.PixelWidth / widthFeet;
             double scaleY = bitmap.PixelHeight / heightFeet;
             Func<XYZ, WpfPoint> project = p => ToLocalPixel(p, map, scaleX, scaleY);
             _currentProject = project;
+            _currentUnproject = px =>
+            {
+                double lx = px.X / scaleX + map.CropMinXFeet;
+                double ly = map.CropMaxYFeet - px.Y / scaleY;
+                map.LocalToModel(lx, ly, out double mx, out double my);
+                return (mx, my);
+            };
+            _currentCanvasAngleToYawDeg = a =>
+            {
+                map.LocalVectorToModel(Math.Cos(a), -Math.Sin(a), out double vx, out double vy);
+                return YawFromModelVector(vx, vy);
+            };
 
             // 2026-09-24 對位改版：除錯疊圖「顯示對位框」（右鍵地圖開關，預設關閉）——畫出換算用
             // 的模型裁剪框（紅虛線）與整張換算範圍（藍虛線），圖面內容若沒有剛好落在紅框內，
@@ -635,7 +667,7 @@ namespace RevitMCP.UI
             {
                 TextBlock msg = new TextBlock { Text = "沒有相機可顯示。", Foreground = CameraManagerTheme.SecondaryText, Margin = new Thickness(10), FontFamily = CameraManagerTheme.UiFont };
                 _mapLayer.Children.Add(msg);
-                _currentProject = null;
+                _currentProject = null; _currentUnproject = null; _currentCanvasAngleToYawDeg = null;
                 _userAdjustedView = false;
                 FitToView();
                 return;
@@ -654,6 +686,8 @@ namespace RevitMCP.UI
                 return new WpfPoint(px, py);
             };
             _currentProject = project;
+            _currentUnproject = px => ((px.X - margin) / scale + minX, (canvasSize - margin - px.Y) / scale + minY);
+            _currentCanvasAngleToYawDeg = a => YawFromModelVector(Math.Cos(a), -Math.Sin(a));
 
             foreach (CameraRow row in _rows)
                 DrawOneCamera(row, project, dim: false, checkRange: false, map: null);
@@ -691,6 +725,14 @@ namespace RevitMCP.UI
             double px = (lx - map.CropMinXFeet) * scaleX;
             double py = (map.CropMaxYFeet - ly) * scaleY;
             return new WpfPoint(px, py);
+        }
+
+        /// <summary>模型水平向量 → 水平角（0＝+Y 北、順時針為正，0–360）；與 CameraMath.ComputeHorizontalAngleDeg 同定義。</summary>
+        private static double YawFromModelVector(double x, double y)
+        {
+            double a = Math.Atan2(x, y) * 180.0 / Math.PI;
+            if (a < 0) a += 360.0;
+            return Math.Round(a, 2);
         }
 
         private static bool IsFinite(double v) => !double.IsNaN(v) && !double.IsInfinity(v);
@@ -792,20 +834,36 @@ namespace RevitMCP.UI
 
             WpfPoint origin = new WpfPoint(0, 0); // 群組本地座標系原點＝anchor
 
+            // 2026-09-26 第四輪：扇形／視線／楔形／旋轉把手放在可旋轉子層（地圖拖曳旋轉時只改這一層的角度）。
+            RotateTransform rot = new RotateTransform(0, 0, 0);
+            Canvas rotLayer = new Canvas { RenderTransform = rot, IsHitTestVisible = true };
+            group.Children.Add(rotLayer);
+
             // 視野扇形（局部座標，中心在原點）
             WpfPath fan = BuildFanPath(origin, planarAngleRad + leftEdgeRad, planarAngleRad + rightEdgeRad, FanRadius);
             fan.IsHitTestVisible = false;
-            group.Children.Add(fan);
+            rotLayer.Children.Add(fan);
 
             // 中央視線：沿相機正前方到扇形半徑。
             WpfPoint shaftEnd = new WpfPoint(Math.Cos(planarAngleRad) * FanRadius, Math.Sin(planarAngleRad) * FanRadius);
             WpfLine shaft = new WpfLine { X1 = 0, Y1 = 0, X2 = shaftEnd.X, Y2 = shaftEnd.Y, StrokeThickness = 2, IsHitTestVisible = false };
-            group.Children.Add(shaft);
+            rotLayer.Children.Add(shaft);
 
             // 眼睛楔形（取代舊的朝前三角形箭頭）：頂點在眼睛、沿同樣兩條邊界張開，長度＝ArrowLen。
             WpfPath head = BuildFanPath(origin, planarAngleRad + leftEdgeRad, planarAngleRad + rightEdgeRad, ArrowLen);
             head.IsHitTestVisible = false;
-            group.Children.Add(head);
+            rotLayer.Children.Add(head);
+
+            // 旋轉把手：視線末端的小圓（只有選取中、非淡化的相機顯示）。拖它＝改水平角。
+            WpfEllipse handle = new WpfEllipse
+            {
+                Width = 9, Height = 9, Fill = CameraManagerTheme.Surface, Stroke = CameraManagerTheme.Accent, StrokeThickness = 1.5,
+                Cursor = Cursors.Hand, Tag = row, ToolTip = "③ 拖曳旋轉：改這台相機的水平角（放開才套用；Esc 取消）",
+                Visibility = isSelected ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed
+            };
+            Canvas.SetLeft(handle, shaftEnd.X - 4.5);
+            Canvas.SetTop(handle, shaftEnd.Y - 4.5);
+            rotLayer.Children.Add(handle);
 
             WpfEllipse dot = new WpfEllipse
             {
@@ -813,9 +871,12 @@ namespace RevitMCP.UI
                 Stroke = CameraManagerTheme.WhiteText, StrokeThickness = 1.5,
                 Cursor = Cursors.Hand, Tag = row
             };
-            // 左鍵＝開啟動作、右鍵＝選單，分開掛在對應的路由事件上，避免 MouseDown（不分左右鍵）
-            // 同時觸發兩邊（2026-09-24 v5 新增右鍵選單時一併修正）。
-            dot.MouseLeftButtonDown += (s, e) => SafeUi(() => MarkerActivated?.Invoke(row), "MarkerActivated");
+            // 左鍵、右鍵分開掛在對應的路由事件上，避免 MouseDown（不分左右鍵）同時觸發兩邊。
+            // 2026-09-26 第四輪（使用者決策）：單擊＝選取；雙擊＝開啟動作（一鍵 4 視圖）；按住「已選取」相機的圓點拖曳＝移動
+            // （Shift＋拖曳＝旋轉），放開才送出一次編輯。
+            dot.ToolTip = "③ " + row.Name + "：單擊＝選取・雙擊＝一鍵 4 視圖・選取後拖曳＝移動（Shift＋拖曳＝旋轉；Esc 取消）・右鍵＝更多";
+            dot.MouseLeftButtonDown += (s, e) => SafeUi(() => OnMarkerDotDown(row, e, rotateOnly: (Keyboard.Modifiers & ModifierKeys.Shift) != 0), "MarkerDotDown");
+            handle.MouseLeftButtonDown += (s, e) => SafeUi(() => OnMarkerDotDown(row, e, rotateOnly: true, fromHandle: true), "MarkerHandleDown");
             dot.MouseRightButtonDown += (s, e) => { e.Handled = true; SafeUi(() => MarkerContextMenuRequested?.Invoke(row, dot), "MarkerContextMenu"); };
             Canvas.SetLeft(dot, -5.5);
             Canvas.SetTop(dot, -5.5);
@@ -838,7 +899,11 @@ namespace RevitMCP.UI
             group.Children.Add(label);
 
             _mapLayer.Children.Add(group);
-            _markersByViewId[row.ViewId] = new MarkerVisual { Group = group, InverseScale = inverseScale, Dot = dot, Shaft = shaft, Head = head, Fan = fan };
+            _markersByViewId[row.ViewId] = new MarkerVisual
+            {
+                Group = group, InverseScale = inverseScale, Dot = dot, Shaft = shaft, Head = head, Fan = fan,
+                Rot = rot, Handle = handle, Row = row, PlanarAngleRad = planarAngleRad, Anchor = anchor
+            };
         }
 
         /// <summary>依選取狀態把 accent（選取中）／次要色（一般）／淡化（其他樓層）套到扇形填色＋
@@ -962,6 +1027,7 @@ namespace RevitMCP.UI
                 bool dim = v.Group.Opacity < 0.99; // 淡化標記不參與選取變色（見 DrawOneCamera 的 dim 邏輯）
                 v.Dot.Fill = dim ? CameraManagerTheme.SecondaryText : (selected ? CameraManagerTheme.Accent : CameraManagerTheme.SecondaryText);
                 ApplyMarkerColors(v.Fan, v.Shaft, v.Head, selected && !dim, dim);
+                if (v.Handle != null) v.Handle.Visibility = selected && !dim ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
             }
         }
 
@@ -1093,6 +1159,7 @@ namespace RevitMCP.UI
 
         private void Viewport_PreviewMouseMove(object sender, MouseEventArgs e)
         {
+            if (_camDrag != null) { SafeUi(() => CameraDragMove(e), "CameraDragMove"); return; }
             if (!_potentialPan) return;
             WpfPoint cur = e.GetPosition(_viewport);
             double dx = cur.X - _panStartScreen.X;
@@ -1109,8 +1176,118 @@ namespace RevitMCP.UI
             ApplyTransform();
         }
 
+        // ══════════════════════════════════════════════════════════
+        // 2026-09-26 第四輪：地圖上拖曳移動／旋轉相機（只動 WPF 畫布；放開才送出一次編輯）
+        // ══════════════════════════════════════════════════════════
+        private sealed class CamDragState
+        {
+            public MarkerVisual Marker;
+            public CameraRow Row;
+            public bool Rotate;
+            public WpfPoint StartScreen;
+            public bool Active;
+            public double CurrentDx, CurrentDy;   // 內容座標位移（移動模式）
+            public double CurrentAngleRad;        // 畫布角度（旋轉模式）
+        }
+        private CamDragState _camDrag;
+        private bool _camDragEnding;
+
+        /// <summary>標記圓點／把手按下：單擊＝選取；雙擊＝開啟動作；按在「已選取」相機上＝可能開始拖曳（移動或旋轉）。</summary>
+        private void OnMarkerDotDown(CameraRow row, MouseButtonEventArgs e, bool rotateOnly, bool fromHandle = false)
+        {
+            if (row == null) return;
+            if (e.ClickCount >= 2)
+            {
+                e.Handled = true;
+                MarkerActivated?.Invoke(row);
+                return;
+            }
+            bool wasSelected = _selectedViewId != null && row.ViewId != null && SameId(_selectedViewId, row.ViewId);
+            if (!wasSelected)
+            {
+                MarkerSelected?.Invoke(row);
+                if (!fromHandle) return; // 還沒選取的相機：這一下只選取，不拖曳
+            }
+            if (!_markersByViewId.TryGetValue(row.ViewId, out MarkerVisual mv) || mv.Group.Opacity < 0.99 || _currentUnproject == null) return;
+            _camDrag = new CamDragState { Marker = mv, Row = row, Rotate = rotateOnly, StartScreen = e.GetPosition(_viewport), CurrentAngleRad = mv.PlanarAngleRad };
+            _viewport.CaptureMouse();
+            try { _viewport.Focus(); } catch { }
+            e.Handled = true;
+        }
+
+        private void CameraDragMove(MouseEventArgs e)
+        {
+            CamDragState d = _camDrag;
+            if (d == null) return;
+            if (Keyboard.IsKeyDown(Key.Escape)) { CameraDragEnd(commit: false); return; }
+            WpfPoint cur = e.GetPosition(_viewport);
+            double dx = cur.X - d.StartScreen.X, dy = cur.Y - d.StartScreen.Y;
+            if (!d.Active)
+            {
+                if (Math.Abs(dx) < PanThresholdPx && Math.Abs(dy) < PanThresholdPx) return;
+                d.Active = true;
+                Logger.Info($"相機管理面板：③ 開始在地圖上{(d.Rotate ? "旋轉" : "移動")}「{d.Row.Name}」（放開才套用，拖曳中不呼叫 Revit）。");
+            }
+            if (d.Rotate)
+            {
+                // 錨點的螢幕座標＝內容座標 × scale ＋ offset
+                double ax = d.Marker.Anchor.X * _scale + _offset.X, ay = d.Marker.Anchor.Y * _scale + _offset.Y;
+                double ang = Math.Atan2(cur.Y - ay, cur.X - ax);
+                if (!IsFinite(ang)) return;
+                d.CurrentAngleRad = ang;
+                d.Marker.Rot.Angle = (ang - d.Marker.PlanarAngleRad) * 180.0 / Math.PI;
+            }
+            else
+            {
+                double s = _scale > 1e-9 ? _scale : 1.0;
+                d.CurrentDx = dx / s; d.CurrentDy = dy / s;
+                Canvas.SetLeft(d.Marker.Group, d.Marker.Anchor.X + d.CurrentDx);
+                Canvas.SetTop(d.Marker.Group, d.Marker.Anchor.Y + d.CurrentDy);
+            }
+        }
+
+        private void CameraDragEnd(bool commit)
+        {
+            CamDragState d = _camDrag;
+            if (d == null) return;
+            _camDrag = null;
+            _camDragEnding = true;
+            try { if (_viewport.IsMouseCaptured) _viewport.ReleaseMouseCapture(); } catch { }
+            finally { _camDragEnding = false; }
+            if (!d.Active) return; // 只是點一下
+            if (!commit)
+            {
+                Canvas.SetLeft(d.Marker.Group, d.Marker.Anchor.X);
+                Canvas.SetTop(d.Marker.Group, d.Marker.Anchor.Y);
+                d.Marker.Rot.Angle = 0;
+                Logger.Info($"相機管理面板：③ 取消拖曳「{d.Row.Name}」（Esc／捕捉中斷），標記還原。");
+                return;
+            }
+            if (d.Rotate)
+            {
+                double yaw = _currentCanvasAngleToYawDeg != null ? _currentCanvasAngleToYawDeg(d.CurrentAngleRad) : double.NaN;
+                if (!IsFinite(yaw)) { d.Marker.Rot.Angle = 0; return; }
+                Logger.Info($"相機管理面板：③ 地圖旋轉「{d.Row.Name}」水平角 {d.Row.HorizontalAngleDeg:F1}° → {yaw:F1}°（送出一次編輯）");
+                CameraDragCommitted?.Invoke(d.Row, null, null, yaw);
+            }
+            else
+            {
+                var p = new WpfPoint(d.Marker.Anchor.X + d.CurrentDx, d.Marker.Anchor.Y + d.CurrentDy);
+                (double x, double y) = _currentUnproject(p);
+                if (!IsFinite(x) || !IsFinite(y))
+                {
+                    Canvas.SetLeft(d.Marker.Group, d.Marker.Anchor.X);
+                    Canvas.SetTop(d.Marker.Group, d.Marker.Anchor.Y);
+                    return;
+                }
+                Logger.Info($"相機管理面板：③ 地圖移動「{d.Row.Name}」眼睛 XY ({d.Row.EyeXFeet * 304.8:F0},{d.Row.EyeYFeet * 304.8:F0}) → ({x * 304.8:F0},{y * 304.8:F0}) mm（送出一次編輯，離樓板高度與方向不變）");
+                CameraDragCommitted?.Invoke(d.Row, x, y, null);
+            }
+        }
+
         private void Viewport_PreviewMouseUp(object sender, MouseButtonEventArgs e)
         {
+            if (_camDrag != null) { SafeUi(() => CameraDragEnd(commit: true), "CameraDragEnd"); e.Handled = true; return; }
             if (!_potentialPan) return;
             _potentialPan = false;
             _panning = false;
