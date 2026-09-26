@@ -3475,6 +3475,10 @@ namespace RevitMCP.Core
             public double? TopZ;
             /// <summary>2026-09-26 第四輪：房間垂直範圍 [底, 頂]（底＝Level＋底部偏移；頂＝底＋UnboundedHeight），多層房間樓層規則用。</summary>
             public double? SpanBaseZ, SpanTopZ;
+            /// <summary>2026-09-26 第五輪：眼睛 XY 落在房間內、但眼睛高於房間頂（被排除）的房間中，最高的房間頂 Z——
+            /// 室外相機站在該房間上方的屋頂／露台時，射線若漏掉屋頂面，以此推定站立面。</summary>
+            public double? RoofBelowZ;
+            public string RoofBelowLabel;
             public string Log;
         }
 

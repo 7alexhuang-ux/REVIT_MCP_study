@@ -18,14 +18,13 @@ namespace RevitMCP.Core
     ///   1. 候選＝已放置房間（面積 &gt; 0、與透視圖同一個 Phase）中，BoundingBox XY 含眼睛者（便宜的前篩），
     ///      再以房間邊界線段（Tessellate，所有迴圈奇偶規則，含中空）做點在多邊形內判定。
     ///   2. 其中垂直範圍 [底, 頂] 含眼睛高度者優先（多個時取底最高者＝最內層）；
-    ///      都不含 → 取垂直距離最近、且 ≤ 2.0 m 者（例：眼睛比房間底低 150 mm）。
+    ///      都不含 → 只接受「眼睛低於房間底 ≤ 600 mm」且眼下站立面不在房間範圍外者（2026-09-26 第五輪；舊版 ≤ 2.0 m 且含房間上方）。
     ///   3. 同 Phase 找不到任何 XY 候選時，改不分 Phase 再找一次並記 log（透視圖 Phase 與房間 Phase 不同的模型）。
     ///   底＝房間 Level 高程＋底部偏移；頂＝底＋UnboundedHeight（取不到用 BoundingBox 頂）。
     /// 室內相機的樓層＝房間的 Level（room.LevelId），離樓板高度以該樓層計算；室外維持「眼睛正下方的建築樓層」。
     /// </summary>
     internal static partial class CameraKeyPlanService
     {
-        private const double EyeRoomVerticalToleranceMm = 2000.0;
         private static readonly HashSet<string> _loggedEyeRoomChoices = new HashSet<string>(StringComparer.Ordinal);
 
         // ══════════════════════════════════════════════════════════
@@ -100,7 +99,8 @@ namespace RevitMCP.Core
         {
             string phase = "";
             try { phase = camera.get_Parameter(BuiltInParameter.VIEW_PHASE)?.AsElementId()?.GetIdValue().ToString() ?? ""; } catch { }
-            return $"{ModelEpoch}|{Math.Round(CameraMath.FeetToMm(eye.X))}|{Math.Round(CameraMath.FeetToMm(eye.Y))}|{Math.Round(CameraMath.FeetToMm(eye.Z))}|{phase}";
+            // StoreyRuleVersion：規則改版時舊快取一律失效（同一個 Revit 工作階段內熱重載也不沿用舊判定）。
+            return $"{StoreyRuleVersion}|{ModelEpoch}|{Math.Round(CameraMath.FeetToMm(eye.X))}|{Math.Round(CameraMath.FeetToMm(eye.Y))}|{Math.Round(CameraMath.FeetToMm(eye.Z))}|{phase}";
         }
 
         // ── 有非樣板樓層平面的 Level（多層房間／室外站立面規則用），每個 epoch 算一次 ──
@@ -135,7 +135,9 @@ namespace RevitMCP.Core
         /// CameraMath.ComputeGeometry 呼叫：搜尋眼睛所在房間並存進 geom；決定相機的樓層（清單、③ 位置圖跟隨、Key Plan、
         /// 樓層總覽分組、剖面樓層記號、A 標記都經由這裡取得同一個值）。2026-09-26 第四輪規則（D-040）：
         ///   室內：樓層＝{room.Level} ∪ {房間垂直範圍內、且至少有一張非樣板樓層平面的 Level} 之中，高程 ≤ 眼睛 − 300 mm 的最高者；
-        ///         都不符合 → room.Level（例：大廳樓梯房間掛在 L1、往上跨到 L3，眼睛在 L3 → 樓層＝L3）。
+        ///         （第五輪：範圍容差 ±300 mm；都不符合 → 全模型 ≤ 眼睛 − 300 mm 的最高建築樓層（優先有平面），不再盲目用 room.Level）
+        ///         （例：大廳樓梯房間掛在 L1、往上跨到 L3，眼睛在 L3 → 樓層＝L3）。
+        ///   第五輪合理性檢查：離樓層 &lt; 0 或 &gt; 6 m、且眼下 6 m 內有站立面 → 改以站立面判定（空拍相機維持高程規則）。
         ///   室外：眼睛正下方往下打（樓板／屋頂／地形／基地），站立面 Z → 樓層＝有平面、高程 ≤ Z + 300 mm 的最高 Level；
         ///         沒有 → 高程最接近 Z 的 Level；沒打到 → 眼睛下方最近的建築樓層（舊規則）。
         /// 結果以「相機＋眼睛位置＋模型 epoch」快取。
@@ -184,14 +186,27 @@ namespace RevitMCP.Core
                 else
                 {
                     double? surf = EnsureStandingSurface(doc, geom);
+                    string roofNote = "";
+                    // 2026-09-26 第五輪：眼睛站在某房間頂之上（該房間已因「眼睛在房間頂之上」被排除），射線卻打到更低的面
+                    // （例：「Camera - Fifth Floor Roof Garden」打到下層機房樓板）→ 射線漏掉屋頂／露台版，推定站立面＝房間頂。
+                    double clr = CameraMath.MmToFeet(StoreyEyeClearanceMm);
+                    if (rc?.RoofBelowZ != null && rc.RoofBelowZ.Value <= geom.Eye.Z - clr + 1e-9 &&
+                        (!surf.HasValue || rc.RoofBelowZ.Value > surf.Value + clr))
+                    {
+                        roofNote = $"射線站立面 {(surf.HasValue ? CameraMath.FeetToMm(surf.Value).ToString("F0") + "mm" : "(沒打到)")} 低於眼下房間頂 " +
+                                   $"{CameraMath.FeetToMm(rc.RoofBelowZ.Value):F0}mm（{rc.RoofBelowLabel}）→ 推定站立面＝房間頂（射線可能漏掉屋頂／露台版）；";
+                        Logger.Info($"相機管理：「{camera.Name}」{roofNote}射線：{geom.StandingSurfaceLog}");
+                        surf = rc.RoofBelowZ.Value;
+                    }
                     if (surf.HasValue)
                     {
                         Level st = PickOutdoorStorey(doc, surf.Value, out string slog);
-                        if (st != null) { entry.LevelId = st.Id; entry.Source = "surface"; entry.StoreyLog = slog; }
-                        else entry.StoreyLog = "站立面找不到樓層 → 眼睛下方建築樓層";
+                        if (st != null) { entry.LevelId = st.Id; entry.Source = roofNote.Length > 0 ? "roomTop" : "surface"; entry.StoreyLog = roofNote + slog; }
+                        else entry.StoreyLog = roofNote + "站立面找不到樓層 → 眼睛下方建築樓層";
                     }
                     else entry.StoreyLog = "往下沒打到站立面 → 眼睛下方建築樓層（" + (geom.StandingSurfaceLog ?? "") + "）";
                 }
+                ApplyHeightSanity(doc, camera, geom, entry);
             }
             catch (Exception ex)
             {
@@ -230,29 +245,82 @@ namespace RevitMCP.Core
         }
 
         private const double StoreyEyeClearanceMm = 300.0;
+        /// <summary>樓層規則版本（併入快取 key）；規則改版就遞增，讓記憶體內舊判定全部失效。</summary>
+        private const int StoreyRuleVersion = 5;
+        /// <summary>房間垂直範圍收集候選 Level 的容差（±）：Level 與房間底／頂差幾 mm 以內仍算在範圍內。</summary>
+        private const double StoreySpanToleranceMm = 300.0;
+        /// <summary>眼睛在房間底「以下」仍可算在房間內的上限（相機略低於架高地板）；眼睛在房間頂以上一律不接受。</summary>
+        private const double EyeRoomBelowBaseToleranceMm = 600.0;
+        /// <summary>高度合理範圍上限與站立面搜尋距離：離樓層 &lt; 0 或 &gt; 6 m 且眼下 6 m 內有站立面 → 改以站立面判定。</summary>
+        private const double StoreySaneHeightMaxMm = 6000.0;
 
-        /// <summary>多層房間：{room.Level} ∪ {房間垂直範圍 (底, 頂] 內且有樓層平面的 Level} 中，高程 ≤ 眼睛 − 300 mm 的最高者；都不符合＝room.Level。</summary>
+        /// <summary>
+        /// 多層房間：{room.Level} ∪ {房間垂直範圍 [底−300, 頂+300] 內且有樓層平面的 Level} 中，高程 ≤ 眼睛 − 300 mm 的最高者；
+        /// 都不符合 → 全模型「建築樓層」中 ≤ 眼睛 − 300 mm 的最高者（優先有樓層平面者）；仍沒有才用 room.Level。
+        /// </summary>
         private static Level PickIndoorStorey(Document doc, Level roomLevel, RoomCtx rc, double eyeZ, out string log)
         {
             double limit = eyeZ - CameraMath.MmToFeet(StoreyEyeClearanceMm);
             var cands = new List<Level> { roomLevel };
             string span = "無房間垂直範圍";
+            HashSet<long> withPlan = GetLevelIdsWithFloorPlan(doc);
+            List<Level> all = CameraMath.GetLevelsSorted(doc);
             if (rc?.SpanBaseZ != null && rc.SpanTopZ != null)
             {
+                double tol = CameraMath.MmToFeet(StoreySpanToleranceMm);
                 double b = rc.SpanBaseZ.Value, t = rc.SpanTopZ.Value;
-                span = $"房間範圍 [{CameraMath.FeetToMm(b):F0},{CameraMath.FeetToMm(t):F0}]mm";
-                HashSet<long> withPlan = GetLevelIdsWithFloorPlan(doc);
-                foreach (Level l in CameraMath.GetLevelsSorted(doc))
+                span = $"房間範圍 [{CameraMath.FeetToMm(b):F0},{CameraMath.FeetToMm(t):F0}]mm（容差 ±{StoreySpanToleranceMm:F0}mm）";
+                foreach (Level l in all)
                 {
                     if (l.Id == roomLevel.Id) continue;
                     double z = l.ProjectElevation;
-                    if (z > b + 1e-6 && z <= t + 1e-6 && withPlan.Contains(l.Id.GetIdValue())) cands.Add(l);
+                    if (z >= b - tol - 1e-6 && z <= t + tol + 1e-6 && withPlan.Contains(l.Id.GetIdValue())) cands.Add(l);
                 }
             }
             Level pick = cands.Where(l => l.ProjectElevation <= limit + 1e-9).OrderByDescending(l => l.ProjectElevation).FirstOrDefault();
-            log = $"{span}；候選 {string.Join("、", cands.Select(l => l.Name))}；取 ≤ 眼睛−{StoreyEyeClearanceMm:F0}mm 最高者" +
-                  (pick == null ? " → 都不符合，用房間 Level" : $"「{pick.Name}」");
-            return pick ?? roomLevel;
+            log = $"{span}；候選 {string.Join("、", cands.Select(l => l.Name))}；取 ≤ 眼睛−{StoreyEyeClearanceMm:F0}mm 最高者";
+            if (pick != null) { log += $"「{pick.Name}」"; return pick; }
+
+            // 2026-09-26 第五輪（「Camera in Stair 3 - Parking Level」：房間 Level 高於眼睛，盲目退回 room.Level → 高度 −500 cm）
+            List<Level> below = all.Where(l => CameraMath.IsBuildingStorey(l) && l.ProjectElevation <= limit + 1e-9).ToList();
+            Level g = below.Where(l => withPlan.Contains(l.Id.GetIdValue())).LastOrDefault() ?? below.LastOrDefault();
+            if (g != null)
+            {
+                log += $" → 候選都不符合，改取全模型 ≤ 眼睛−{StoreyEyeClearanceMm:F0}mm 最高建築樓層「{g.Name}」" +
+                       (withPlan.Contains(g.Id.GetIdValue()) ? "（有平面）" : "（無平面）");
+                return g;
+            }
+            log += " → 候選與全模型都沒有 ≤ 眼睛−300mm 的建築樓層，用房間 Level";
+            return roomLevel;
+        }
+
+        /// <summary>
+        /// 高度合理性檢查：離所判樓層 &lt; 0 或 &gt; 6 m，且眼下 6 m 內有站立面 → 以站立面重判（有平面、≤ 站立面 + 300 mm 的最高 Level）。
+        /// 眼下 6 m 內沒有站立面（空拍）維持高程規則。
+        /// </summary>
+        private static void ApplyHeightSanity(Document doc, View3D camera, CameraMath.CameraGeometry geom, StoreyCacheEntry entry)
+        {
+            Level lv = null;
+            try { lv = entry.LevelId != null ? doc.GetElement(entry.LevelId) as Level : null; } catch { lv = null; }
+            if (lv == null) return;
+            double hMm = CameraMath.FeetToMm(geom.Eye.Z - lv.ProjectElevation);
+            if (hMm >= 0 && hMm <= StoreySaneHeightMaxMm) return;
+            double? surf = EnsureStandingSurface(doc, geom);
+            string msg;
+            if (surf.HasValue && CameraMath.FeetToMm(geom.Eye.Z - surf.Value) <= StoreySaneHeightMaxMm + 1e-6)
+            {
+                Level st = PickOutdoorStorey(doc, surf.Value, out string slog);
+                if (st != null && st.Id != lv.Id)
+                {
+                    msg = $"高度不合理（離「{lv.Name}」{hMm:F0}mm）→ 改以站立面判定：{slog}";
+                    entry.LevelId = st.Id;
+                    entry.Source = "surfaceSanity";
+                }
+                else msg = $"高度不合理（離「{lv.Name}」{hMm:F0}mm），站立面判定結果相同 → 維持";
+            }
+            else msg = $"高度不合理（離「{lv.Name}」{hMm:F0}mm），但眼下 {StoreySaneHeightMaxMm:F0}mm 內無站立面（空拍）→ 維持高程規則";
+            entry.StoreyLog = (entry.StoreyLog ?? "") + "；" + msg;
+            Logger.Info($"相機管理：「{camera.Name}」{msg}");
         }
 
         /// <summary>室外：有樓層平面、高程 ≤ 站立面 + 300 mm 的最高 Level；沒有 → 高程最接近站立面的 Level。</summary>
@@ -304,12 +372,14 @@ namespace RevitMCP.Core
                 View3D v3 = FindRaycastView(doc);
                 if (v3 == null) { geom.StandingSurfaceLog = "沒有可用的 3D 視圖（非透視、非樣板）"; return null; }
                 var cats = new List<BuiltInCategory> { BuiltInCategory.OST_Floors, BuiltInCategory.OST_Roofs, BuiltInCategory.OST_Topography, BuiltInCategory.OST_Site, BuiltInCategory.OST_BuildingPad };
-                if (Enum.TryParse("OST_Toposolid", out BuiltInCategory topo)) cats.Add(topo);
+                // 2026-09-26 第五輪：Toposolid（R24+）、Hardscape（新版才有）以名稱解析，舊版沒有就略過。
+                foreach (string n in new[] { "OST_Toposolid", "OST_Hardscape" })
+                    if (Enum.TryParse(n, out BuiltInCategory extra) && !cats.Contains(extra)) cats.Add(extra);
                 var ri = new ReferenceIntersector(new ElementMulticategoryFilter(cats), FindReferenceTarget.Face, v3) { FindReferencesInRevitLinks = true };
                 ReferenceWithContext rwc = ri.FindNearest(geom.Eye, XYZ.BasisZ.Negate());
                 if (rwc == null)
                 {
-                    geom.StandingSurfaceLog = $"往下沒打到（3D 視圖「{v3.Name}」）";
+                    geom.StandingSurfaceLog = $"往下沒打到（3D 視圖「{v3.Name}」）" + RaycastDiagnostics(doc, v3, cats, geom.Eye, null);
                     return null;
                 }
                 double z = geom.Eye.Z - rwc.Proximity;
@@ -324,6 +394,9 @@ namespace RevitMCP.Core
                 catch { }
                 geom.StandingSurfaceZ = z;
                 geom.StandingSurfaceLog = $"Z={CameraMath.FeetToMm(z):F0}mm（眼睛下 {CameraMath.FeetToMm(rwc.Proximity):F0}mm，{what}，3D 視圖「{v3.Name}」）";
+                // 眼睛離站立面 > 2.5 m（不像一般視線高度）→ 記射線診斷，看是否漏掉屋頂／露台版（被視圖隱藏、在連結、或類別不在清單）。
+                if (CameraMath.FeetToMm(rwc.Proximity) > RaycastDiagnoseAboveMm)
+                    geom.StandingSurfaceLog += RaycastDiagnostics(doc, v3, cats, geom.Eye, rwc.Proximity);
                 return z;
             }
             catch (Exception ex)
@@ -332,6 +405,52 @@ namespace RevitMCP.Core
                 Logger.Error("相機管理：站立面射線失敗（沿用舊規則）", ex);
                 return null;
             }
+        }
+
+        private const double RaycastDiagnoseAboveMm = 2500.0;
+
+        /// <summary>
+        /// 站立面射線診斷（只在沒打到或打到的面離眼睛 &gt; 2.5 m 時跑）：列出射線視圖隱藏的站立面類別、隱藏的連結，
+        /// 以及不限類別往下打時，比站立面更近的前 5 個命中（類別／元素／Z），用來判斷是否漏掉屋頂／露台版。
+        /// </summary>
+        private static string RaycastDiagnostics(Document doc, View3D v3, List<BuiltInCategory> cats, XYZ eye, double? foundProximity)
+        {
+            var parts = new List<string>();
+            try
+            {
+                var hidden = new List<string>();
+                foreach (BuiltInCategory bic in cats)
+                {
+                    try { if (v3.GetCategoryHidden(new ElementId(bic))) hidden.Add(bic.ToString()); } catch { }
+                }
+                parts.Add("射線視圖隱藏類別：" + (hidden.Count == 0 ? "無" : string.Join("、", hidden)));
+                var links = new FilteredElementCollector(doc).OfClass(typeof(RevitLinkInstance)).Cast<RevitLinkInstance>().ToList();
+                int hiddenLinks = links.Count(l => { try { return l.IsHidden(v3); } catch { return false; } });
+                parts.Add($"連結 {links.Count} 個（視圖中隱藏 {hiddenLinks}）");
+                var any = new ReferenceIntersector(new ElementIsElementTypeFilter(true), FindReferenceTarget.Face, v3) { FindReferencesInRevitLinks = true };
+                IList<ReferenceWithContext> hits = any.Find(eye, XYZ.BasisZ.Negate());
+                var near = (hits ?? new List<ReferenceWithContext>())
+                    .Where(h => h != null && (!foundProximity.HasValue || h.Proximity < foundProximity.Value - 1e-6))
+                    .OrderBy(h => h.Proximity).Take(5).ToList();
+                var desc = new List<string>();
+                foreach (ReferenceWithContext h in near)
+                {
+                    try
+                    {
+                        Reference r = h.GetReference();
+                        Element el = doc.GetElement(r.ElementId);
+                        bool linked = r.LinkedElementId != null && r.LinkedElementId != ElementId.InvalidElementId;
+                        desc.Add($"{(linked ? "連結「" + el?.Name + "」內 " + r.LinkedElementId.GetIdValue() : (el?.Category?.Name ?? "?") + " " + r.ElementId.GetIdValue())}" +
+                                 $" Z={CameraMath.FeetToMm(eye.Z - h.Proximity):F0}mm");
+                    }
+                    catch { }
+                }
+                parts.Add("不限類別、比站立面更近的命中：" + (desc.Count == 0 ? "無" : string.Join("；", desc)));
+            }
+            catch (Exception ex) { parts.Add("診斷失敗：" + ex.Message); }
+            string s = "；射線診斷［" + string.Join("｜", parts) + "］";
+            Logger.Info("相機管理：站立面" + s);
+            return s;
         }
 
         /// <summary>
@@ -441,9 +560,9 @@ namespace RevitMCP.Core
             return best;
         }
 
-        /// <summary>眼睛 XY 不在任何房間內時：水平距離 ≤ 1.5 m、垂直範圍含眼睛（或差 ≤ tolZ）的最近房間。</summary>
+        /// <summary>眼睛 XY 不在任何房間內時：水平距離 ≤ 1.5 m、垂直範圍含眼睛（或差 ≤ tolZ，且通過 rejectVertical）的最近房間。</summary>
         private static EyeRoomCandidate FindNearestEyeRoom(Document doc, XYZ eye, ElementId phaseId, double tolZ, out string log,
-            Func<double, double, string, bool> rejectAbove = null)
+            Func<double, double, string, bool> rejectVertical = null)
         {
             log = "";
             double tolXY = CameraMath.MmToFeet(EyeRoomNearestXYToleranceMm);
@@ -467,7 +586,7 @@ namespace RevitMCP.Core
                     if (!(topZ > baseZ + 1e-6)) topZ = bb.Max.Z;
                     double dz = eye.Z < baseZ ? baseZ - eye.Z : (eye.Z > topZ ? eye.Z - topZ : 0.0);
                     if (dz > tolZ) continue;
-                    if (rejectAbove != null && rejectAbove(topZ, baseZ, r.Id.GetIdValue() + "「" + SafeRoomLabel(r) + "」（最近房間）")) continue;
+                    if (rejectVertical != null && rejectVertical(topZ, baseZ, r.Id.GetIdValue() + "「" + SafeRoomLabel(r) + "」（最近房間）")) continue;
                     List<List<XYZ>> loops = GetRoomLoopsXY(r);
                     if (loops.Count == 0) continue;
                     scanned++;
@@ -537,37 +656,56 @@ namespace RevitMCP.Core
                 if (cands.Count > 0) { phaseNote += "（同 Phase 無候選，改不分 Phase）"; bboxHits = bboxHitsAny; }
             }
 
-            double tolFeet = CameraMath.MmToFeet(EyeRoomVerticalToleranceMm);
-            // 2026-09-26 第四輪（使用者：「Camera - Fifth Floor Roof Garden」站在屋頂上卻被判成下層房間的室內）：
-            // 眼睛在房間頂「以上」的候選，往下打站立面；站立面 ≥ 房間頂 − 300 mm 且 > 房間底 + 1 m（＝眼睛站在房間上方另一層
-            // 樓板／屋頂上，而不是站在這個房間自己的地板上）→ 不是這個房間。
-            double sep = CameraMath.MmToFeet(StoreyEyeClearanceMm);
-            double aboveBase = CameraMath.MmToFeet(1000.0);
+            // 2026-09-26 第五輪（D-040 修正；Kitchen 01 眼睛在夾層「下方」被判成夾層、Roof Garden 眼睛在房間頂上 1.9 m 被判成下層室內）：
+            // 垂直不含眼睛的候選只在「眼睛略低於房間底 ≤ 600 mm」（相機略低於架高地板）時接受；眼睛在房間頂以上一律不接受；
+            // 眼睛略低於房間底時，若眼下站立面在房間範圍外（< 底 − 600 mm＝眼睛與房間之間隔著樓板）也不接受。
+            double belowTol = CameraMath.MmToFeet(EyeRoomBelowBaseToleranceMm);
+            double roofSearch = CameraMath.MmToFeet(StoreySaneHeightMaxMm);
             string rejectNote = "";
-            bool RejectAbove(double topZ, double baseZ, string label)
+            int rejectCount = 0;
+            foreach (EyeRoomCandidate c in cands)
             {
-                if (!(eye.Z > topZ + 1e-9)) return false;
-                double? surf = EnsureStandingSurface(doc, geom);
-                if (!surf.HasValue || surf.Value < topZ - sep || surf.Value <= baseZ + aboveBase) return false;
-                rejectNote += $"；排除 {label}（眼睛在房間頂 {CameraMath.FeetToMm(topZ):F0}mm 之上、站立面 {CameraMath.FeetToMm(surf.Value):F0}mm 隔開）";
+                // 眼睛在房間頂之上（6 m 內）→ 記下最高的房間頂，室外站立面射線漏掉屋頂／露台版時用來推定站立面。
+                if (eye.Z > c.TopZ + 1e-9 && eye.Z - c.TopZ <= roofSearch && (rc.RoofBelowZ == null || c.TopZ > rc.RoofBelowZ.Value))
+                {
+                    rc.RoofBelowZ = c.TopZ;
+                    rc.RoofBelowLabel = c.Room.Id.GetIdValue() + "「" + SafeRoomLabel(c.Room) + "」";
+                }
+            }
+            bool RejectVertical(double topZ, double baseZ, string label)
+            {
+                if (eye.Z >= baseZ - 1e-9 && eye.Z <= topZ + 1e-9) return false;
+                string why;
+                if (eye.Z > topZ)
+                    why = $"眼睛在房間頂 {CameraMath.FeetToMm(topZ):F0}mm 之上 {CameraMath.FeetToMm(eye.Z - topZ):F0}mm（nearestZ 不接受房間上方）";
+                else if (baseZ - eye.Z > belowTol)
+                    why = $"眼睛在房間底 {CameraMath.FeetToMm(baseZ):F0}mm 之下 {CameraMath.FeetToMm(baseZ - eye.Z):F0}mm > {EyeRoomBelowBaseToleranceMm:F0}mm";
+                else
+                {
+                    double? surf = EnsureStandingSurface(doc, geom);
+                    if (!surf.HasValue || surf.Value >= baseZ - belowTol - 1e-9) return false;
+                    why = $"眼睛略低於房間底，但眼下站立面 {CameraMath.FeetToMm(surf.Value):F0}mm 在房間範圍外（< 底−{EyeRoomBelowBaseToleranceMm:F0}mm，隔著樓板）";
+                }
+                if (++rejectCount <= 6) rejectNote += $"；排除 {label}（{why}）";
                 return true;
             }
-            cands = cands.Where(c => !RejectAbove(c.TopZ, c.BaseZ, c.Room.Id.GetIdValue() + "「" + SafeRoomLabel(c.Room) + "」")).ToList();
+            int xyHits = cands.Count;
+            cands = cands.Where(c => !RejectVertical(c.TopZ, c.BaseZ, c.Room.Id.GetIdValue() + "「" + SafeRoomLabel(c.Room) + "」")).ToList();
             string candText = string.Join("；", cands.Select(c =>
                 $"{c.Room.Id.GetIdValue()}「{SafeRoomLabel(c.Room)}」[{CameraMath.FeetToMm(c.BaseZ):F0},{CameraMath.FeetToMm(c.TopZ):F0}]mm d={CameraMath.FeetToMm(c.Dist):F0}"));
             EyeRoomCandidate pick = cands.Where(c => c.Dist <= 1e-9).OrderByDescending(c => c.BaseZ).FirstOrDefault();
             string how = pick != null ? "xyPolygon+zSpan" : null;
             if (pick == null)
             {
-                pick = cands.Where(c => c.Dist <= tolFeet).OrderBy(c => c.Dist).FirstOrDefault();
-                if (pick != null) how = $"xyPolygon+nearestZ({CameraMath.FeetToMm(pick.Dist):F0}mm ≤ {EyeRoomVerticalToleranceMm:F0}mm)";
+                pick = cands.OrderBy(c => c.Dist).FirstOrDefault();
+                if (pick != null) how = $"xyPolygon+nearestZ(眼睛低於房間底 {CameraMath.FeetToMm(pick.Dist):F0}mm ≤ {EyeRoomBelowBaseToleranceMm:F0}mm)";
             }
             if (pick == null)
             {
                 // 2026-09-25 第二輪：眼睛 XY 不在任何房間內（相機在未放房間的樓梯間／挑空，或剛好在邊界外）→
-                // 取水平距離（眼睛到房間邊界）≤ 1.5 m、且垂直範圍含眼睛（或差 ≤ 2 m）的最近房間，當室內。
-                EyeRoomCandidate near = FindNearestEyeRoom(doc, eye, phase?.Id, tolFeet, out string nearLog, RejectAbove);
-                if (near == null && phase != null) near = FindNearestEyeRoom(doc, eye, null, tolFeet, out nearLog, RejectAbove);
+                // 取水平距離（眼睛到房間邊界）≤ 1.5 m、且垂直範圍含眼睛（或眼睛低於房間底 ≤ 600 mm，同上垂直規則）的最近房間，當室內。
+                EyeRoomCandidate near = FindNearestEyeRoom(doc, eye, phase?.Id, belowTol, out string nearLog, RejectVertical);
+                if (near == null && phase != null) near = FindNearestEyeRoom(doc, eye, null, belowTol, out nearLog, RejectVertical);
                 if (near != null)
                 {
                     pick = near;
@@ -578,8 +716,8 @@ namespace RevitMCP.Core
             phaseNote += rejectNote;
             if (pick == null)
             {
-                rc.Log = $"none ({phaseNote}, eyeZ={CameraMath.FeetToMm(eye.Z):F0}mm, bboxHits={bboxHits}, xyHits={cands.Count}" +
-                         (cands.Count > 0 ? $"：{candText}，垂直距離都 > {EyeRoomVerticalToleranceMm:F0}mm" : "") + ")";
+                rc.Log = $"none ({phaseNote}, eyeZ={CameraMath.FeetToMm(eye.Z):F0}mm, bboxHits={bboxHits}, xyHits={xyHits}" +
+                         (xyHits > 0 ? "，垂直規則全部排除（只接受眼睛在範圍內，或低於房間底 ≤ " + EyeRoomBelowBaseToleranceMm.ToString("F0") + "mm）" : "") + ")";
                 return rc;
             }
 
