@@ -59,6 +59,10 @@ namespace RevitMCP.Core
         // 遠端標頭超出平面裁剪框、近端標頭被眼睛楔形蓋住）：剖面沿線範圍兩端各截到平面裁剪框內縮 1m，確保標頭落在框內。
         private const double SectionLineCropInsetMm = 1000.0;
         private const double SightCenterlineSkipAngleDeg = 3.0; // 剖面方向與畫面中心線夾角 < 此值 → 平面上不重畫紅色視線中心線（剖面線已代表它）
+        // 2026-09-27（MCP 實測，D-044 修正②）：剖面「看向」（−BasisZ）與相機水平視線夾角 < 此值 → 剖面側視垂直
+        // 扇形（DrawSectionMarker）會誤導（等於在剖面裡沿著視線看下去，不是真的側視），只畫眼睛圓圈。判斷用幾何
+        // （夾角），不看是不是剖面轉 90°，任何組合只要剖面恰好看向視線都適用。
+        private const double SectionFanSuppressAlongSightDeg = 45.0;
         private const int SectionViewerLineWeight = 6;         // 本相機剖面 viewer 在 Key Plan 平面上的投影線寬（深灰、虛線，不跟淡化走）
         private const double OutdoorBelowLevelMm = 1000.0;     // 室外：Z 下限＝min(下方樓層, 最低樓層) −1m
         private const double OutdoorAboveModelMm = 2000.0;     // 室外：Z 上限＝XY 範圍內模型最高點 +2m
@@ -2060,10 +2064,38 @@ namespace RevitMCP.Core
                         double a = x0; x0 = -x1; x1 = -a;
                         flipped = true;
                     }
+                    // 2026-09-27（MCP 實測，D-044 修正①：Kitchen 01 轉 90° 後只看到牆／衛浴，看不到房間內部）：
+                    // 深度要用「翻轉之後」的最終看向（BuildSectionBox 用最終 ax 重算 viewDir＝ax×up，深度往
+                    // −viewDir＝up×ax 延伸）；flip 前的 look 方向可能已經反過來，不能直接拿來投影。
+                    XYZ lookFinal = XYZ.BasisZ.CrossProduct(ax);
+                    lookFinal = lookFinal.GetLength() > 1e-6 ? lookFinal.Normalize() : (center ?? XYZ.BasisX);
                     double depth = Math.Max(cp.FanRadiusFeet, Cm(100));
+                    string depthSrc = $"扇形半徑 {CameraMath.FeetToMm(depth):F0}mm";
+                    // 剖面轉 90°＋室內：扇形半徑（原本沿視線的可見距離）跟新軸向的房間深度未必相關，容易太薄
+                    // （只看到近側牆／固定物），改成不小於「房間沿最終看向側、從剖切面（眼睛）起算的投影範圍
+                    // ＋0.6m buffer」——與 ApplyRotate90 的水平範圍用同一個 buffer 常數。室外／找不到房間維持原規則。
+                    if (rotate90 && cp.Room?.Room != null && cp.Room.Pts != null && cp.Room.Pts.Count >= 3)
+                    {
+                        double depthBuf = CameraMath.MmToFeet(RoomBufferMm);
+                        double maxT = double.MinValue;
+                        foreach (XYZ p in cp.Room.Pts)
+                        {
+                            double t = (p.X - geom.Eye.X) * lookFinal.X + (p.Y - geom.Eye.Y) * lookFinal.Y;
+                            if (t > maxT) maxT = t;
+                        }
+                        if (maxT > double.MinValue)
+                        {
+                            double roomDepth = maxT + depthBuf;
+                            if (roomDepth > depth)
+                            {
+                                depthSrc = $"剖面轉90°：房間沿看向側投影 {CameraMath.FeetToMm(roomDepth):F0}mm（含 {RoomBufferMm:F0}mm buffer）取代{depthSrc}";
+                                depth = roomDepth;
+                            }
+                        }
+                    }
                     s.Axis = ax; s.Origin = geom.Eye; s.MinX = x0; s.MaxX = x1;
                     s.MinZ = -depth; s.MaxZ = 0.0;
-                    log.Append($" | 剖面位置＝相機位置：原點＝眼睛 X[{CameraMath.FeetToMm(s.MinX):F0},{CameraMath.FeetToMm(s.MaxX):F0}]mm 深度[{CameraMath.FeetToMm(s.MinZ):F0},0]mm（剖切面通過眼睛）" +
+                    log.Append($" | 剖面位置＝相機位置：原點＝眼睛 X[{CameraMath.FeetToMm(s.MinX):F0},{CameraMath.FeetToMm(s.MaxX):F0}]mm 深度[{CameraMath.FeetToMm(s.MinZ):F0},0]mm（剖切面通過眼睛；深度來源＝{depthSrc}）" +
                                (flipped ? "；扇形在剖切面背後 → 軸反向" : ""));
                 }
                 catch (Exception exA)
@@ -4713,6 +4745,9 @@ namespace RevitMCP.Core
         ///   alongRaw＝forwardHoriz 去掉剖面法向分量（不正規化，所以斜交時自然縮短＝透視縮減），垂直分量不變。
         ///   視線與剖面平面夾角 &gt; 60° 記 log（扇形明顯縮短）；接近 90°（|alongRaw|&lt;0.05）只畫眼睛圓圈。
         /// 若使用者手動移過剖面，眼睛先投影到剖面目前的實際平面上，避免 NewDetailCurve 因不共面失敗。
+        /// 2026-09-27（D-044 修正②）：剖面「看向」（−BasisZ）與相機水平視線夾角 &lt; <see cref="SectionFanSuppressAlongSightDeg"/>
+        /// 也只畫眼睛圓圈（不管是不是剖面轉 90° 造成的，純看幾何）——這種情況等於順著視線看進剖面，垂直扇形
+        /// （假設視線躺在畫面裡的側視）會誤導；平面視圖的扇形不受影響。
         /// </summary>
         private static void DrawSectionMarker(Document doc, ViewSection sectionView, CameraMath.CameraGeometry geom,
             XYZ forwardHoriz, double fanRadiusFeet, double downRad, double upRad, string cid)
@@ -4736,15 +4771,26 @@ namespace RevitMCP.Core
             double lenA = alongRaw.GetLength();
             double planeAngleDeg = Math.Acos(Math.Max(0.0, Math.Min(1.0, lenA))) * 180.0 / Math.PI;
 
+            // 2026-09-27（MCP 實測，D-044 修正②，Kitchen 01 轉 90° 後剖面看向與相機視線幾乎同向：側視垂直
+            // 扇形誤導使用者）：剖面「看向」＝−n（BuildSectionBox 的 viewDir 是 n＝BasisZ，實際看進去的方向是 −n）；
+            // 與水平視線 forwardHoriz 夾角 < SectionFanSuppressAlongSightDeg → 這其實是「順著視線看下去」，不是
+            // 側視，垂直扇形（假設視線躺在剖面畫面裡）會誤導，只畫眼睛圓圈（平面上的扇形不受影響）。
+            double sightAlignDot = Math.Max(-1.0, Math.Min(1.0, -(n.DotProduct(forwardHoriz))));
+            double sightAlignDeg = Math.Acos(sightAlignDot) * 180.0 / Math.PI;
+            bool looksAlongSight = sightAlignDeg < SectionFanSuppressAlongSightDeg;
+
             double circleR = PrintSizeFeet(sectionView, MarkerCirclePrintRadiusMm);
             List<Curve> curves = new List<Curve>();
             XYZ sideAxis = lenA > 1e-6 ? alongRaw / lenA : up.CrossProduct(n).Normalize();
             AddCircle(curves, eye, circleR, sideAxis, up);
 
-            if (lenA < 0.05)
+            if (lenA < 0.05 || looksAlongSight)
             {
                 CreateMarkerCurves(doc, sectionView, curves, cid, "MarkerSection", style);
-                Logger.Info($"相機 Key Plan：剖面標記 視線幾乎垂直剖面平面（夾角 {planeAngleDeg:F1}°），只畫眼睛圓圈");
+                string why = lenA < 0.05
+                    ? $"視線幾乎垂直剖面平面（夾角 {planeAngleDeg:F1}°）"
+                    : $"剖面看向（−BasisZ）與相機視線夾角 {sightAlignDeg:F1}° < {SectionFanSuppressAlongSightDeg:F0}°（順著視線看，側視垂直扇形會誤導）";
+                Logger.Info($"相機 Key Plan：剖面標記 {why}，只畫眼睛圓圈（平面扇形不受影響）");
                 return;
             }
             XYZ alongN = alongRaw / lenA;

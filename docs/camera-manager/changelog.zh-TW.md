@@ -6,6 +6,13 @@
 
 ## 2026-09-27
 
+### 18:05｜剖面轉 90°：MCP 實測後修正深度＋側視扇形誤導（D-044 修正；已編譯 R22–R26 0 錯誤、QA/QC 67 PASS/0 FAIL；未部署：Revit 執行中；待複測）
+- **背景**：D-044 上線後 MCP 實測——室外相機（沿視線模式）轉 90° 正確（軸垂直於視線、剖切面通過眼睛、方向朝前；平面看得到通過眼睛的虛線剖面線；轉回 0° 用既有剖面更新路徑正確復原，視圖 id 不變、無誤差）。室內相機「Camera at Kitchen 01」（對齊房間長邊模式）轉 90° 方向正確（軸 (0,1)，剖切面通過眼睛 X=-19665mm，朝 -X 看＝相機那一側），但發現兩個問題。
+- **修正①：深度只有 1.5 m**（`Decisions.FanRadiusMm=1500`，`anchor=Camera` 區塊原本一律用 `max(扇形半徑, 1m)` 當深度）：轉 90° 後剖面沿房間長軸看（房間長邊約 10.2 m），只有 1.5 m 深看到的只是近側牆／衛浴固定物，看不到房間內部。改為：`rotate90` 且找得到眼睛所在房間時，深度＝`max(原深度, 房間沿「翻轉後最終看向」投影範圍 + 0.6m buffer)`；室外／無房間維持原規則（扇形半徑）。深度計算要用**翻轉之後**的最終看向（`BuildSectionBox` 用最終軸重算 viewDir，翻轉前的 `look` 變數方向可能已經反過來，不能直接用）。剖面遠裁剪在新建路徑（`CreateSectionFromBox`）與既有剖面更新路徑（`UpdateExistingSectionFrame`／`SetSectionFarClip`）都是從同一個 `spec`／意圖框讀 Z 範圍，兩條路徑不需要分別改，改一處深度公式即自動生效於兩者。
+- **修正②：剖面裡的側視垂直扇形（紅色楔形，代表垂直視野）誤導**：轉 90° 後剖面「看向」（−BasisZ）幾乎與相機水平視線同向，等於在剖面裡順著視線看下去，不是真的側視——這時畫「側視垂直扇形」（假設視線躺在畫面裡）會誤導。`DrawSectionMarker` 新增幾何判斷：剖面看向與相機水平視線夾角 < 45°（新常數 `SectionFanSuppressAlongSightDeg`）時，只畫眼睛圓圈、不畫垂直扇形／楔形；判斷純看幾何角度，不看是否轉 90°，所以其他任何剖面恰好看向視線的組合也會正確套用；平面視圖的扇形不受影響。
+- 兩項修正都在 `MCP/Core/CameraKeyPlanService.cs`：`ComputeSectionSpec` 的 `anchor=Camera` 深度計算、`DrawSectionMarker` 的扇形抑制判斷。
+- R22–R26 dotnet build 皆 0 errors；`verify-qaqc.ps1 -SkipBuild -SkipDeploy`：PASS 67／FAIL 0／WARN 2（既有）／SKIP 3。Revit 執行中 → 未部署；本次改動未再跑 MCP 複測（留給下一輪）。
+
 ### 14:20｜剖面轉 90°：單一相機開關，可看另一向剖面（D-044；已編譯 R22–R26 0 錯誤、`npm run build` 通過、QA/QC 67 PASS/0 FAIL；未部署：Revit 執行中；待 MCP 複測）
 - **新增第三個 ES Schema** `RevitMCP_CameraSectionOptions`（記在相機元素本身，不是剖面視圖，也不是面板全域設定），單一欄位 `SectionRotate90: bool`，預設 false、跨 session／同事共用同一份 .rvt 都看得到。
 - `ComputeSectionSpec` 在既有模式決定好軸與水平範圍之後、`anchor=Camera` 區塊之前，若這台相機開關為真，把軸繞垂直軸轉 90°，水平範圍沿新軸重新投影（室內＝眼睛所在房間頂點 ±0.6m buffer；室外／無房間＝等角 XY 範圍投影）；之後 `anchor=Camera` 區塊、`ClampSectionSpecToPlanCrop` 原樣套用「已轉向」的 spec，不需要另外改。
