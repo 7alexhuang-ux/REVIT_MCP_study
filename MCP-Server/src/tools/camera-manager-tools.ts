@@ -12,7 +12,7 @@ export const cameraManagerTools: Tool[] = [
     {
         name: "list_cameras",
         title: "列出透視相機（相機管理）",
-        description: "列出專案中所有透視相機，逐台回報相機管理面板看到的同一份資料：所在樓層（室內＝眼睛所在房間的樓層、室外＝眼睛正下方的建築樓層，附判定來源）、離樓板高度（cm 與 mm）、水平角（0°=+Y 順時針）、俯仰角、視野角（左／右／下／上邊界與水平／垂直總角）、遠裁剪、室內／室外與眼睛所在房間、相機放置時記錄的平面、③ 位置圖底圖挑選器會選哪張平面與步驟、已連結的 Key Plan 平面／剖面／等角視圖 id（KeyPlan.PlanLevelMismatch＝平面的樓層與相機目前樓層不符，重跑一鍵 4 視圖會重建）、剖面方向與剖面位置設定、剖面是否被手動移過。唯讀。觸發條件：相機清單、相機管理、Key Plan、人視高檢查、camera list。",
+        description: "列出專案中所有透視相機，逐台回報相機管理面板看到的同一份資料：所在樓層（室內＝眼睛所在房間的樓層、室外＝眼睛正下方的建築樓層，附判定來源）、離樓板高度（cm 與 mm）、水平角（0°=+Y 順時針）、俯仰角、視野角（左／右／下／上邊界與水平／垂直總角）、遠裁剪、室內／室外與眼睛所在房間、相機放置時記錄的平面、③ 位置圖底圖挑選器會選哪張平面與步驟、已連結的 Key Plan 平面／剖面／等角視圖 id（KeyPlan.PlanLevelMismatch＝平面的樓層與相機目前樓層不符，重跑一鍵 4 視圖會重建）、剖面方向與剖面位置設定、這台相機是否啟用「剖面轉 90°」（SectionOrientation.Rotate90）、剖面是否被手動移過。唯讀。觸發條件：相機清單、相機管理、Key Plan、人視高檢查、camera list。",
         inputSchema: {
             type: "object",
             properties: {
@@ -27,7 +27,7 @@ export const cameraManagerTools: Tool[] = [
     {
         name: "run_camera_keyplan",
         title: "執行相機一鍵 4 視圖（Key Plan）",
-        description: "對一台透視相機執行相機管理面板的「一鍵 4 視圖」核心（建立或更新 Key Plan 平面／剖面／等角三張視圖＋相機標記），與面板同一段程式碼，不經面板 UI。回傳三張視圖的 id、名稱、比例、範圍（平面裁剪框、剖面裁剪框、等角 Section Box，mm）、各視圖內本相機標記元素數（依角色分組），以及關鍵判定（室內／室外、使用的房間、本層頂、扇形半徑、實際剖面方向、等角範圍模式、等角近側牆切掉哪兩面）、實際生效的相機標記型式，與裁剪框讀回不符預期（> 1 %）的警告。複製來的平面會先解除 Scope Box、改專案北、圖紙上的標題改為「Key Plan 平面」；平面／剖面隱藏其他剖面／立面／詳圖索引標記（平面保留本相機剖面）。寫入模型（一個交易「建立相機 Key Plan」），不刪除任何使用者元素。室內相機的等角預設切掉觀看者側兩道牆（近側兩面＝房間邊界往內 100 mm，遠側維持房間 +0.6 m）。觸發條件：一鍵 4 視圖、Key Plan、相機平面剖面等角、run keyplan。",
+        description: "對一台透視相機執行相機管理面板的「一鍵 4 視圖」核心（建立或更新 Key Plan 平面／剖面／等角三張視圖＋相機標記），與面板同一段程式碼，不經面板 UI。回傳三張視圖的 id、名稱、比例、範圍（平面裁剪框、剖面裁剪框、等角 Section Box，mm）、各視圖內本相機標記元素數（依角色分組），以及關鍵判定（室內／室外、使用的房間、本層頂、扇形半徑、實際剖面方向、是否啟用剖面轉 90°、等角範圍模式、等角近側牆切掉哪兩面）、實際生效的相機標記型式，與裁剪框讀回不符預期（> 1 %）的警告。複製來的平面會先解除 Scope Box、改專案北、圖紙上的標題改為「Key Plan 平面」；平面／剖面隱藏其他剖面／立面／詳圖索引標記（平面保留本相機剖面）。寫入模型（一個交易「建立相機 Key Plan」），不刪除任何使用者元素。室內相機的等角預設切掉觀看者側兩道牆（近側兩面＝房間邊界往內 100 mm，遠側維持房間 +0.6 m）。觸發條件：一鍵 4 視圖、Key Plan、相機平面剖面等角、run keyplan。",
         inputSchema: {
             type: "object",
             properties: {
@@ -62,6 +62,10 @@ export const cameraManagerTools: Tool[] = [
                 resetSection: {
                     type: "boolean",
                     description: "true＝即使剖面被手動移過也強制重算覆蓋（同面板「重設剖面位置」）；預設 false"
+                },
+                sectionRotate90: {
+                    type: "boolean",
+                    description: "只影響這台相機（不是這次執行）：設定並持久化「剖面轉 90°」——把 Key Plan 剖面方向繞垂直軸轉 90°（原方向的另一向），存在相機元素本身（同事開同一份 .rvt 也看得到）；有給值就會強制這次重設剖面位置（同 resetSection=true）讓效果立即可見。true＝開啟、false＝關閉；省略＝不變更、沿用這台相機目前已存的設定。回傳 Decisions.SectionRotate90，list_cameras 也會回報於 SectionOrientation.Rotate90"
                 },
                 markerMode: {
                     type: "string",

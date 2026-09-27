@@ -267,7 +267,9 @@ namespace RevitMCP.Core
                         // 室外一律沿視線；室內找不到房間時 ComputeSectionSpec 也會退回沿視線（以 run_camera_keyplan 的 SectionModeUsed 為準）
                         ExpectedForThisCamera = outdoor ? CameraSectionOrientationMode.AlongSightLine.ToString() : configuredMode.ToString(),
                         // 2026-09-26 第五輪：剖面位置（Camera＝剖切面通過眼睛／Center＝視野中心）
-                        AnchorConfigured = CameraKeyPlanService.GetConfiguredSectionAnchorMode().ToString()
+                        AnchorConfigured = CameraKeyPlanService.GetConfiguredSectionAnchorMode().ToString(),
+                        // 2026-09-27：單一相機「剖面轉 90°」開關（持久化於相機元素，見 run_camera_keyplan 的 sectionRotate90 參數）
+                        Rotate90 = CameraKeyPlanService.GetCameraSectionRotate90(view)
                     }
                 });
             }
@@ -301,6 +303,16 @@ namespace RevitMCP.Core
                 IsoNearWalls = ParseIsoNearWalls(parameters),
                 SectionAnchor = ParseSectionAnchor(parameters)
             };
+
+            // 2026-09-27：sectionRotate90 有給值＝設定並持久化這台相機的「剖面轉 90°」（存在相機元素本身
+            // 的 ES，不是單次覆寫），並強制這次重設剖面位置，讓效果立即可見（同面板「重設剖面位置」）。
+            bool? sectionRotate90Param = parameters?["sectionRotate90"]?.Value<bool?>();
+            if (sectionRotate90Param.HasValue)
+            {
+                string rotateErr = CameraKeyPlanService.ApplySectionRotate90(doc, camera, sectionRotate90Param.Value);
+                if (rotateErr != null) throw new Exception("設定「剖面轉90°」失敗：" + rotateErr);
+                resetSection = true;
+            }
 
             CameraKeyPlanService.KeyPlanResult result =
                 CameraKeyPlanService.CreateOrUpdateFourViews(_uiApp, doc, camera.Id, resetSection, options);
@@ -376,6 +388,7 @@ namespace RevitMCP.Core
                     SectionModeRequested = d.SectionModeRequested.ToString(),
                     SectionModeUsed = d.SectionModeUsed.ToString(),
                     SectionAnchor = d.SectionAnchor.ToString(),
+                    SectionRotate90 = d.SectionRotate90,
                     d.SectionSpecLog,
                     d.SectionApplyLog,
                     SectionExtentDeviationMm = CmRound(d.SectionExtentDeviationMm, 1),

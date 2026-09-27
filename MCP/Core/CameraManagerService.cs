@@ -262,6 +262,7 @@ namespace RevitMCP.Core
                 SourcePlanPrimaryId = srcPrimary,
                 IsOutdoor = isOutdoor,
                 OutdoorFanRadiusFeet = outdoorFanR,
+                SectionRotate90 = CameraKeyPlanService.GetCameraSectionRotate90(view),
                 ViewId = view.Id,
                 UniqueId = view.UniqueId,
                 Name = view.Name,

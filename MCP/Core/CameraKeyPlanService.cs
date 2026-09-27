@@ -75,6 +75,8 @@ namespace RevitMCP.Core
         internal const string MarkerUpdateTransactionName = "更新相機標記";
         internal const string KeyPlanTransactionName = "建立相機 Key Plan";
         internal const string MarkerColorTransactionName = "變更相機標記顏色";
+        /// <summary>2026-09-27：單一相機「剖面轉 90°」開關的交易名稱。</summary>
+        internal const string SectionRotate90TransactionName = "剖面轉90°";
         /// <summary>標記重畫交易進行中（含 Commit 當下觸發的 DocumentChanged）。</summary>
         internal static bool IsUpdatingMarkers { get; private set; }
         // MarkerCrossRadiusCm／MarkerArrowLenCm（模型空間固定 cm）已被下面的「列印比例固定」
@@ -202,11 +204,88 @@ namespace RevitMCP.Core
                     ForgeTypeId spec = field.GetSpecTypeId();
                     if (spec == null || spec.Empty()) return "CameraSectionState 欄位 " + f + " 沒有 Spec";
                 }
+                Schema options = GetOrCreateCameraSectionOptionsSchema();
+                if (options == null) return "CameraSectionOptions Schema 建立回傳 null";
                 return null;
             }
             catch (Exception ex)
             {
                 return ex.GetType().Name + ": " + ex.Message;
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // 2026-09-27 追加：單一相機「剖面轉 90°」開關（第三個 Schema，同樣不動前兩個既有 GUID）。
+        // 這個開關記在「相機元素本身」（View3D 透視相機），不是記在剖面視圖上——這樣即使剖面
+        // 視圖還沒建立（第一次跑一鍵 4 視圖前）也能先設定，且一鍵 4 視圖／剖面對位都能在算
+        // ComputeSectionSpec 之前讀到它。預設 false（沒有 ES 資料＝false，不影響舊檔案）。
+        // ══════════════════════════════════════════════════════════
+        private static readonly Guid CameraSectionOptionsSchemaGuid = new Guid("A50006E7-15DF-4114-9032-904C391CD569");
+        private const string FieldSectionRotate90 = "SectionRotate90";
+
+        private static Schema GetOrCreateCameraSectionOptionsSchema()
+        {
+            Schema schema = Schema.Lookup(CameraSectionOptionsSchemaGuid);
+            if (schema != null) return schema;
+
+            SchemaBuilder builder = new SchemaBuilder(CameraSectionOptionsSchemaGuid);
+            builder.SetSchemaName("RevitMCP_CameraSectionOptions");
+            builder.SetReadAccessLevel(AccessLevel.Public);
+            builder.SetWriteAccessLevel(AccessLevel.Public);
+            builder.AddSimpleField(FieldSectionRotate90, typeof(bool));
+            return builder.Finish();
+        }
+
+        /// <summary>這台相機是否設定「剖面轉 90°」（存在相機元素本身的 ES，跨 session／同事共用同一份 .rvt
+        /// 都看得到；預設 false）。唯讀，任何情境都可呼叫（不需要交易）；任何失敗一律視為 false。</summary>
+        internal static bool GetCameraSectionRotate90(Element camera)
+        {
+            try
+            {
+                if (camera == null) return false;
+                Schema schema = Schema.Lookup(CameraSectionOptionsSchemaGuid);
+                if (schema == null) return false;
+                Entity e = camera.GetEntity(schema);
+                if (e == null || !e.IsValid()) return false;
+                return e.Get<bool>(schema.GetField(FieldSectionRotate90));
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("相機 Key Plan：讀取「剖面轉90°」設定失敗，視為未啟用", ex);
+                return false;
+            }
+        }
+
+        /// <summary>寫入這台相機的「剖面轉 90°」設定；呼叫端須已在交易內。</summary>
+        private static void SetCameraSectionRotate90(Element camera, bool value)
+        {
+            Schema schema = GetOrCreateCameraSectionOptionsSchema();
+            Entity e = new Entity(schema);
+            e.Set(schema.GetField(FieldSectionRotate90), value);
+            camera.SetEntity(e);
+        }
+
+        /// <summary>設定並提交（自己開單一交易「剖面轉90°」）：面板切換選單、MCP 工具 run_camera_keyplan
+        /// 的 sectionRotate90 參數共用。回傳 null＝成功，否則錯誤訊息（呼叫端須在 ExternalEvent 內）。</summary>
+        internal static string ApplySectionRotate90(Document doc, Element camera, bool value)
+        {
+            if (doc == null) return "目前沒有開啟中的文件。";
+            if (camera == null) return "找不到這台相機（可能已被刪除）。";
+            using (Transaction t = TransactionHelper.Begin(doc, SectionRotate90TransactionName))
+            {
+                try
+                {
+                    t.Start();
+                    SetCameraSectionRotate90(camera, value);
+                    TransactionHelper.CommitOrThrow(t);
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    try { if (t.HasStarted() && !t.HasEnded()) t.RollBack(); } catch { }
+                    Logger.Error("相機 Key Plan：設定「剖面轉90°」失敗", ex);
+                    return ex.Message;
+                }
             }
         }
 
@@ -380,6 +459,8 @@ namespace RevitMCP.Core
             public CameraSectionOrientationMode SectionModeUsed;
             /// <summary>2026-09-26 第五輪：剖面位置（Camera＝剖切面通過眼睛／Center＝舊行為）。</summary>
             public CameraSectionAnchorMode SectionAnchor;
+            /// <summary>2026-09-27：這台相機是否啟用「剖面轉 90°」（單一相機、持久化開關）。</summary>
+            public bool SectionRotate90;
             public string SectionSpecLog;
             /// <summary>2026-09-26：剖面套用紀錄（新建／移動旋轉／刪除重建＋世界範圍後檢）。</summary>
             public string SectionApplyLog;
@@ -513,6 +594,8 @@ namespace RevitMCP.Core
             dec.StoreyTopLog = storeyTop.Log;
             dec.IsoXYLog = isoXY.Log;
             dec.SectionModeRequested = sectionMode;
+            bool sectionRotate90 = GetCameraSectionRotate90(camera);
+            dec.SectionRotate90 = sectionRotate90;
             dec.IsoExtentMode = GetIsoExtentMode();
 
             // ES Schema 註冊不需要交易；先在交易外建好，Schema 問題不會在交易中途才爆出來。
@@ -545,7 +628,7 @@ namespace RevitMCP.Core
                     try { planBasisX = planView.CropBox?.Transform?.BasisX; } catch { planBasisX = null; }
                     CameraSectionAnchorMode sectionAnchor = GetSectionAnchorMode();
                     dec.SectionAnchor = sectionAnchor;
-                    SectionSpec spec = ComputeSectionSpec(geom, cp, isoXY, storeyTop, sectionMode, planBasisX, cutPlaneZ, sectionAnchor);
+                    SectionSpec spec = ComputeSectionSpec(geom, cp, isoXY, storeyTop, sectionMode, planBasisX, cutPlaneZ, sectionAnchor, sectionRotate90);
                     // 2026-09-26 第七輪：剖面沿線範圍截到 Key Plan 平面裁剪框內（避免遠端標頭超框、近端被眼睛楔形蓋住）；
                     // 一定要在 DrawPlanMarker（讀 spec/section 軸判斷是否重畫紅色視線中心線）與建剖面之前做。
                     ClampSectionSpecToPlanCrop(planView, spec);
@@ -1868,7 +1951,7 @@ namespace RevitMCP.Core
         /// </summary>
         private static SectionSpec ComputeSectionSpec(CameraMath.CameraGeometry geom, CameraParams cp, IsoXY isoXY, StoreyTop storeyTop,
             CameraSectionOrientationMode mode, XYZ planBasisX, double? cutPlaneZ,
-            CameraSectionAnchorMode anchor = CameraSectionAnchorMode.Center)
+            CameraSectionAnchorMode anchor = CameraSectionAnchorMode.Center, bool rotate90 = false)
         {
             // 2026-09-25：「沿視線」一律沿畫面中心線（水平視錐左右緣角平分線），不是相機正前方。
             XYZ center = cp.CenterHoriz ?? cp.ForwardHoriz;
@@ -1952,6 +2035,12 @@ namespace RevitMCP.Core
                 }
             }
 
+            // 2026-09-27（使用者：「有時候會想看另一向的剖面」）：單一相機的「剖面轉 90°」開關——把目前模式
+            // 決定的軸（含房間長軸模式已經把原點移到中心線那一步）繞垂直軸轉 90°，水平範圍沿新軸重新投影。
+            // 一定要在 anchor=Camera 區塊（原點改回眼睛、看向側翻轉、深度）之前做，這樣兩者才能疊加生效；
+            // anchor=Center 則直接沿用這裡轉好的軸與範圍（維持舊行為，只是方向換了）。
+            if (rotate90) ApplyRotate90(s, cp, geom, isoXY);
+
             // 2026-09-26 第五輪（使用者：剖面預設要剛好通過相機位置）：剖面位置＝相機位置 → 原點＝眼睛（方向沿用上面的模式），
             // 水平範圍改成相對眼睛；深度：剖切面（區域 Max.Z）＝0（通過眼睛），往看向側（−BasisZ）延伸扇形半徑（至少 1 m）。
             // 對齊房間長邊時若扇形中心線落在剖切面背後（看向側的反側），把軸反向（範圍對調），讓相機前方的扇形在剖面裡看得到。
@@ -2030,6 +2119,85 @@ namespace RevitMCP.Core
             log.Append($" | 剖面原點=({CameraMath.FeetToMm(o.X):F0},{CameraMath.FeetToMm(o.Y):F0},{CameraMath.FeetToMm(o.Z):F0})mm{(o.IsAlmostEqualTo(geom.Eye) ? "＝眼睛" : "")} axis=({s.Axis.X:F3},{s.Axis.Y:F3})");
             s.Log = log.ToString();
             return s;
+        }
+
+        /// <summary>
+        /// 2026-09-27（使用者：「剖面有沒有辦法提供一個選項，讓它可以旋轉 90 度」）：單一相機「剖面轉 90°」——
+        /// 把目前模式決定的軸（<paramref name="s"/>.Axis，此時已包含各模式自己的原點移動，例如對齊房間長邊
+        /// 已把原點移到中心線上）繞垂直軸轉 90°，沿新軸重新算水平範圍（相對目前的 <paramref name="s"/>.Origin）：
+        ///   室內（找得到眼睛所在房間）：房間頂點沿新軸投影 ±0.6m buffer（與其他規則同一個 buffer 常數）；
+        ///   室外／無房間：等角 XY 範圍（房間外接框+buffer，或找不到房間時的扇形外接框）沿新軸投影。
+        /// 之後 anchor=Camera 區塊（原點改回眼睛、看向側翻轉、深度）與 ClampSectionSpecToPlanCrop 原樣對
+        /// 「已轉向」的 spec 運作，不需要另外改。深度（MinZ/MaxZ）重置為 NaN，讓 BuildSectionBox 用預設
+        /// ±1.5m（anchor=Camera 之後會整個覆蓋掉，只影響 anchor=Center＋房間長軸這個組合）。
+        /// 任何一步算不出來（基準軸與垂直軸重合、投影範圍為零、例外）都記 log 並維持原方向，不拋例外。
+        /// </summary>
+        private static void ApplyRotate90(SectionSpec s, CameraParams cp, CameraMath.CameraGeometry geom, IsoXY isoXY)
+        {
+            try
+            {
+                XYZ baseAxis = s.Axis != null && s.Axis.GetLength() > 1e-6 ? s.Axis.Normalize() : XYZ.BasisX;
+                XYZ axis90 = XYZ.BasisZ.CrossProduct(baseAxis);
+                if (axis90.GetLength() < 1e-6)
+                {
+                    s.Log += " | 剖面轉90°：基準軸與垂直軸重合，無法轉向，略過";
+                    return;
+                }
+                axis90 = axis90.Normalize();
+                XYZ origin = s.Origin ?? geom.Eye;
+                double buf = CameraMath.MmToFeet(RoomBufferMm);
+                double mn = double.MaxValue, mx = double.MinValue;
+                string src;
+
+                if (cp.Room?.Room != null && cp.Room.Pts != null && cp.Room.Pts.Count >= 3)
+                {
+                    foreach (XYZ p in cp.Room.Pts)
+                    {
+                        double t = (p.X - origin.X) * axis90.X + (p.Y - origin.Y) * axis90.Y;
+                        if (t < mn) mn = t;
+                        if (t > mx) mx = t;
+                    }
+                    mn -= buf; mx += buf;
+                    src = $"室內：眼睛所在房間頂點投影 ±{RoomBufferMm:F0}mm buffer";
+                }
+                else if (isoXY != null)
+                {
+                    double[] xs = { isoXY.MinX, isoXY.MaxX };
+                    double[] ys = { isoXY.MinY, isoXY.MaxY };
+                    foreach (double x in xs)
+                        foreach (double y in ys)
+                        {
+                            double t = (x - origin.X) * axis90.X + (y - origin.Y) * axis90.Y;
+                            if (t < mn) mn = t;
+                            if (t > mx) mx = t;
+                        }
+                    src = "室外／無房間：等角 XY 範圍投影";
+                }
+                else
+                {
+                    double r = Math.Max(cp.FanRadiusFeet, Cm(100));
+                    mn = -r; mx = r;
+                    src = "無房間／無等角範圍資料：扇形半徑 fallback";
+                }
+
+                if (!(mx > mn + 1e-6))
+                {
+                    s.Log += " | 剖面轉90°：投影範圍算不出來（min≥max），略過，維持原方向";
+                    return;
+                }
+
+                string beforeAxis = $"({s.Axis.X:F3},{s.Axis.Y:F3})";
+                string beforeRange = $"X[{CameraMath.FeetToMm(s.MinX):F0},{CameraMath.FeetToMm(s.MaxX):F0}]mm";
+                s.Axis = axis90;
+                s.MinX = mn; s.MaxX = mx;
+                s.MinZ = s.MaxZ = double.NaN; // 深度隨新軸重算（anchor=Camera 會整個覆蓋；anchor=Center 退回預設 ±1.5m）
+                s.Log += $" | 剖面轉90°：基準軸 {beforeAxis} → ({axis90.X:F3},{axis90.Y:F3})，{src}，{beforeRange} → X[{CameraMath.FeetToMm(mn):F0},{CameraMath.FeetToMm(mx):F0}]mm";
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("相機 Key Plan：剖面轉90°計算失敗，維持原方向", ex);
+                s.Log += " | 剖面轉90°：計算失敗（例外），維持原方向";
+            }
         }
 
         /// <summary>

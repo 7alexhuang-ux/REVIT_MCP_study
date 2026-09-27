@@ -482,6 +482,16 @@ namespace RevitMCP.UI
             _secAnchorCameraItem.IsCheckable = false; _secAnchorCenterItem.IsCheckable = false;
             _fourViewsMenu.Items.Add(_secAnchorCameraItem);
             _fourViewsMenu.Items.Add(_secAnchorCenterItem);
+            // 2026-09-27（使用者：「有時候會想看另一向的剖面」）：剖面轉 90°——單一相機、持久化開關
+            // （不是面板全域設定），作用在「目前選取的相機」，沒有選取時停用。
+            _secRotate90Item = NewMenuItem("剖面轉 90°（另一向，目前選取相機）", SectionRotate90Tip, () =>
+            {
+                CameraRow r = GetPrimarySelectedRow();
+                if (r == null) { SetStatus("請先在清單選取一個相機。"); return; }
+                DoToggleSectionRotate90(r);
+            }, "SectionRotate90");
+            _secRotate90Item.IsCheckable = true;
+            _fourViewsMenu.Items.Add(_secRotate90Item);
             _fourViewsMenu.Items.Add(new Separator());
             // 2026-09-25：室外相機（眼睛不在任何房間）的 Key Plan 範圍半徑，實際＝min(遠裁剪, 本值)
             _fourViewsMenu.Items.Add(NewMenuItem("室外範圍半徑… (m)",
@@ -526,10 +536,23 @@ namespace RevitMCP.UI
             if (_nearCameraItem != null) _nearCameraItem.IsChecked = near == CameraIsoNearWallsMode.Camera;
             if (_nearCutItem != null) _nearCutItem.IsChecked = near == CameraIsoNearWallsMode.Wall;
             if (_nearKeepItem != null) _nearKeepItem.IsChecked = near == CameraIsoNearWallsMode.Keep;
+            // 2026-09-27：④ 下拉的「剖面轉 90°」作用在目前選取的相機——沒選取就停用，打勾狀態跟著選取相機的持久化設定走。
+            if (_secRotate90Item != null)
+            {
+                CameraRow selected = GetPrimarySelectedRow();
+                _secRotate90Item.IsChecked = selected != null && selected.SectionRotate90;
+                _secRotate90Item.IsEnabled = selected != null;
+                _secRotate90Item.ToolTip = selected == null ? "④ 剖面轉 90°：請先在清單選取一個相機。" : SectionRotate90Tip;
+                ToolTipService.SetShowOnDisabled(_secRotate90Item, true);
+            }
         }
+
+        /// <summary>「剖面轉 90°」共用提示文字（④ 下拉、右鍵選單都用同一句）。</summary>
+        private const string SectionRotate90Tip = "剖面轉 90°：只影響這一台相機（持久化設定，存在相機元素本身，同事開同一份 .rvt 也看得到）——把 Key Plan 剖面的方向繞垂直軸轉 90°（原方向的另一向），保留剖面位置與其他規則不變；再次點擊可還原。切換後立即依「重設剖面位置」流程重建剖面。";
 
         private WpfMenuItem _secRoomAxisItem, _secSightItem;
         private WpfMenuItem _secAnchorCameraItem, _secAnchorCenterItem;
+        private WpfMenuItem _secRotate90Item, _secRotate90ItemCtx;
 
         private void SetSectionAnchor(CameraSectionAnchorMode mode)
         {
@@ -947,9 +970,18 @@ namespace RevitMCP.UI
                     CameraRow r = _cameraMenuRow; if (r == null) return;
                     _listSection.SelectByViewId(r.ViewId); DoResetSectionToSightLine();
                 }, "CtxResetSection"));
+                // 2026-09-27：剖面轉 90°——單一相機、持久化開關（不是「重設剖面位置」的單次動作）。
+                _secRotate90ItemCtx = NewMenuItem("剖面轉 90°（另一向）", SectionRotate90Tip, () =>
+                {
+                    CameraRow r = _cameraMenuRow; if (r == null) return;
+                    DoToggleSectionRotate90(r);
+                }, "CtxSectionRotate90");
+                _secRotate90ItemCtx.IsCheckable = true;
+                _cameraMenu.Items.Add(_secRotate90ItemCtx);
                 // 關閉後放掉對列／視覺元素的參照（清單重建後舊 DataGridRow 不再被選單抓住）。
                 _cameraMenu.Closed += (s, e) => SafeUiAction(() => { _cameraMenu.PlacementTarget = null; }, "CtxClosed");
             }
+            if (_secRotate90ItemCtx != null) _secRotate90ItemCtx.IsChecked = row.SectionRotate90;
 
             RebuildVersionMenu(row);
             if (_cameraMenu.IsOpen) _cameraMenu.IsOpen = false;
@@ -2391,6 +2423,40 @@ namespace RevitMCP.UI
         /// （見 <see cref="CameraKeyPlanService.ResetSectionToSightLine"/>），供使用者手動調整
         /// 剖面之後想要「還原成自動算出來的視線」時使用。</summary>
         private void DoResetSectionToSightLine() => RunOneClickFourViews(forceResetSection: true);
+
+        /// <summary>
+        /// 2026-09-27（使用者：「有時候會想看另一向的剖面」）：切換單一相機的「剖面轉 90°」開關——
+        /// 先用小交易「剖面轉90°」把設定寫進相機元素本身的 ES（CameraKeyPlanService.ApplySectionRotate90，
+        /// 跨 session／同事共用同一份 .rvt 都看得到），成功後照「重設剖面位置」的路徑（forceResetSection=true）
+        /// 立即重建這台相機的剖面，讓效果馬上看得到。右鍵選單、④ 下拉都呼叫這裡。
+        /// </summary>
+        private void DoToggleSectionRotate90(CameraRow row)
+        {
+            if (row == null) { SetStatus("請先在清單選取一個相機。"); return; }
+            if (_fourViewsInFlight)
+            {
+                Logger.Info("相機管理面板：剖面轉90°——一鍵 4 視圖（或重設剖面）已在進行中，忽略這次觸發。");
+                SetStatus("正在建立 4 視圖，請稍候...");
+                return;
+            }
+            bool target = !row.SectionRotate90;
+            _listSection.SelectByViewId(row.ViewId);
+            SetStatus(target ? "剖面轉 90° 設定中..." : "剖面轉 90° 還原中...");
+            EnqueueForLoadedDoc(uiApp =>
+            {
+                Document doc = uiApp?.ActiveUIDocument?.Document;
+                View3D camera = doc?.GetElement(row.ViewId) as View3D;
+                string err = camera == null
+                    ? "找不到這台相機（可能已被刪除），請按重新整理。"
+                    : CameraKeyPlanService.ApplySectionRotate90(doc, camera, target);
+                RunOnUiThread(() =>
+                {
+                    if (err != null) { SetStatus("剖面轉 90° 設定失敗：" + err); return; }
+                    Logger.Info($"相機管理面板：「{row.Name}」剖面轉90° → {(target ? "開啟" : "關閉")}");
+                    RunOneClickFourViews(forceResetSection: true);
+                });
+            }, "ToggleSectionRotate90");
+        }
 
         private void RunOneClickFourViews(bool forceResetSection)
         {

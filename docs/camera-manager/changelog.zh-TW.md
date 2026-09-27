@@ -6,6 +6,13 @@
 
 ## 2026-09-27
 
+### 14:20｜剖面轉 90°：單一相機開關，可看另一向剖面（D-044；已編譯 R22–R26 0 錯誤、`npm run build` 通過、QA/QC 67 PASS/0 FAIL；未部署：Revit 執行中；待 MCP 複測）
+- **新增第三個 ES Schema** `RevitMCP_CameraSectionOptions`（記在相機元素本身，不是剖面視圖，也不是面板全域設定），單一欄位 `SectionRotate90: bool`，預設 false、跨 session／同事共用同一份 .rvt 都看得到。
+- `ComputeSectionSpec` 在既有模式決定好軸與水平範圍之後、`anchor=Camera` 區塊之前，若這台相機開關為真，把軸繞垂直軸轉 90°，水平範圍沿新軸重新投影（室內＝眼睛所在房間頂點 ±0.6m buffer；室外／無房間＝等角 XY 範圍投影）；之後 `anchor=Camera` 區塊、`ClampSectionSpecToPlanCrop` 原樣套用「已轉向」的 spec，不需要另外改。
+- UI：右鍵選單、④ 下拉（作用在目前選取相機，沒選取時停用＋提示）各一個可勾選項目「剖面轉 90°（另一向）」；切換時先寫 ES（單一小交易「剖面轉90°」），成功後照「重設剖面位置」路徑（強制重建）立即生效。
+- MCP：`run_camera_keyplan` 新增布林參數 `sectionRotate90`（有給值＝設定並持久化這台相機的開關＋強制這次重設剖面）；`list_cameras` 於 `SectionOrientation.Rotate90` 回報目前設定；`Decisions.SectionRotate90` 回報本次實際套用值。Runtime MCP 工具數維持 221（沒有新增工具）。
+- 詳見 [adr.zh-TW.md](adr.zh-TW.md) D-044。
+
 ### 02:40｜Key Plan 剖面方向相反＝平面看不到剖面線的真正原因（**已部署 R24、MCP 實機驗證通過**）
 - **根因**：`ViewSection.CreateSection` 產生的剖面與傳入框方向相反（讀回 BasisX＝−意圖軸），剖切面落在意圖框的遠裁剪面——室外相機在眼睛 60 m 外、室內在 1.5 m 外；平面剖面標記因此落在裁剪框外看不到，剖面圖也沒有剖到相機所在處。原範圍後檢只比「範圍」不比「方向」，所以一直報 0 mm。
 - **修正**：新建剖面後讀回方向；相反 → 刪除，改用「同一實體框、座標系繞鉛直軸轉 180°」重建，再驗方向與剖切面通過原點。實測兩台（室外沿視線、室內對齊房間長邊）都由 BasisX·意圖＝−1 修為 ＋1、剖切面偏差 0 mm；平面上出現通過相機的剖面虛線，剖面圖剖到建築。

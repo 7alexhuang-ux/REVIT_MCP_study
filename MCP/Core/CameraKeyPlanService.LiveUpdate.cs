@@ -507,7 +507,7 @@ namespace RevitMCP.Core
                 double? cutPlaneZ = plan != null ? GetPlanCutPlaneZ(doc, plan) : null;
                 XYZ planBasisX = null;
                 try { planBasisX = plan?.CropBox?.Transform?.BasisX; } catch { planBasisX = null; }
-                SectionSpec spec = ComputeSectionSpec(geom, cp, isoXY, storeyTop, GetSectionOrientationMode(), planBasisX, cutPlaneZ, GetSectionAnchorMode());
+                SectionSpec spec = ComputeSectionSpec(geom, cp, isoXY, storeyTop, GetSectionOrientationMode(), planBasisX, cutPlaneZ, GetSectionAnchorMode(), GetCameraSectionRotate90(camera));
                 perf.Lap("剖面規格");
                 string sectionName = SanitizeRevitName("Key Plan-" + camera.Name + "-剖面");
                 bool preserved = false;

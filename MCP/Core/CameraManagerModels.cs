@@ -83,6 +83,10 @@ namespace RevitMCP.Core
         /// <summary>DataGrid 列 ToolTip 前綴用：「室內」「室外」或「?」。</summary>
         public string IndoorOutdoorText => IsOutdoor.HasValue ? (IsOutdoor.Value ? "室外" : "室內") : "?";
 
+        /// <summary>2026-09-27：這台相機是否啟用「剖面轉 90°」（單一相機、持久化於相機元素的 ES，
+        /// 見 CameraKeyPlanService.GetCameraSectionRotate90）。右鍵選單／④ 下拉選單打勾狀態用。</summary>
+        public bool SectionRotate90 { get; set; }
+
         public string ViewIdText => ViewId.GetIdValue().ToString();
 
         public string HeightAboveLevelCmText => HeightAboveLevelCm.HasValue

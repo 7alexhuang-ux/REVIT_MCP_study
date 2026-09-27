@@ -99,7 +99,7 @@
 
 ### 5.4 右鍵選單（清單列與地圖標記共用）
 
-一鍵 4 視圖／僅打開透視圖（2026-09-26：切到透視圖並**關閉其他所有視圖**，同一鍵 4 視圖的關閉邏輯）／**一鍵出圖紙**（§10.13）／**視角版本 ▸**（§11.5）／重新命名…（主題化輸入 Popup，拒絕重名）／複製到其他樓層…／重設剖面位置。每個項目都有 ToolTip。
+一鍵 4 視圖／僅打開透視圖（2026-09-26：切到透視圖並**關閉其他所有視圖**，同一鍵 4 視圖的關閉邏輯）／**一鍵出圖紙**（§10.13）／**視角版本 ▸**（§11.5）／重新命名…（主題化輸入 Popup，拒絕重名）／複製到其他樓層…／重設剖面位置／**剖面轉 90°（另一向）**（可勾選，§10.5.3a）。每個項目都有 ToolTip。
 
 ### 5.5 預設選取
 
@@ -171,7 +171,7 @@
 | 控制項 | 行為 |
 |---|---|
 | 一鍵 4 視圖（主鈕） | §10 |
-| ▾ 選單 | 等角範圍（整層（見上層樑）／只到當層（不含上層））、等角近側（相機位置（預設）／牆內側／保留，§10.6）、剖面方向（對齊房間長邊（預設）／沿視線）、剖面位置（相機位置（預設）／視野中心，§10.5.3）、室外範圍半徑… (m)（預設 60，有效 5–1000）、重設剖面位置、全部符合畫面、**更新樓層總覽**（有選取相機＝該相機的樓層；沒有選取＝所有有相機的樓層；只更新一張時自動開啟它，§10.10）、**一鍵出圖紙**（§10.13）、**圖紙圖框 ▸**（自動（最常用）＋專案內每個圖框類型，附已使用張數；本機設定 `SheetTitleBlockTypeId`，0＝自動；清單在「重新整理」時讀取） |
+| ▾ 選單 | 等角範圍（整層（見上層樑）／只到當層（不含上層））、等角近側（相機位置（預設）／牆內側／保留，§10.6）、剖面方向（對齊房間長邊（預設）／沿視線）、剖面位置（相機位置（預設）／視野中心，§10.5.3）、**剖面轉 90°（另一向，目前選取相機；沒有選取時停用，§10.5.3a）**、室外範圍半徑… (m)（預設 60，有效 5–1000）、重設剖面位置、全部符合畫面、**更新樓層總覽**（有選取相機＝該相機的樓層；沒有選取＝所有有相機的樓層；只更新一張時自動開啟它，§10.10）、**一鍵出圖紙**（§10.13）、**圖紙圖框 ▸**（自動（最常用）＋專案內每個圖框類型，附已使用張數；本機設定 `SheetTitleBlockTypeId`，0＝自動；清單在「重新整理」時讀取） |
 | 並排 | 開啟選取相機的透視圖＋下方樓層一張**既有**平面（已開啟 > 已裁剪 > 名稱排序；找不到就報錯，不新建），先關閉其他視圖，再 `PostCommand(TileViews)` |
 | 還原 | 關閉並排額外開的視圖、切回之前的作用視圖；已被關掉的其他視圖不會重新打開 |
 | ⋯ 更多 | 複製到其他樓層…、**相機標記 ▸（B 詳圖（預設）／A 模型／A+B，§10.11）**、標記顏色 ▸（藍 `#3B82C4` 預設／紅 `#D9534F`／橘 `#E8A33D`／綠 `#4CAF7A`／紫 `#8E6BBF`／黑 `#1C2B3A`／自訂…）、Key Plan 樣式 ▸（淡化背景（預設）／原始）、⑤ 人視高預設值…、匯出 Excel、開啟預覽視窗 |
@@ -286,6 +286,16 @@
 | 視野中心 | 舊行為：對齊房間長邊＝中心線上半個扇形半徑處；沿視線／室外＝眼睛、深度前後各 1.5 m |
 
 手動拖過的剖面仍保留（同 10.5 既有判定）；「重設剖面位置」依目前的位置設定重算。
+
+#### 10.5.3a 剖面轉 90°（2026-09-27，D-044，單一相機、持久化開關；`run_camera_keyplan` 的 `sectionRotate90` 可設定並持久化）
+
+與 10.5.1／10.5.3 是「單一相機」層級的開關，不是面板全域設定（不影響其他相機、也不寫進 `ConfigManager` 設定檔）：記在**相機元素本身**的 ES（Schema `RevitMCP_CameraSectionOptions`，欄位 `SectionRotate90: bool`，預設 false），右鍵選單／④ ▾「剖面轉 90°（另一向）」可勾選切換（④ 下拉作用在目前選取的相機，沒有選取時停用）。
+
+- **時機**：在 10.5.1（方向）與 10.5.2（範圍，含房間長軸模式把原點移到中心線那一步）都算完之後、10.5.3（位置＝相機位置）之前套用；10.5.3、`ClampSectionSpecToPlanCrop`（10.5.4 第七輪）之後照樣對「已轉向」的結果運作，不需要另外改。
+- **規則**：新軸＝目前軸繞垂直軸轉 90°（`XYZ.BasisZ.CrossProduct(軸)`）；水平範圍沿新軸重新投影（相對目前原點）——室內＝眼睛所在房間頂點投影 ±0.6 m buffer（與 10.5.2 同一個 buffer）；室外／找不到房間＝等角 XY 範圍（房間外接框 +0.6 m，或找不到房間時的扇形外接框，見 §10.6）投影；深度重置，交回 10.5.2／10.5.3 的既有預設值決定（位置＝相機位置時會整個覆蓋，只影響「位置＝視野中心」＋「方向＝對齊房間長邊」這個組合，改用預設 ±1.5 m）。
+- **切換行為**：切換時先寫 ES（單一小交易「剖面轉90°」），成功後照「重設剖面位置」流程（強制重建）立即生效，狀態列顯示中／還原中。
+- **失敗退回**：基準軸與垂直軸重合、投影範圍算不出來、任何例外 → 記 log 並維持原方向，不拋例外、不影響其他規則。
+- **MCP**：`run_camera_keyplan` 的 `sectionRotate90`（布林）有給值＝設定並持久化這台相機的開關＋強制這次重設剖面；`list_cameras` 於 `SectionOrientation.Rotate90` 回報目前設定；`Decisions.SectionRotate90` 回報本次實際套用值。
 
 #### 10.5.3 保留手動調整
 
@@ -467,7 +477,7 @@ C#：`MCP/Core/Commands/CommandExecutor.CameraManager.cs`；TS：`MCP-Server/src
 | 工具 | 讀／寫 | 參數 | 呼叫的共用程式碼 |
 |---|---|---|---|
 | `list_cameras` | 唯讀 | `nameContains?` | `ReadSnapshot`／`BuildCameraRow`、`ComputePerspectiveFov`、`FindEyeRoom`、`BaseMapPlanChooser.Choose`、ES 連結查詢 |
-| `run_camera_keyplan` | 寫入 | `cameraId?`、`tile`（預設 false）、`sectionMode?`（room／sight）、`isoMode?`（full／current）、`resetSection`（預設 false）、`markerMode?`（B／A／AB，2026-09-25）、`isoNearWalls?`（camera／wall／keep，舊值 cut＝wall；2026-09-26） | `CreateOrUpdateFourViews`（單次覆寫設定，不寫回設定檔）、`tile=true` 時 `OpenAndTileFourViews`；另回傳 `MarkerModeUsed`、`Warnings`（裁剪框讀回不符）、`Plan.Extents.ScopeBox` |
+| `run_camera_keyplan` | 寫入 | `cameraId?`、`tile`（預設 false）、`sectionMode?`（room／sight）、`isoMode?`（full／current）、`resetSection`（預設 false）、`markerMode?`（B／A／AB，2026-09-25）、`isoNearWalls?`（camera／wall／keep，舊值 cut＝wall；2026-09-26）、`sectionRotate90?`（布林，2026-09-27；有給值＝設定並持久化這台相機的「剖面轉 90°」開關＋強制 `resetSection=true`，不是單次覆寫，§10.5.3a） | `CreateOrUpdateFourViews`（單次覆寫設定，不寫回設定檔）、`tile=true` 時 `OpenAndTileFourViews`；另回傳 `MarkerModeUsed`、`Warnings`（裁剪框讀回不符）、`Plan.Extents.ScopeBox`、`Decisions.SectionRotate90` |
 | `set_camera_pose` | 寫入 | `cameraId?`＋任一：`heightAboveLevelCm`、`yawDeg`、`pitchDeg`、`planXcm`、`planYcm`、`farClipCm` | `BuildEditRequestFromRow`＋`ApplyDetailEdit`（第一次修改前自動存「A案」）→ `RefreshCameraViewIfOpen`（回傳 `ViewRefresh`）→ `UpdateCamerasAfterChange`（回傳 `CameraUpdate`：標記更新／略過數、是否重算 Key Plan；2026-09-26） |
 | `copy_camera_to_level` | 寫入 | `cameraId?`、`levelId` 或 `levelName` | `CopyCameraToLevels` |
 | `run_camera_overview` | 寫入（Wave 2） | `levelId` 或 `levelName`，或 `all=true`（所有有相機的樓層） | `CreateOrUpdateOverviews`（§10.10）；回傳每層視圖 id、名稱、是否新建、相機數與名稱、底圖來源與理由、範圍模式、裁剪外接框 mm、比例、依角色的標記元素數 |
