@@ -63,6 +63,10 @@ namespace RevitMCP.Core
         // 扇形（DrawSectionMarker）會誤導（等於在剖面裡沿著視線看下去，不是真的側視），只畫眼睛圓圈。判斷用幾何
         // （夾角），不看是不是剖面轉 90°，任何組合只要剖面恰好看向視線都適用。
         private const double SectionFanSuppressAlongSightDeg = 45.0;
+        // 2026-09-28（使用者決策，D-046：相機站在門邊，沿視線看的剖面卡在牆上）：跳過眼前牆的射線參數。
+        private const double WallSkipTightRangeMm = 1500.0;          // 只認「眼睛前方 1.5m 內」的命中；更遠的牆是場景一部分，不移剖切面
+        private const double WallSkipThicknessSanityCapMm = 1500.0;  // 找同一元素「背面」命中時的合理厚度上限（近端 + 這個值），避免抓到後面另一片牆
+        private const double WallSkipClearanceMm = 100.0;            // 剖切面落在元素背面再往前 100mm
         private const int SectionViewerLineWeight = 6;         // 本相機剖面 viewer 在 Key Plan 平面上的投影線寬（深灰、虛線，不跟淡化走）
         private const double OutdoorBelowLevelMm = 1000.0;     // 室外：Z 下限＝min(下方樓層, 最低樓層) −1m
         private const double OutdoorAboveModelMm = 2000.0;     // 室外：Z 上限＝XY 範圍內模型最高點 +2m
@@ -632,7 +636,7 @@ namespace RevitMCP.Core
                     try { planBasisX = planView.CropBox?.Transform?.BasisX; } catch { planBasisX = null; }
                     CameraSectionAnchorMode sectionAnchor = GetSectionAnchorMode();
                     dec.SectionAnchor = sectionAnchor;
-                    SectionSpec spec = ComputeSectionSpec(geom, cp, isoXY, storeyTop, sectionMode, planBasisX, cutPlaneZ, sectionAnchor, sectionRotate90);
+                    SectionSpec spec = ComputeSectionSpec(doc, geom, cp, isoXY, storeyTop, sectionMode, planBasisX, cutPlaneZ, sectionAnchor, sectionRotate90);
                     // 2026-09-26 第七輪：剖面沿線範圍截到 Key Plan 平面裁剪框內（避免遠端標頭超框、近端被眼睛楔形蓋住）；
                     // 一定要在 DrawPlanMarker（讀 spec/section 軸判斷是否重畫紅色視線中心線）與建剖面之前做。
                     ClampSectionSpecToPlanCrop(planView, spec);
@@ -1953,7 +1957,7 @@ namespace RevitMCP.Core
         ///           並確保包含 Key Plan 平面的剖切面高程（否則剖面線在平面上不顯示），不含就外擴並記 log。
         /// 任何一步失敗只記 log、退回較簡單的規則。
         /// </summary>
-        private static SectionSpec ComputeSectionSpec(CameraMath.CameraGeometry geom, CameraParams cp, IsoXY isoXY, StoreyTop storeyTop,
+        private static SectionSpec ComputeSectionSpec(Document doc, CameraMath.CameraGeometry geom, CameraParams cp, IsoXY isoXY, StoreyTop storeyTop,
             CameraSectionOrientationMode mode, XYZ planBasisX, double? cutPlaneZ,
             CameraSectionAnchorMode anchor = CameraSectionAnchorMode.Center, bool rotate90 = false)
         {
@@ -2093,9 +2097,33 @@ namespace RevitMCP.Core
                             }
                         }
                     }
-                    s.Axis = ax; s.Origin = geom.Eye; s.MinX = x0; s.MaxX = x1;
+                    // 2026-09-28（使用者決策，D-046，MCP 實測：Kitchen 01 站在門邊，剖切面卡在牆上只看到牆／
+                    // 衛浴固定物，看不到房間）：只在「沿視線看」（與剖面 fan 抑制同一個幾何判斷：lookFinal 與
+                    // 相機視線 center 夾角 < SectionFanSuppressAlongSightDeg）才自動跳過眼前的牆——側視剖面
+                    // （預設模式）不受影響、剖切面仍通過眼睛。往 lookFinal 打水平射線，1.5m 內打到牆／門／窗
+                    // 就把剖切面挪到該元素背面 +100mm；遠裁剪維持在原世界位置（深度＝原深度－位移量）。
+                    XYZ sectionOrigin = geom.Eye;
+                    double sightAlignDot2 = Math.Max(-1.0, Math.Min(1.0, lookFinal.DotProduct(center ?? lookFinal)));
+                    double sightAlignDeg2 = Math.Acos(sightAlignDot2) * 180.0 / Math.PI;
+                    string wallSkipLog;
+                    if (sightAlignDeg2 < SectionFanSuppressAlongSightDeg)
+                    {
+                        double wallOffset = ComputeWallSkipOffset(doc, geom.Eye, lookFinal, out string hitLog);
+                        wallSkipLog = hitLog;
+                        if (wallOffset > 1e-6)
+                        {
+                            double minDepth = Cm(50);
+                            depth = Math.Max(depth - wallOffset, minDepth);
+                            sectionOrigin = geom.Eye + lookFinal * wallOffset;
+                        }
+                    }
+                    else
+                    {
+                        wallSkipLog = $"剖面非沿視線看（與視線夾角 {sightAlignDeg2:F1}° ≥ {SectionFanSuppressAlongSightDeg:F0}°），不套用跳過眼前牆";
+                    }
+                    s.Axis = ax; s.Origin = sectionOrigin; s.MinX = x0; s.MaxX = x1;
                     s.MinZ = -depth; s.MaxZ = 0.0;
-                    log.Append($" | 剖面位置＝相機位置：原點＝眼睛 X[{CameraMath.FeetToMm(s.MinX):F0},{CameraMath.FeetToMm(s.MaxX):F0}]mm 深度[{CameraMath.FeetToMm(s.MinZ):F0},0]mm（剖切面通過眼睛；深度來源＝{depthSrc}）" +
+                    log.Append($" | 剖面位置＝相機位置：原點＝{(sectionOrigin.IsAlmostEqualTo(geom.Eye) ? "眼睛" : $"眼睛沿看向前移{CameraMath.FeetToMm((sectionOrigin - geom.Eye).GetLength()):F0}mm")} X[{CameraMath.FeetToMm(s.MinX):F0},{CameraMath.FeetToMm(s.MaxX):F0}]mm 深度[{CameraMath.FeetToMm(s.MinZ):F0},0]mm（剖切面{(sectionOrigin.IsAlmostEqualTo(geom.Eye) ? "通過眼睛" : "已跳過眼前牆")}；深度來源＝{depthSrc}；跳牆判斷＝{wallSkipLog}）" +
                                (flipped ? "；扇形在剖切面背後 → 軸反向" : ""));
                 }
                 catch (Exception exA)
@@ -2151,6 +2179,100 @@ namespace RevitMCP.Core
             log.Append($" | 剖面原點=({CameraMath.FeetToMm(o.X):F0},{CameraMath.FeetToMm(o.Y):F0},{CameraMath.FeetToMm(o.Z):F0})mm{(o.IsAlmostEqualTo(geom.Eye) ? "＝眼睛" : "")} axis=({s.Axis.X:F3},{s.Axis.Y:F3})");
             s.Log = log.ToString();
             return s;
+        }
+
+        /// <summary>
+        /// 2026-09-28（使用者決策，D-046）：剖面「沿視線看」時，相機常常站在門邊／貼牆（例如 Snowdon Towers
+        /// 「Camera at Kitchen 01」），剖切面通過眼睛就卡在眼前那道牆上，畫面只看到牆面／衛浴固定物，看不到
+        /// 房間。往 <paramref name="lookFinal"/>（section 的最終看向，已經過 anchor=Camera 的軸翻轉）從
+        /// <paramref name="eye"/> 打水平射線（沿用 <see cref="FindRaycastView"/> 同一張非透視／非樣板 3D 視圖、
+        /// 含連結模型，與站立面射線同一套 ReferenceIntersector 用法），目標類別牆／門／窗／帷幕嵌板（帷幕牆
+        /// 本身就是 OST_Walls）。只認眼睛前方 <see cref="WallSkipTightRangeMm"/>（1.5m）內的最近命中——更遠的
+        /// 牆是場景的一部分（例如房間對面那道牆），不能移動剖切面。找到最近命中的元素後，在同一條射線的所有
+        /// 命中裡找「同一個元素」（比對 Reference 的 ElementId＋LinkedElementId，含連結模型時仍正確分組）中
+        /// Proximity 最大者當作「元素背面」（夾一個合理厚度上限 <see cref="WallSkipThicknessSanityCapMm"/>，
+        /// 避免抓到牆後面另一片牆當成同一片的背面），剖切面落在背面再 +<see cref="WallSkipClearanceMm"/>（100mm）。
+        /// 回傳位移量（feet，&gt;0＝有效）；沒有可用 3D 視圖、前方 1.5m 內沒有命中、或射線例外都回傳 0，
+        /// <paramref name="log"/> 說明原因，呼叫端維持剖切面在相機位置，不拋例外。
+        /// </summary>
+        private static double ComputeWallSkipOffset(Document doc, XYZ eye, XYZ lookFinal, out string log)
+        {
+            log = "剖切面維持在相機位置";
+            try
+            {
+                if (doc == null || eye == null || lookFinal == null || lookFinal.GetLength() < 1e-6)
+                {
+                    log = "剖切面維持在相機位置（缺少射線起點／方向）";
+                    return 0.0;
+                }
+                View3D v3 = FindRaycastView(doc);
+                if (v3 == null)
+                {
+                    log = "剖切面維持在相機位置（沒有可用的 3D 視圖做射線）";
+                    return 0.0;
+                }
+                var cats = new List<BuiltInCategory>
+                {
+                    BuiltInCategory.OST_Walls, BuiltInCategory.OST_Doors, BuiltInCategory.OST_Windows, BuiltInCategory.OST_CurtainWallPanels
+                };
+                var ri = new ReferenceIntersector(new ElementMulticategoryFilter(cats), FindReferenceTarget.Face, v3) { FindReferencesInRevitLinks = true };
+                IList<ReferenceWithContext> hits = ri.Find(eye, lookFinal.Normalize());
+                List<ReferenceWithContext> ordered = (hits ?? new List<ReferenceWithContext>())
+                    .Where(h => h != null).OrderBy(h => h.Proximity).ToList();
+                if (ordered.Count == 0)
+                {
+                    log = "前方 1.5m 內無牆，剖切面維持在相機位置";
+                    return 0.0;
+                }
+                double tightFeet = CameraMath.MmToFeet(WallSkipTightRangeMm);
+                ReferenceWithContext near = ordered[0];
+                if (near.Proximity > tightFeet)
+                {
+                    log = "前方 1.5m 內無牆，剖切面維持在相機位置";
+                    return 0.0;
+                }
+                Reference nearRef = near.GetReference();
+                ElementId nearElId = nearRef.ElementId;
+                ElementId nearLinkId = nearRef.LinkedElementId;
+                bool SameElement(Reference r) => r != null && r.ElementId == nearElId && r.LinkedElementId == nearLinkId;
+                double capFeet = near.Proximity + CameraMath.MmToFeet(WallSkipThicknessSanityCapMm);
+                double farProximity = near.Proximity;
+                foreach (ReferenceWithContext h in ordered)
+                {
+                    Reference r;
+                    try { r = h.GetReference(); } catch { continue; }
+                    if (!SameElement(r) || h.Proximity > capFeet) continue;
+                    if (h.Proximity > farProximity) farProximity = h.Proximity;
+                }
+                double clearanceFeet = CameraMath.MmToFeet(WallSkipClearanceMm);
+                double offset = farProximity + clearanceFeet;
+                string catName = "?", elLabel = nearElId.GetIdValue().ToString();
+                try
+                {
+                    bool linked = nearLinkId != null && nearLinkId != ElementId.InvalidElementId;
+                    if (linked)
+                    {
+                        Element linkInst = doc.GetElement(nearElId);
+                        catName = "連結元素";
+                        elLabel = $"{linkInst?.Name}內 {nearLinkId.GetIdValue()}";
+                    }
+                    else
+                    {
+                        Element el = doc.GetElement(nearElId);
+                        catName = el?.Category?.Name ?? "?";
+                        elLabel = $"{nearElId.GetIdValue()}「{el?.Name}」";
+                    }
+                }
+                catch { }
+                log = $"前方偵測到「{catName}」{elLabel}（近端 {CameraMath.FeetToMm(near.Proximity):F0}mm、背面 {CameraMath.FeetToMm(farProximity):F0}mm）→ 剖切面往前移 {CameraMath.FeetToMm(offset):F0}mm（背面 +{WallSkipClearanceMm:F0}mm）";
+                return offset;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("相機 Key Plan：剖面「跳過眼前牆」射線失敗，剖切面維持原位", ex);
+                log = "剖切面維持在相機位置（射線例外：" + ex.Message + "）";
+                return 0.0;
+            }
         }
 
         /// <summary>
@@ -4748,6 +4870,9 @@ namespace RevitMCP.Core
         /// 2026-09-27（D-044 修正②）：剖面「看向」（−BasisZ）與相機水平視線夾角 &lt; <see cref="SectionFanSuppressAlongSightDeg"/>
         /// 也只畫眼睛圓圈（不管是不是剖面轉 90° 造成的，純看幾何）——這種情況等於順著視線看進剖面，垂直扇形
         /// （假設視線躺在畫面裡的側視）會誤導；平面視圖的扇形不受影響。
+        /// 2026-09-28（D-046）：剖面轉 90°＋跳過眼前牆後，眼睛不再落在剖切面（剖切面往前挪了），眼睛落在裁剪框
+        /// 深度範圍外側（視野中「相機背後」那一側）——投影點（畫在畫面上的圓圈位置）落在裁剪框 X/Y 範圍外時
+        /// 直接略過整個標記（不畫圓圈、不畫扇形），不拋例外。
         /// </summary>
         private static void DrawSectionMarker(Document doc, ViewSection sectionView, CameraMath.CameraGeometry geom,
             XYZ forwardHoriz, double fanRadiusFeet, double downRad, double upRad, string cid)
@@ -4766,6 +4891,25 @@ namespace RevitMCP.Core
             if (n == null || n.GetLength() < 1e-6) return;
             n = n.Normalize();
             XYZ eye = geom.Eye - n * (geom.Eye - sectionView.Origin).DotProduct(n);
+            try
+            {
+                Transform cropTf = sectionView.CropBox?.Transform;
+                BoundingBoxXYZ cb = sectionView.CropBox;
+                if (cropTf != null && cb != null)
+                {
+                    XYZ local = cropTf.Inverse.OfPoint(eye);
+                    double eps = CameraMath.MmToFeet(1.0);
+                    if (local.X < cb.Min.X - eps || local.X > cb.Max.X + eps || local.Y < cb.Min.Y - eps || local.Y > cb.Max.Y + eps)
+                    {
+                        Logger.Info($"相機 Key Plan：剖面標記 眼睛投影點落在裁剪框外（本機 X={CameraMath.FeetToMm(local.X):F0}mm Y={CameraMath.FeetToMm(local.Y):F0}mm，框 X[{CameraMath.FeetToMm(cb.Min.X):F0},{CameraMath.FeetToMm(cb.Max.X):F0}]mm Y[{CameraMath.FeetToMm(cb.Min.Y):F0},{CameraMath.FeetToMm(cb.Max.Y):F0}]mm），略過整個標記");
+                        return;
+                    }
+                }
+            }
+            catch (Exception exCrop)
+            {
+                Logger.Error("相機 Key Plan：剖面標記 檢查眼睛是否在裁剪框內失敗，照常繪製", exCrop);
+            }
             XYZ alongRaw = forwardHoriz - n * forwardHoriz.DotProduct(n);
             alongRaw = new XYZ(alongRaw.X, alongRaw.Y, 0);
             double lenA = alongRaw.GetLength();

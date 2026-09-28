@@ -4,6 +4,18 @@
 > 除非另外註明，每一條都「已編譯、未經 Revit 實機驗證」。
 > 現行行為見 [spec.zh-TW.md](spec.zh-TW.md)；決策理由見 [adr.zh-TW.md](adr.zh-TW.md)。
 
+## 2026-09-28
+
+### 10:40｜沿視線看的剖面自動跳過眼前的牆（D-046，使用者決策；已編譯 R22–R26 0 錯誤、QA/QC 67 PASS/0 FAIL；未部署：Revit 執行中；待複測）
+- **背景**：D-045 已部署並 MCP 複測通過（室內剖面轉 90° 深度修正為 11132mm、側視扇形正確抑制）。但「Camera at Kitchen 01」站在門邊貼牆（眼睛 X=-19665mm，牆＋門就在看向前方約 150–300mm），剖切面通過眼睛時只切到那道牆（牆上的衛浴固定物），看不到房間本身。使用者拍板：自動跳過相機正前方的牆。
+- **判斷時機**：與 D-045 的側視扇形抑制共用同一個幾何測試（剖面最終看向與相機水平視線夾角 < 45°）才套用；側視剖面（預設模式）不受影響。
+- **跳牆邏輯（新方法 `ComputeWallSkipOffset`）**：沿看向打水平射線（`ReferenceIntersector`，沿用站立面射線同一張 3D 視圖、含連結模型），目標牆／門／窗／帷幕嵌板；只認眼睛前方 1.5m 內的最近命中；找同一元素（`ElementId`+`LinkedElementId`）沿射線最遠的命中當「背面」（厚度上限 1.5m），剖切面挪到背面 +100mm；遠裁剪維持原世界位置（深度＝原深度−位移量，下限 0.5m）；原點沿看向前移，X／垂直範圍不受影響（看向與軸、世界 Z 皆垂直）。沒偵測到、無 3D 視圖、或例外都退回「剖切面維持在相機位置」並記 log。
+- **`ClampSectionSpecToPlanCrop`／`UpdateExistingSectionFrame`**：確認兩者本來就是對通用的 `spec.Origin`／意圖框運作，不假設原點＝眼睛，不需要另外改。
+- **標記防禦**：`DrawSectionMarker` 新增眼睛投影點裁剪框內外檢查——跳牆後眼睛可能落在裁剪框外（相機背後那一側），落在框外就整個標記略過，不拋例外。
+- 新常數：`WallSkipTightRangeMm`(1500)、`WallSkipThicknessSanityCapMm`(1500)、`WallSkipClearanceMm`(100)。`ComputeSectionSpec` 簽章新增 `Document doc` 參數（兩個呼叫點都已更新）。
+- 詳見 [adr.zh-TW.md](adr.zh-TW.md) D-046。
+- R22–R26 dotnet build 皆 0 errors；`verify-qaqc.ps1 -SkipBuild -SkipDeploy`：PASS 67／FAIL 0／WARN 2（既有）／SKIP 3。Revit 執行中 → 未部署，本次未再跑 MCP 複測（留給下一輪）。
+
 ## 2026-09-27
 
 ### 18:05｜剖面轉 90°：MCP 實測後修正深度＋側視扇形誤導（D-044 修正；已編譯 R22–R26 0 錯誤、QA/QC 67 PASS/0 FAIL；未部署：Revit 執行中；待複測）
