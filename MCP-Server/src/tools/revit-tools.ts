@@ -31,9 +31,9 @@ export async function executeRevitTool(
     // 如果是 query_elements_with_filter，映射到 C# 的 query_elements
     const commandName = toolName === "query_elements_with_filter" ? "query_elements" : toolName;
 
-    // 跨文件命令需要較長 timeout（開啟 .rvt/.rfa 檔案較費時）
-    const CROSS_DOC_COMMANDS = new Set(["read_source_file_sheets", "copy_sheets_from_file", "sync_sheet_parameters_from_source", "inject_green_material_into_family"]);
-    const timeoutMs = CROSS_DOC_COMMANDS.has(commandName) ? 120000 : 30000;
+    // 跨文件與批次匯出命令需要較長 timeout。
+    const LONG_RUNNING_COMMANDS = new Set(["read_source_file_sheets", "copy_sheets_from_file", "sync_sheet_parameters_from_source", "inject_green_material_into_family", "export_sheets"]);
+    const timeoutMs = LONG_RUNNING_COMMANDS.has(commandName) ? 120000 : 30000;
 
     // 發送命令到 Revit
     const response = await client.sendCommand(commandName, args, timeoutMs);

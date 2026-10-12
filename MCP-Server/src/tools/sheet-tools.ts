@@ -35,6 +35,65 @@ export const sheetTools: Tool[] = [
         },
     },
     {
+        name: "place_views_on_sheets",
+        description: "批次將平面、剖面、立面或詳圖視圖放到指定圖紙；可自動置中於圖框，並可選擇移動已存在於同張圖紙的視埠。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                placements: {
+                    type: "array",
+                    minItems: 1,
+                    items: {
+                        type: "object",
+                        properties: {
+                            sheetId: { type: "number", description: "目標圖紙 Element ID" },
+                            viewId: { type: "number", description: "要放置的視圖 Element ID" },
+                            xMm: { type: "number", description: "圖紙座標 X（mm）；省略時使用圖框中心" },
+                            yMm: { type: "number", description: "圖紙座標 Y（mm）；省略時使用圖框中心" },
+                        },
+                        required: ["sheetId", "viewId"],
+                    },
+                    description: "視圖與圖紙的配置清單",
+                },
+                moveExisting: {
+                    type: "boolean",
+                    description: "視圖已在同張圖紙上時，是否移動既有視埠到指定位置。預設 false",
+                },
+            },
+            required: ["placements"],
+        },
+    },
+    {
+        name: "export_sheets",
+        description: "將指定 Revit 圖紙批次匯出為 PDF、DWG，支援依圖紙編號或 Element ID 選取、合併 PDF 與既有 DWG 匯出設定。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                outputFolder: { type: "string", description: "輸出資料夾的絕對路徑" },
+                sheetIds: {
+                    type: "array",
+                    items: { type: "number" },
+                    description: "要匯出的圖紙 Element ID 清單（與 sheetNumbers 擇一或合併）",
+                },
+                sheetNumbers: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "要匯出的圖紙編號清單（與 sheetIds 擇一或合併）",
+                },
+                formats: {
+                    type: "array",
+                    items: { type: "string", enum: ["pdf", "dwg"] },
+                    description: "輸出格式；預設同時輸出 PDF 與 DWG",
+                },
+                combinePdf: { type: "boolean", description: "是否合併為單一 PDF。預設 true" },
+                combinedPdfName: { type: "string", description: "合併 PDF 檔名；預設 Structural_Review.pdf" },
+                dwgSetupName: { type: "string", description: "Revit 既有 DWG 匯出設定名稱；省略時使用預設設定" },
+                overwrite: { type: "boolean", description: "是否覆寫既有同名輸出。預設 false" },
+            },
+            required: ["outputFolder"],
+        },
+    },
+    {
         name: "auto_renumber_sheets",
         description: "自動掃描專案中所有帶有 -1 後綴的圖紙（例如 ARB-D0417-1），並將其合併至主序列中（變成 ARB-D0418），後續編號會自動順延。",
         inputSchema: { type: "object", properties: {} },

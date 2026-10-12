@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tools 索引（192 個）· BIM_MCP</title>
-<meta property="og:title" content="RevitMCP Tools 索引：192 個執行層工具">
-<meta property="og:description" content="192 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
+<title>Tools 索引（194 個）· BIM_MCP</title>
+<meta property="og:title" content="RevitMCP Tools 索引：194 個執行層工具">
+<meta property="og:description" content="194 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@300;400;600;700;800&display=swap">
@@ -89,17 +89,17 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">192 個</span></div>
+  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">194 個</span></div>
   <h1 class="bim-hero-title">Tools · <span class="accent">執行層</span><br>模型上真正被動到的那一下</h1>
-  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 192 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
+  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 194 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
 </header>
 
 <section class="bim-section">
   <h2 class="bim-section-title">先看懂三個標記</h2>
   <p>每張卡右上角的標記來自工具自己宣告的 <code>annotations</code>，不是這一頁另外標的——閘門 <code>9-1</code> 會驗證它們與程式碼一致。</p>
   <ul>
-    <li><strong>唯讀</strong>（85 個）——只讀不寫。跑錯了不會留下痕跡，可以放心探索。</li>
-    <li><strong>會寫入</strong>（104 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
+    <li><strong>唯讀</strong>（86 個）——只讀模型；部分工具會寫出外部檔案。跑錯了不會修改 Revit 模型。</li>
+    <li><strong>會寫入</strong>（105 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
     <li><strong>破壞性</strong>（3 個）——刪除或不可逆地取代既有內容：<code>curate_mep_sizes · dedup_detail_elements_in_view · delete_element</code>。這份名單是白名單，程式碼裡多一個就會被閘門擋下。</li>
   </ul>
   <p style="color:var(--text-muted);font-size:13px;">「唯讀」是工具作者的宣告，不是執行時的沙箱。它告訴你這支工具<em>設計上</em>不寫入，不是保證它<em>不可能</em>寫入。</p>
@@ -117,16 +117,16 @@
         <tr><td><strong>C</strong></td><td>房間與空間</td><td class="num">18</td><td>房間邊界、編號、面積、走廊、施工架周長。</td></tr>
         <tr><td><strong>D</strong></td><td>MEP 與碰撞</td><td class="num">17</td><td>風管系統、空間代表點、套管開孔、CSA 干涉。</td></tr>
         <tr><td><strong>E</strong></td><td>法規檢核</td><td class="num">13</td><td>排煙、偵煙、樓梯——有法源、有判準的檢查。</td></tr>
-        <tr><td><strong>F</strong></td><td>視圖與圖紙</td><td class="num">26</td><td>建視圖、裁剪、圖紙配置、視埠定位、跨專案複製。</td></tr>
+        <tr><td><strong>F</strong></td><td>視圖與圖紙</td><td class="num">28</td><td>建視圖、裁剪、圖紙配置、視埠定位、跨專案複製與出圖。</td></tr>
         <tr><td><strong>G</strong></td><td>標註與詳圖</td><td class="num">25</td><td>尺寸、詳圖元件、填充區域、圖例、明細表、文字。</td></tr>
         <tr><td><strong>H</strong></td><td>視覺化</td><td class="num">20</td><td>上色、覆寫、隱藏顯示，也含材質與 Type 建構。</td></tr>
     </tbody>
   </table>
-  <p style="color:var(--text-muted);font-size:13px;">分類是 40 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 192。這一頁由 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
+  <p style="color:var(--text-muted);font-size:13px;">分類是 40 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 194。這一頁由 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
 </section>
 
 <section class="bim-section">
-  <h2 class="bim-section-title">192 個工具 · 依用途分組</h2>
+  <h2 class="bim-section-title">194 個工具 · 依用途分組</h2>
 
     <div class="cat-header">A · 基礎與查詢（26 個）</div>
     <p class="cat-blurb">讀模型、找元素、問參數，多數工作的第一步；也包含少數寫入型前置工具（如載入共用參數檔 load_shared_parameters）。</p>
@@ -1351,7 +1351,7 @@
         <div class="tool-desc">依照法規判定結果對偵煙探測器上色：綠=PASS、紅=FAIL、橙=WARN（出風口資料缺失）。</div>
       </div>
     </div>
-    <div class="cat-header">F · 視圖與圖紙（26 個）</div>
+    <div class="cat-header">F · 視圖與圖紙（28 個）</div>
     <p class="cat-blurb">建視圖、裁剪、圖紙配置、視埠定位、跨專案複製。</p>
     <div class="tool-card" id="align_titleblocks_on_sheets" data-tool="align_titleblocks_on_sheets">
       <div>
@@ -1493,6 +1493,16 @@
         <div class="tool-desc">Duplicate one or more views with detailing (ViewDuplicateOption.WithDetailing keeps view-specific detailing/annotation), optionally renaming them and copying the crop region from the source view. Typical use: create the &#x27;高於6m牆標示&#x27; tall-partition markup views from a base plan.</div>
       </div>
     </div>
+    <div class="tool-card" id="export_sheets" data-tool="export_sheets">
+      <div>
+        <div class="tool-name">export_sheets</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">sheet-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">將指定 Revit 圖紙批次匯出為 PDF、DWG，支援依圖紙編號或 Element ID 選取、合併 PDF 與既有 DWG 匯出設定。</div>
+      </div>
+    </div>
     <div class="tool-card" id="get_all_sheets" data-tool="get_all_sheets">
       <div>
         <div class="tool-name">get_all_sheets</div>
@@ -1541,6 +1551,16 @@
       </div>
       <div>
         <div class="tool-desc">批次移動 viewport 標題（label line + text）的位置。支援兩種模式：(1) below-view-center: 將標題置中放在 view 正下方（自動計算 cropbox 底邊中心 + gapMm 距離）；(2) reset: LabelOffset 還原為 XYZ.Zero（Revit 預設位置，通常在 viewport 左下角）。識別目標 viewports 與 position_viewports_on_sheet 相同：viewportIds / viewIds / viewNames / viewNameContains，可加 sheetNumbers / viewTypeFilter 過濾。觸發條件：使用者提到 viewport 標題位置、視埠標題、view title 對齊、把標題挪到視圖下方、reset title position。建議搭配 dryRun=true 先預覽。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="place_views_on_sheets" data-tool="place_views_on_sheets">
+      <div>
+        <div class="tool-name">place_views_on_sheets</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">sheet-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">批次將平面、剖面、立面或詳圖視圖放到指定圖紙；可自動置中於圖框，並可選擇移動已存在於同張圖紙的視埠。</div>
       </div>
     </div>
     <div class="tool-card" id="position_viewports_on_sheet" data-tool="position_viewports_on_sheet">
@@ -2078,7 +2098,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / tools-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">192 個 MCP 工具完整索引，由 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">194 個 MCP 工具完整索引，由 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
 </footer>
 
 <script src="../shared.js"></script>

@@ -2,8 +2,8 @@
 name: sheet-viewport-management
 description: "圖紙與視埠管理工作流程：批次建立圖紙、自動修正圖號衝突、語義化重新排序、視埠定位。當使用者提到圖紙、sheet、視埠、viewport、圖框、titleblock、圖紙編號時觸發。"
 metadata:
-  version: "1.0"
-  updated: "2026-03-16"
+  version: "1.1"
+  updated: "2026-10-08"
   created: "2026-03-16"
   contributors:
     - "unknown"
@@ -163,7 +163,31 @@ metadata:
 
 ---
 
-### 5. get_viewport_map
+### 5. place_views_on_sheets
+**用途：** 批次把平面、剖面、立面或詳圖視圖配置到指定圖紙。
+
+**要點：**
+- 每筆配置明確提供 `sheetId` 與 `viewId`。
+- 省略 `xMm` / `yMm` 時，以圖框邊界中心作為預設視埠中心。
+- 視圖已在同一張圖紙上時預設跳過；設定 `moveExisting=true` 才移動既有視埠。
+- 不會刪除視圖已在其他圖紙上的既有視埠；Revit 不允許重複配置時回報失敗。
+
+---
+
+### 6. export_sheets
+**用途：** 依圖紙編號或 Element ID 批次匯出 PDF 與 DWG。
+
+**要點：**
+- `outputFolder` 必須是絕對路徑。
+- `formats` 可指定 `pdf`、`dwg`；省略時兩者都匯出。
+- PDF 可用 `combinePdf=true` 合併成單一檔案。
+- DWG 可選擇既有 `dwgSetupName`；省略時使用 Revit 預設匯出設定。
+- 預設不覆寫既有檔案；只有明確傳入 `overwrite=true` 才覆寫。
+- 匯出後必須檢查回傳的檔案清單；PDF 交付前應另做逐頁渲染檢查。
+
+---
+
+### 7. get_viewport_map
 **用途：** 取得視埠與圖紙的對應關係
 
 **輸入參數：** 無
@@ -305,7 +329,6 @@ graph TD
 ### 待實作功能
 1. **batch_rename_sheets** - 批次重新編號工具
 2. **duplicate_sheet** - 複製圖紙（含視埠配置）
-3. **place_view_on_sheet** - 將視圖放置到圖紙上
 
 ### 改進方向
 - 支援圖紙編號格式驗證

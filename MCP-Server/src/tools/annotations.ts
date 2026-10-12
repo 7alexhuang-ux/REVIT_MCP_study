@@ -95,6 +95,7 @@ export const OVERRIDE: Record<string, ClassificationHints> = {
     export_families: { readOnlyHint: true, destructiveHint: false },
     export_clash_report: { readOnlyHint: true, destructiveHint: false },
     export_smoke_review_excel: { readOnlyHint: true, destructiveHint: false },
+    export_sheets: { readOnlyHint: true, destructiveHint: false },
     import_excel_to_drafting_views: { readOnlyHint: true, destructiveHint: false },
 
     select_element: { readOnlyHint: false, destructiveHint: false },

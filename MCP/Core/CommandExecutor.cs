@@ -466,6 +466,12 @@ namespace RevitMCP.Core
                     case "create_sheets":
                         result = CreateSheets(parameters);
                         break;
+                    case "place_views_on_sheets":
+                        result = PlaceViewsOnSheets(parameters);
+                        break;
+                    case "export_sheets":
+                        result = ExportSheets(parameters);
+                        break;
                     case "auto_renumber_sheets":
                         result = AutoRenumberSheets(parameters);
                         break;
