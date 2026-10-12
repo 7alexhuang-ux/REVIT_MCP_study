@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>貢獻者致謝 · BIM_MCP</title>
-<meta property="og:title" content="BIM_MCP 貢獻者致謝 · 19 位建置協助人">
+<meta property="og:title" content="BIM_MCP 貢獻者致謝 · 21 位建置協助人">
 <meta property="og:description" content="被收編進 main 的 fork 貢獻者名單：真名 + GitHub handle + 貢獻內容摘要 + 對應 PR／收編波次。依 domain 分類與貢獻數量排序。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -51,7 +51,7 @@
 <header class="bim-hero">
   <div class="bim-hero-eyebrow">CONTRIBUTORS <span class="accent">建置協助人</span></div>
   <h1 class="bim-hero-title">致謝<span class="accent">建置協助人</span></h1>
-  <p class="bim-hero-sub">Revit MCP 是公開 fork 的專案，這些人把自己 fork 出去的分支做出了實際成果——修過的工具、補齊的 domain SOP、開過的 PR——後來被逐一手動核對、跑 build、過 QA/QC 後收編進 main。這裡列出的 19 位，每個人的貢獻都能追到具體的 PR、commit 或 <a href="../2026-07/harvest-waves.html">收編波次</a>，不是邀請名單，是實際發生過的工作記錄。排序依 domain 分類與貢獻數量：<strong>法規檢查（紅）→ 圖說管理（藍）→ 開發工具（黃）→ 結構穿梁（綠）→ 教材參考（紫）</strong>。</p>
+  <p class="bim-hero-sub">Revit MCP 是公開 fork 的專案，這些人把自己 fork 出去的分支做出了實際成果——修過的工具、補齊的 domain SOP、開過的 PR——後來被逐一手動核對、跑 build、過 QA/QC 後收編進 main。這裡列出的 21 位，每個人的貢獻都能追到具體的 PR、commit 或 <a href="../2026-07/harvest-waves.html">收編波次</a>，不是邀請名單，是實際發生過的工作記錄。排序依 domain 分類與貢獻數量：<strong>法規檢查（紅）→ 圖說管理（藍）→ 開發工具（黃）→ 結構穿梁（綠）→ 教材參考（紫）</strong>。</p>
 </header>
 
 <section class="bim-section bim-anchor" id="compliance" data-cat="compliance">
@@ -107,8 +107,8 @@
     </div>
     <div class="bim-card contrib-card">
       <h4>任遠 <a class="handle-link" href="https://github.com/7alexhuang-ux" target="_blank" rel="noopener">@7alexhuang-ux</a></h4>
-      <p>帷幕牆圖樣與 Toposolid 分級轉樓板工具 <code>grade_toposolid_to_floors</code>，併入正典 <code>registerRevitTools()</code> 取代原先繞過路徑的 wrapper hack。</p>
-      <div class="contrib-refs">PR #7, #17, #70（merged）· Wave 1 收編</div>
+      <p>帷幕牆圖樣與 Toposolid 分級轉樓板工具 <code>grade_toposolid_to_floors</code>，併入正典 <code>registerRevitTools()</code> 取代原先繞過路徑的 wrapper hack。2026-10 再收編本專案目前最大的單筆貢獻：Revit <strong>相機管理停靠面板</strong>（<code>MCP/UI/CameraManagerPanelControl.cs</code> 等 9 檔 + <code>MCP/Core/CameraKeyPlanService</code> 八個 partial）、一鍵 Key Plan 四視圖，以及視圖診斷／篩選器／Section Box／文件操作共 29 支工具（192→221），另附 <code>docs/camera-manager/</code> 規格／ADR／roadmap 與 <code>domain/lessons.md</code> L-033「剖面範圍對不等於方向對」。</p>
+      <div class="contrib-refs">PR #7, #17, #70（merged）· Wave 1 收編 · <code>feat/camera-manager</code> 分支 2026-10-12 以 squash 收編（PR #132、#136 為其祖先，一併涵蓋）</div>
     </div>
     <div class="bim-card contrib-card">
       <h4>洪友川 <a class="handle-link" href="https://github.com/Roy-y111" target="_blank" rel="noopener">@Roy-y111</a></h4>
@@ -141,6 +141,16 @@
       <h4>邱仁 <a class="handle-link" href="https://github.com/ray92chiu-png" target="_blank" rel="noopener">@ray92chiu-png</a></h4>
       <p>部署腳本 PowerShell 5.1 相容性修正——精準定位 setup.ps1 在 <code>$ErrorActionPreference = "Stop"</code> 下 native 指令 <code>2>&amp;1</code> 誤判編譯例外的根因，附完整 diff 與重現/驗證步驟。</p>
       <div class="contrib-refs">issue #89（fix 已收攏，commit 1b5a71e）</div>
+    </div>
+    <div class="bim-card contrib-card">
+      <h4>嘉祥 <a class="handle-link" href="https://github.com/laytonluo" target="_blank" rel="noopener">@laytonluo</a></h4>
+      <p>Ribbon 上的 MCP 服務狀態指示：原本「MCP 服務（開/關）」按鈕沒有圖示、服務是開還是關只會在按下去的那一次 <code>TaskDialog</code> 裡出現一次，ribbon 上沒有任何常駐線索。補上 ON/OFF 兩個 32×32 圖示（<code>MCP/Resources/icon-32-on.png</code>／<code>icon-32-off.png</code>）與帶 port 的 tooltip，與 <code>SocketService.IsRunning</code> 連動。</p>
+      <div class="contrib-refs">PR #133（2026-10-12 收編；收編時另補強 <code>StartAsync()</code> 非同步競態與 pack URI，見 commit 說明）</div>
+    </div>
+    <div class="bim-card contrib-card">
+      <h4>尚霖 <a class="handle-link" href="https://github.com/Archwiz-boss" target="_blank" rel="noopener">@Archwiz-boss</a></h4>
+      <p>可選 Archicad backend 的提案者與唯一實測來源：<code>.claude/skills/archicad-skill-adapter/</code>（Revit 意圖 → Archicad 的受控轉譯，Domain 方法與 Revit 路線都保留）、<code>docs/integrations/archicad-skill-portability.md</code> 與 translation-wave2 可攜性矩陣，以及 <code>domain/tool-capability-boundary.md</code> L11。該 skill 的 runtime 事實全部由他在自己的 fork（<code>Archwiz-boss/BIM_MCP_study</code>）實機蒐集，本 repo 未複驗——這點在檔首就寫明了。</p>
+      <div class="contrib-refs">issue #98（RFC）· PR #122、#123（內容已收編：commit 6636778、5dad238）· 另有 #130、#131、#139、#140 待審</div>
     </div>
     <div class="bim-card contrib-card">
       <h4>黃律銘 <a class="handle-link" href="https://github.com/LUIMIN921-1" target="_blank" rel="noopener">@LUIMIN921-1</a></h4>
@@ -205,7 +215,7 @@
     <a href="../index.html" class="bim-footer-btn primary">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / contributors</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">2026-07-16 · 19 位建置協助人（5 大分類，依 domain 順序與貢獻數量排序），資料來源 <code>docs/fork-audit/contributor-map.md</code> 與 <code>log/2026-07.md</code>。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">2026-10-12 · 21 位建置協助人（5 大分類，依 domain 順序與貢獻數量排序），資料來源 <code>docs/fork-audit/contributor-map.md</code>、<code>log/2026-07.md</code>；第 20、21 位（嘉祥 @laytonluo、尚霖 @Archwiz-boss）的真名由維護者於 2026-10-12 當面確認，記錄見 <code>log/2026-10.md</code>。</p>
 </footer>
 
 <script src="../shared.js"></script><script>initAll();</script>

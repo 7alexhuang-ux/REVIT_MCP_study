@@ -603,6 +603,28 @@ namespace RevitMCP.Core
         /// 專用 MCP 工具：查詢 Project Materials (材質瀏覽器) 清單中所有現存材質。
         /// 供 Agent 自檢確認 Material 是否已被 100% 建立出。
         /// </summary>
+        /// <summary>
+        /// 安全地把材質顏色格式化成 #RRGGBB。
+        ///
+        /// 部分材質的 Color 未初始化，讀 Red/Green/Blue 會丟
+        /// "The color represents an invalid or uninitialized color."，
+        /// 先前這會讓整個 get_all_materials 查詢失敗（實測：searchKeyword="*" 直接 crash）。
+        /// 單一材質取不到顏色不該拖垮整份清單，所以這裡回 null 由呼叫端呈現。
+        /// </summary>
+        private static string TryFormatMaterialColor(Material material)
+        {
+            try
+            {
+                Color color = material.Color;
+                if (color == null || !color.IsValid) return null;
+                return $"#{color.Red:X2}{color.Green:X2}{color.Blue:X2}";
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private object GetAllMaterials(JObject parameters)
         {
             Document doc = _uiApp.ActiveUIDocument.Document;
@@ -620,7 +642,7 @@ namespace RevitMCP.Core
                     {
                         MaterialId = m.Id.GetIdValue(),
                         Name = m.Name,
-                        ColorHex = $"#{m.Color.Red:X2}{m.Color.Green:X2}{m.Color.Blue:X2}"
+                        ColorHex = TryFormatMaterialColor(m)
                     });
                 }
             }

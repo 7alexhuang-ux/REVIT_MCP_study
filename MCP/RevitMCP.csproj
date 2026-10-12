@@ -22,4 +22,9 @@
     <PackageReference Include="ClosedXML" Version="0.102.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Resource Include="Resources\icon-32-on.png" />
+    <Resource Include="Resources\icon-32-off.png" />
+  </ItemGroup>
+
 </Project>
