@@ -25,7 +25,9 @@ Revit Add-in (C#)
   -> Revit API
 ```
 
-There is also an optional embedded-chat direction where a Revit WPF window can call an AI API directly. That embedded option is separate from the MCP stdio server path.
+The add-in also ships one in-Revit WPF surface of its own: the **camera-manager dockable pane** (`MCP/UI/`, registered in `OnStartup` under a fixed GUID). It is driven by a ribbon button and Revit events, calls the Revit API directly on the UI thread, and never goes through the WebSocket bridge — so a session with no MCP client connected still has a working pane.
+
+Separately, there is an optional embedded-chat *direction* where a Revit WPF window would call an AI API directly. That one is still hypothetical — nothing in the repo implements it — and is unrelated to both the MCP stdio path and the pane above.
 
 A second, unrelated stdio MCP server ships in the repo: `scripts/monstrare_mcp_server.py` exposes the Monstrare kanban cards (`tools/kanban/cards/*.json`) as MCP tools. It does not talk to Revit and is not part of the bridge above. See "Monstrare" below.
 
@@ -114,6 +116,11 @@ If pulling the 2026-07-17 cleanup commit fails with "local changes would be over
 | `MCP/Core/CommandExecutor.cs` | Main command dispatcher |
 | `MCP/Core/Commands/*.cs` | Command modules split by workflow area |
 | `MCP/Core/RevitCompatibility.cs` | Cross-version `ElementId` helpers |
+| `MCP/UI/CameraManagerPaneProvider.cs` | `IDockablePaneProvider` for the camera-manager pane. The pane's `FrameworkElement` must be constructed in `OnStartup` — Revit never rebuilds that instance after `RegisterDockablePane` |
+| `MCP/UI/CameraManagerPanelControl.cs` | The pane itself: WPF built in code, no XAML. Styling comes only from `MCP/UI/CameraManagerTheme.cs` (every container needs an explicit `Background`; the pane host paints black behind a transparent one) |
+| `MCP/Core/CameraManagerEventQueue.cs` | FIFO `ExternalEvent` queue used **only** by the pane. Deliberately separate from `ExternalEventManager`, whose single `_action` field would drop queued pane work |
+| `MCP/Core/CameraKeyPlanService.*.cs` | Key Plan generation, split across eight `partial` files by concern (Overview / Sheet / MarkerA / EyeRoom / LiveUpdate / Versions / ViewHygiene / core) |
+| `MCP/Resources/icon-32-{on,off}.png` | Ribbon toggle-button state icons, compiled as WPF `<Resource>` into `RevitMCP.g.resources`. Load them only through an explicit-assembly pack URI (`pack://application:,,,/RevitMCP;component/...`) — the assembly-less relative form needs `Application.ResourceAssembly`, which an add-in inside Revit.exe cannot rely on |
 | `MCP/RevitMCP.csproj` | Single multi-version build project |
 | `MCP/RevitMCP.addin` | Single version-agnostic add-in manifest |
 | `MCP-Server/src/index.ts` | MCP stdio server entry |
@@ -138,6 +145,8 @@ If pulling the 2026-07-17 cleanup commit fails with "local changes would be over
 - C# namespace: `RevitMCP`.
 - Revit model changes must run inside `Transaction` and be reversible.
 - Revit API work must go through `ExternalEventManager` when called from the WebSocket flow.
+- Revit API work initiated by the dockable pane goes through `CameraManagerEventQueue`, not `ExternalEventManager`. Do not merge the two: the pane can have several operations in flight, and `ExternalEventManager` holds one `_action` at a time.
+- Work triggered by `DocumentChanged` / `ViewActivated` must only set a dirty flag; do the actual reading and redrawing on the next `Idling`. Those two events fire while a document is still opening, and heavy WPF or `ExportImage` work there crashed Revit (`0xe0434352`) — see `docs/camera-manager/adr.zh-TW.md` D-008.
 - C# command payloads use the existing `RevitCommandRequest` / `RevitCommandResponse` shape.
 - MCP tool names use snake_case.
 - C# command cases use the existing switch/dispatcher pattern unless the surrounding module already defines a better local pattern.
