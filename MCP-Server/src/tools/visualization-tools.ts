@@ -421,12 +421,55 @@ export const visualizationTools: Tool[] = [
         },
     },
     {
+        name: "get_view_graphics_diagnostics",
+        description: "唯讀診斷『這張圖現在為什麼長這樣』：依 Revit 覆寫優先序一次回報視覺型式 (DisplayStyle)、套用中的視圖樣板與它鎖住的參數、視圖篩選器（含是否抓到目標元素、是否把它隱藏）、指定元素的個別圖形覆寫、其品類覆寫與可見性，以及該元素材料的 Surface/Cut 填充樣式與顏色。Verdict 會列出『所有』命中的成因並依優先序排序（不是只回第一個），涵蓋填滿顏色、線色、線寬、半色調、透明度與隱藏，每筆附影響範圍與修正方式。用於接手他人模型時追查表現法被誰改掉，省去逐層手動比對。不開 Transaction、不修改模型。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                viewId: { type: "number", description: "要診斷的視圖 Element ID（省略 = 目前作用中的視圖）" },
+                elementId: { type: "number", description: "要追查的元素 Element ID（選填）。省略時只回報視圖層級資訊，不含元素覆寫與材料。" },
+            },
+        },
+    },
+    {
         name: "get_view_templates",
         description: "取得專案中所有視圖樣版的完整設定。可用於視圖樣版比對與整併分析。",
         inputSchema: {
             type: "object",
             properties: {
                 includeDetails: { type: "boolean", description: "是否包含詳細設定", default: true },
+            },
+        },
+    },
+    {
+        name: "set_view_template_controls",
+        description: "列出或切換視圖樣版（View Template）的「控制參數」清單，對應 Revit「View Template」對話框每一列的 Include 勾選框。常見用途：使用者在視圖上看不到篩選器上色，原因是樣版正在控制『V/G Overrides Filters』——把該項目從控制中排除（uncontrol），使用者才能在個別視圖自行開關篩選器。不帶 uncontrol/control 時為純唯讀列表模式，用來查出合法的參數名稱（比對用，不分大小寫）；不確定名稱時應先這樣呼叫一次。dryRun=true 只預覽變更、不寫入模型。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                templateId: {
+                    type: "number",
+                    description: "目標視圖樣版的 ElementId（與 templateName 二擇一）",
+                },
+                templateName: {
+                    type: "string",
+                    description: "目標視圖樣版的名稱（與 templateId 二擇一；精確比對，IsTemplate=true 的 view 中查找）",
+                },
+                uncontrol: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "要讓樣版『停止控制』的參數名稱清單（Include 勾掉），例如 [\"V/G Overrides Filters\"]。名稱不分大小寫，找不到時會回傳相近名稱建議。",
+                },
+                control: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "要讓樣版『開始控制』的參數名稱清單（Include 勾上）。與 uncontrol 用同一份可控參數名單，同一名稱不可同時出現在兩邊。",
+                },
+                dryRun: {
+                    type: "boolean",
+                    description: "true = 只計算並回傳變更結果，不寫入模型。預設 false。",
+                    default: false,
+                },
             },
         },
     },
@@ -441,6 +484,104 @@ export const visualizationTools: Tool[] = [
                 viewId: { type: "number", description: "視圖 ID（若不指定則使用當前視圖）" },
             },
             required: ["category"],
+        },
+    },
+    {
+        name: "get_filterable_parameters",
+        description: "列出指定類別可以拿來當「視圖篩選器規則」的參數清單（唯讀）。回傳的就是 Revit 篩選器對話框下拉選單的實際內容，用 ParameterFilterUtilities.GetFilterableParametersInCommon 取得，所以不必憑印象猜某個參數能不能拿來篩（例如樓層型的 Base Constraint / Reference Level 是否可用）。每筆附 StorageType 與該型別支援的運算子，可直接餵給 create_view_filter。多個類別時回傳的是「共同可用」的交集。專案中若該類別沒有任何實例，StorageType 會是 None（規則仍可建，但建議先放一個元素再查）。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                categories: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "類別名稱陣列，如 [\"Walls\", \"Structural Columns\"]。名稱可用 list_categories 查詢",
+                },
+                contains: { type: "string", description: "只回傳名稱包含此字串的參數（不分大小寫），用於縮小清單" },
+            },
+            required: ["categories"],
+        },
+    },
+    {
+        name: "create_view_filter",
+        description: "建立視圖篩選器（ParameterFilterElement）並套用到指定視圖，含圖形覆寫。這是「規則式」上色：規則命中哪些元素就套哪種表現法，新增的元素會自動納入，改參數值就改顏色——與 override_element_graphics 的逐個元素覆寫不同，後者不是規則、不涵蓋新元素、也看不出意圖。回傳 MatchedElementCount 讓你立刻知道規則在該視圖內實際命中幾個元素（0 代表規則沒抓到東西，通常是參數值寫錯或元素不在視圖範圍內）。參數名稱請先用 get_filterable_parameters 確認。同名篩選器存在時預設報錯，帶 overwriteExisting=true 才會沿用並更新。視圖若被視圖樣板控制 V/G 篩選器，會在 Warnings 提醒（不擋執行）。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                name: { type: "string", description: "篩選器名稱（專案內唯一）" },
+                categories: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "套用的類別名稱陣列，如 [\"Walls\", \"Structural Columns\"]",
+                },
+                rules: {
+                    type: "array",
+                    description: "規則清單（多條為 AND）。每筆 { parameter, operator, value }",
+                    items: {
+                        type: "object",
+                        properties: {
+                            parameter: { type: "string", description: "參數名稱，需在 get_filterable_parameters 的清單中" },
+                            operator: {
+                                type: "string",
+                                enum: ["equals", "not_equals", "contains", "not_contains", "begins_with", "ends_with", "greater_than", "greater_or_equal", "less_than", "less_or_equal"],
+                                description: "運算子。可用範圍依參數 StorageType 而定：ElementId 型只支援 equals/not_equals；數值型支援比較類；字串型支援 contains 類",
+                            },
+                            value: { type: "string", description: "比較值。ElementId 型參數可給名稱（如 \"2F Level\"）或數字 ID" },
+                        },
+                        required: ["parameter", "operator", "value"],
+                    },
+                },
+                viewId: { type: "number", description: "要套用的視圖 ID（省略 = 當前視圖）" },
+                applyToView: { type: "boolean", description: "是否套用到視圖；false = 只建立篩選器不套用", default: true },
+                visible: { type: "boolean", description: "命中的元素在視圖中是否可見。false = 隱藏（用於把干擾元素移出畫面）", default: true },
+                fillColor: {
+                    type: "object",
+                    description: "前景填滿顏色 RGB (0-255)。未指定 patternName 時搭配實心填滿。",
+                    properties: { r: { type: "number" }, g: { type: "number" }, b: { type: "number" } },
+                },
+                patternName: {
+                    type: "string",
+                    description: "前景填充樣式名稱（如 'Earth'、'Sand - Dense'、'Diagonal Crosshatch'）。省略 = 實心填滿。同名有 Model 與 Drafting 兩種時優先取 Model（隨視圖比例縮放）。名稱請先用 list_fill_patterns 查，填錯會直接報錯而不是靜默退回實心。",
+                },
+                backgroundPatternName: {
+                    type: "string",
+                    description: "背景填充樣式名稱。典型用法：前景放 hatch 線條、背景放 'Solid fill' 當底色（例如草地＝淺綠底＋土壤紋）。",
+                },
+                backgroundColor: {
+                    type: "object",
+                    description: "背景填滿顏色 RGB (0-255)，搭配 backgroundPatternName 使用",
+                    properties: { r: { type: "number" }, g: { type: "number" }, b: { type: "number" } },
+                },
+                lineColor: {
+                    type: "object",
+                    description: "線條顏色 RGB (0-255)，同時套用投影線與切割線",
+                    properties: { r: { type: "number" }, g: { type: "number" }, b: { type: "number" } },
+                },
+                lineWeight: { type: "number", description: "線寬 1-16", minimum: 1, maximum: 16 },
+                transparency: { type: "number", description: "表面透明度 0-100", minimum: 0, maximum: 100 },
+                halftone: { type: "boolean", description: "是否套用半色調（把命中元素壓成背景參考）" },
+                patternMode: {
+                    type: "string",
+                    enum: ["auto", "surface", "cut"],
+                    description: "填滿層：auto（平面類視圖用切割、其餘用表面）、surface（強制表面，適用於位於剖切面之下以投影顯示的元素，如平面圖裡的樓板/屋頂/梁）、cut（強制切割，適用於被剖切面切到的牆/柱）",
+                    default: "auto",
+                },
+                overwriteExisting: { type: "boolean", description: "同名篩選器已存在時是否沿用並更新其類別與規則", default: false },
+            },
+            required: ["name", "categories", "rules"],
+        },
+    },
+    {
+        name: "remove_view_filter",
+        description: "把篩選器從指定視圖移除；deleteFilter=true 時一併從專案刪除該篩選器本身。用於還原 create_view_filter 的變更。以 name 或 filterId 指定其中之一。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                name: { type: "string", description: "篩選器名稱（與 filterId 擇一）" },
+                filterId: { type: "number", description: "篩選器 Element ID（與 name 擇一）" },
+                viewId: { type: "number", description: "視圖 ID（省略 = 當前視圖）" },
+                deleteFilter: { type: "boolean", description: "true = 連同專案中的篩選器元素一起刪除；false = 只從這張視圖移除", default: false },
+            },
         },
     },
     {

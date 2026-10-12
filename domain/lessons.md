@@ -252,3 +252,15 @@ metadata:
 - **避坑經驗**：TASK-005.12（Column/Beam 結構材質指派）中，`assign_existing_material` 對「混凝土樑-矩形」族群的 `STRUCTURAL_MATERIAL_PARAM` 呼叫 `Set()`，回報成功、`ErrorCount: 0`，但 `get_types_by_category`/`get_element_info` 驗證材質根本沒套上。加入診斷（`ParamUsed`/`VerifiedImmediatelyAfterSet`：`Set()` 後立即 `AsElementId()` 讀回比對）才抓到根因——該族群把材質參數設計成 Instance 範疇，Type 層級的寫入被 Revit 靜默忽略。同族群的柱（無此設計）完全正常，證明不是 Scenario 邏輯錯，是單一族群的參數範疇選擇。使用者自行在族群編輯器把該參數的 Instance 核取方塊取消勾選、轉為 Type 範疇後，同一套工具鏈立刻正常運作。
 - **實踐**：(a) 任何「複製 Type → 指派 Type 層級參數」的寫入鏈，把「`Set()` 後立即讀回驗證」做成標準步驟，讀回不符就拋例外，讓上層呼叫端（如 `AssignExistingMaterial`）正確計入失敗、不誤把 Type 排進成功清單；(b) 錯誤訊息裡帶上足夠診斷資訊（用了哪個 `BuiltInParameter`、儲存型別、讀回結果），讓下一個排查的人不用重新從頭加 log；(c) 遇到「回報成功但驗證對不上」時，優先懷疑該元素/族群定義本身的參數範疇（Type vs Instance）或公式關聯，而不是懷疑呼叫端邏輯——先用另一個沒有這類設計的同品類元素/族群對照測試，快速判斷是通用 bug 還是單一族群的問題。
 - **警告**：不要把「工具回報 `Success: true`」直接當作「Revit 模型真的改了」——尤其是牽涉族群自訂關聯、公式驅動、或參數範疇可能因族群作者設計而異的欄位。跟 Tool Call Data Honesty 是同一哲學延伸到「寫入端」：讀取端不可用記憶捏造數據，寫入端同樣不可用「沒報錯」捏造成功。
+
+## [L-032] PowerShell 5.1 讀寫無 BOM 的 UTF-8 原始碼會把中文變亂碼——而未追蹤檔沒有 git 可救
+
+- **規則**：本 repo 的 C#／Markdown 原始檔是 **UTF-8 無 BOM**。Windows PowerShell 5.1 的 `Get-Content`／`Set-Content`（不指定 `-Encoding`）會用系統 ANSI 字碼頁（繁中環境＝Big5/cp950）讀寫，讀進來的中文就已經壞了，寫回去即永久損毀。修改原始檔一律用 Edit/Write 工具、或 Python 明確 `encoding='utf-8'`；PowerShell 只拿來跑建置、部署等指令。
+- **避坑經驗**：2026-09-25 相機管理面板開發中，一個子代理用 PowerShell 讀改寫 `MCP/Core/CameraKeyPlanService.cs`（約 20 萬位元組、上萬中文字），整檔中文變亂碼。該檔**還沒 commit、是 untracked**，git 救不回來；只能從先前 session 的對話紀錄逐段重建，並以「把重建檔同樣弄亂、逐字比對損毀檔」驗證，仍有一行註解只能手寫補回。
+- **實踐**：(a) 交辦包裡的限制條款寫明「不准用 PowerShell Get-Content/Set-Content 改原始檔」；(b) 大量新程式長時間停在 untracked 狀態是單點故障——功能告一段落就 commit（至少在功能分支上），不要讓 git 只剩「看得到但救不回」；(c) 事後可用「U+FFFD 替換字元數＝0、無 BOM、中文字數合理」快速自檢檔案完整性。
+
+## [L-033] 剖面「範圍對」不等於「方向對」——ViewSection.CreateSection 會建成反方向，後檢要驗剖切面位置
+
+- **規則**：用 `ViewSection.CreateSection(doc, typeId, box)` 建剖面後，**必須讀回 `CropBox.Transform.BasisX` 並確認「意圖剖切面（意圖框 Max.Z 面）」落在實際剖切面（實際 Max.Z）上**。只比對 8 個角點的世界範圍不夠——剖面整個繞鉛直軸轉 180° 時，框佔的空間一模一樣，範圍偏差是 0 mm，但剖切面跑到了遠裁剪面、看的方向也反了。
+- **避坑經驗**：2026-09-27 相機管理面板的 Key Plan：意圖是「剖切面通過相機、往前看 60 m」，讀回卻是 BasisX＝−意圖軸、剖切面在 60 m 外回頭看相機。範圍後檢一直報 0 mm，所以好幾輪都去修「平面看不到剖面線」的表面原因（比例門檻、篩選器、線型、裁剪框），真正原因是方向。最後靠兩個證據定案：用讀回的 Transform 把眼睛換算成剖面座標，得到 Z＝−60000（等於遠裁剪）；截剖面圖發現整棟建築只有投影線、沒有被剖到。實測室外（沿視線）和室內（對齊房間長邊）兩台相機，`CreateSection` 都建成反方向；改用「同一實體框、座標系轉 180°」重新請求後才正確。
+- **實踐**：(a) 幾何後檢要涵蓋**範圍＋方向＋關鍵面位置**三件事，缺一就可能出現「數字全綠、圖是錯的」；(b) 參數 `Set()` 回傳 true 也要讀回——本案「在比例粗於…時隱藏」遇到不在下拉選項內的值，Set 回 true 但讀回 −1（同 L-031 的哲學）；(c) 「看不到」類問題先截圖＋用讀回座標算關鍵點落在哪，再去調表現法。
