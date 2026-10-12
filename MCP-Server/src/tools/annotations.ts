@@ -95,6 +95,7 @@ export const OVERRIDE: Record<string, ClassificationHints> = {
     export_families: { readOnlyHint: true, destructiveHint: false },
     export_clash_report: { readOnlyHint: true, destructiveHint: false },
     export_smoke_review_excel: { readOnlyHint: true, destructiveHint: false },
+    export_sheets: { readOnlyHint: true, destructiveHint: false },
     import_excel_to_drafting_views: { readOnlyHint: true, destructiveHint: false },
     // 讀模型、寫系統暫存圖檔（預設用完即刪），不異動 Revit 模型 → 同 export_* 歸類為唯讀
     capture_view_image: { readOnlyHint: true, destructiveHint: false },
