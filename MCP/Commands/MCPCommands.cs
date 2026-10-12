@@ -1,5 +1,4 @@
 using System;
-using System.Windows.Media.Imaging;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
@@ -43,7 +42,7 @@ namespace RevitMCP.Commands
                         "（連上後可在「MCP 設定」查看目前佔用連線的客戶端）");
                 }
 
-                UpdateToggleButtonIcon();
+                Application.RequestToggleButtonIconRefresh();
 
                 return Result.Succeeded;
             }
@@ -52,30 +51,6 @@ namespace RevitMCP.Commands
                 message = ex.Message;
                 TaskDialog.Show("錯誤", "切換服務狀態失敗: " + ex.Message);
                 return Result.Failed;
-            }
-        }
-
-        /// <summary>
-        /// 依目前服務狀態切換 Ribbon 按鈕的圖示與 Tooltip（含 port 資訊）。
-        /// </summary>
-        private static void UpdateToggleButtonIcon()
-        {
-            PushButton button = Application.ToggleButton;
-            if (button == null)
-                return;
-
-            bool running = Application.SocketService != null && Application.SocketService.IsRunning;
-            int port = ConfigManager.Instance.Settings.Port;
-
-            if (running)
-            {
-                button.LargeImage = new BitmapImage(new Uri("/RevitMCP;component/Resources/icon-32-on.png", UriKind.RelativeOrAbsolute));
-                button.ToolTip = $"MCP 服務：開啟\r\n監聽中（port {port}）\r\n點擊停止";
-            }
-            else
-            {
-                button.LargeImage = new BitmapImage(new Uri("/RevitMCP;component/Resources/icon-32-off.png", UriKind.RelativeOrAbsolute));
-                button.ToolTip = $"MCP 服務：關閉\r\n點擊啟動（port {port}）";
             }
         }
     }

@@ -39,6 +39,25 @@ namespace RevitMCP
         public static UIApplication UIApp => _uiApp;
         public static PushButton ToggleButton { get; private set; }
 
+        // ── ribbon 圖示狀態同步（PR #133 @laytonluo／嘉祥；2026-10-12 收編時補強競態）。
+        // StartMCPService() 是 StartAsync() 的 fire-and-forget 呼叫，按鈕按下去的那一瞬間
+        // SocketService.IsRunning 還可能是 false——port 被佔用時 StartAsync() 內部會先
+        // await Task.Delay(500) 才真正綁定。原實作只在命令收尾讀一次 IsRunning，靠 TaskDialog
+        // 把使用者擋在對話框前面，剛好蓋過這段時間；使用者直接按 Enter 關掉對話框就會看到
+        // 「服務已啟動、圖示還是關閉」。因此改成兩段：命令收尾立刻套一次（停止方向一定正確，
+        // StopMCPService() 是同步的），再由 Idling 讀回校正——Idling 保證在 Revit UI 執行緒上，
+        // WPF 的 ImageSource 可以安全賦值。
+        private static bool? _toggleIconRunning;
+        private static int _toggleIconRecheckTicks;
+        private static BitmapImage _toggleIconOn;
+        private static BitmapImage _toggleIconOff;
+
+        /// <summary>
+        /// Idling 補校正的次數上限。10 次閒置遠大於 StartAsync() 內部最長的 500ms 延遲；
+        /// 用固定次數而不是「等狀態變了才收手」，因為啟動失敗時狀態永遠不會變，旗標會一直掛著。
+        /// </summary>
+        private const int ToggleIconRecheckTicks = 10;
+
         public Result OnStartup(UIControlledApplication application)
         {
             try
@@ -68,8 +87,11 @@ namespace RevitMCP
                     "RevitMCP.Commands.ToggleServiceCommand");
                 int configuredPort = ConfigManager.Instance.Settings.Port;
                 toggleButtonData.ToolTip = $"MCP 服務：關閉\r\n點擊啟動（port {configuredPort}）";
-                toggleButtonData.LargeImage = new BitmapImage(new Uri("/RevitMCP;component/Resources/icon-32-off.png", UriKind.RelativeOrAbsolute));
+                toggleButtonData.LargeImage = GetToggleIcon(false);
                 ToggleButton = panel.AddItem(toggleButtonData) as PushButton;
+                _toggleIconRunning = false;   // 服務不會自動啟動（沒有 AutoStart 設定），開機狀態一定是關
+                // ribbon 圖示的 Idling 讀回校正，見 RequestToggleButtonIconRefresh() 的註解。
+                application.Idling += OnToggleIconIdling;
 
                 // 2. 開啟日誌按鈕
                 PushButtonData logButtonData = new PushButtonData(
@@ -176,6 +198,7 @@ namespace RevitMCP
                     application.ControlledApplication.DocumentChanged -= OnCameraManagerDocumentChanged;
                     application.ViewActivated -= OnCameraManagerViewActivated;
                     application.Idling -= OnCameraManagerIdling;
+                    application.Idling -= OnToggleIconIdling;
                     application.ControlledApplication.DocumentClosing -= OnCameraManagerDocumentClosing;
                     application.ControlledApplication.DocumentOpened -= OnCameraManagerDocumentOpened;
                     application.ControlledApplication.DocumentSavingAs -= OnCameraManagerDocumentSavingAs;
@@ -563,6 +586,85 @@ namespace RevitMCP
         /// 這個 handler 從 OnStartup 就永久訂閱，每次 Idling 都會被呼叫；沒有 pending 刷新時
         /// 只是檢查一個 bool，成本可忽略，是 Revit add-in 常見的 debounce 寫法。
         /// </summary>
+        /// <summary>
+        /// 取得 ON／OFF 圖示（快取＋Freeze，切換時不重新解碼）。
+        /// 用寫明組件名的絕對 pack URI：省略組件名的相對形式要靠 WPF 的
+        /// Application.ResourceAssembly，而 Revit 的進入組件是 Revit.exe，外掛不保證拿得到；
+        /// 寫成 `RevitMCP;component` 就不依賴那個預設值。載入失敗回 null（按鈕沒圖示，
+        /// 但不讓 ribbon 建立整個失敗）。
+        /// </summary>
+        private static BitmapImage GetToggleIcon(bool running)
+        {
+            try
+            {
+                if (running)
+                {
+                    if (_toggleIconOn == null) _toggleIconOn = LoadFrozenIcon("icon-32-on.png");
+                    return _toggleIconOn;
+                }
+
+                if (_toggleIconOff == null) _toggleIconOff = LoadFrozenIcon("icon-32-off.png");
+                return _toggleIconOff;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"載入 MCP 服務狀態圖示失敗（{(running ? "on" : "off")}）: {ex.Message}");
+                return null;
+            }
+        }
+
+        private static BitmapImage LoadFrozenIcon(string fileName)
+        {
+            BitmapImage image = new BitmapImage(
+                new Uri($"pack://application:,,,/RevitMCP;component/Resources/{fileName}", UriKind.Absolute));
+            if (image.CanFreeze) image.Freeze();
+            return image;
+        }
+
+        /// <summary>
+        /// 把 ribbon 按鈕的圖示與 tooltip 套成指定狀態。同狀態重複呼叫直接返回，所以
+        /// Idling 每次呼叫都是兩個 bool 比較的成本，不會反覆去碰 WPF 的 ImageSource。
+        /// 必須在 Revit UI 執行緒上呼叫。
+        /// </summary>
+        private static void ApplyToggleButtonState(bool running)
+        {
+            PushButton button = ToggleButton;
+            if (button == null) return;
+            if (_toggleIconRunning.HasValue && _toggleIconRunning.Value == running) return;
+
+            try
+            {
+                int port = ConfigManager.Instance.Settings.Port;
+                BitmapImage icon = GetToggleIcon(running);
+                if (icon != null) button.LargeImage = icon;
+                button.ToolTip = running
+                    ? $"MCP 服務：開啟\r\n監聽中（port {port}）\r\n點擊停止"
+                    : $"MCP 服務：關閉\r\n點擊啟動（port {port}）";
+                _toggleIconRunning = running;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"更新 MCP 服務狀態圖示失敗: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 由 ToggleServiceCommand 在切換後呼叫：立刻依目前 IsRunning 套一次，並要求接下來
+        /// 幾次 Idling 再讀回校正（涵蓋 StartAsync() 還沒把 IsRunning 翻成 true 的那段）。
+        /// </summary>
+        public static void RequestToggleButtonIconRefresh()
+        {
+            ApplyToggleButtonState(_socketService != null && _socketService.IsRunning);
+            _toggleIconRecheckTicks = ToggleIconRecheckTicks;
+        }
+
+        private static void OnToggleIconIdling(object sender, Autodesk.Revit.UI.Events.IdlingEventArgs e)
+        {
+            if (_toggleIconRecheckTicks <= 0) return;
+            _toggleIconRecheckTicks--;
+            ApplyToggleButtonState(_socketService != null && _socketService.IsRunning);
+        }
+
         private static void OnCameraManagerIdling(object sender, Autodesk.Revit.UI.Events.IdlingEventArgs e)
         {
             try
