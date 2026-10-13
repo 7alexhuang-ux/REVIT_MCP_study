@@ -81,7 +81,7 @@ flowchart TD
 > [!NOTE]
 > **獨立 GUI 工具 1**：擁有專屬之 DockablePane / 主 UI 介面 (`ComponentInspectorPage.xaml`)，為全專案模型門窗與構件品質的通用品質控制台。
 
-![自訂模型檢查器介面預覽](../docs/image/component_inspector_preview.png)
+> *（註：介面採用 DockablePane 雙欄清單，左側為品類與族群巡檢樹狀檢視，右側展示 13 項 BEP 參數稽核狀態與缺失標記。）*
 
 - **職責分離原則**：注入功能不重覆撰寫參數檢查與名稱規則判斷，直接調用 `ComponentInspector` 服務模組 (`FamilyParamQCService` / `BepParamCheckItem`) 取得既有門窗稽核狀態。
 - **門窗狀態標記**：
@@ -93,7 +93,7 @@ flowchart TD
 > [!NOTE]
 > **獨立 GUI 工具 2**：為門窗參數注入功能專屬啟動之獨立 WPF 彈出式對話框 (`DoorWindowFireParamBatchWindow.xaml`)，非 Component Inspector 頁面內之子元件。
 
-![門窗防火與性能共用參數批次注入工具預覽](../docs/image/door_window_fire_param_batch_preview.png)
+> *（註：介面由頂部篩選工具列、中央 DataGrid 門窗清單與底部注入執行操作列構成。）*
 
 - 遵循 `xaml-decoupled-ui-preview-workflow.md` 與 GUI 設計規範：
   - **嚴禁 Emoji 符號**：採用純 CJK 與標籤 Pill Badges (`[MISSING]`, `[PASS]`, `[PARTIAL]`) 呈現稽核狀態。
