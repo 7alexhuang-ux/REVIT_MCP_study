@@ -10,7 +10,7 @@ test("export_web_compare 全部參數選填且有預設值", () => {
 
     const properties = tool.inputSchema.properties as Record<string, any>;
     assert.equal(properties.viewName.default, "WEB_COMPARE");
-    assert.equal(properties.outputDir.default, "C:\Project\issue-manager\spikes\s1-glb\input");
+    assert.equal(properties.outputDir.default, "C:\\Project\\issue-manager\\spikes\\s1-glb\\input");
     assert.equal(properties.pixelSize.default, 1920);
     assert.equal(properties.pixelSize.minimum, 256);
     for (const key of ["includeImages", "includeIfc", "includeGlb"]) {
@@ -18,6 +18,17 @@ test("export_web_compare 全部參數選填且有預設值", () => {
         assert.equal(properties[key].default, true);
     }
     assert.equal(properties.maxTriangles.default, 3000000);
+});
+
+test("export_web_compare 有 sectionBox 與 linkedTerrain 參數且預設 auto", () => {
+    const tool = webCompareTools.find(item => item.name === "export_web_compare");
+    assert.ok(tool);
+    const properties = tool.inputSchema.properties as Record<string, any>;
+    assert.deepEqual(properties.sectionBox.properties.mode.enum, ["auto", "manual", "off"]);
+    assert.equal(properties.sectionBox.properties.mode.default, "auto");
+    assert.equal(properties.sectionBox.properties.marginMeters.default, 10);
+    assert.deepEqual(properties.linkedTerrain.enum, ["auto", "always", "off"]);
+    assert.equal(properties.linkedTerrain.default, "auto");
 });
 
 test("export_web_compare 說明列出模式對照與輸出檔", () => {

@@ -20,6 +20,19 @@ namespace RevitMCP.Core.Walkthrough
         private int _currentMaterial = -1;
         private bool _cancelled;
         private int _elementDepth;
+        private readonly Stack<string> _linkNames = new Stack<string>();
+        private readonly Stack<int> _linkStartTriangles = new Stack<int>();
+
+        public const string HostName = "(host)";
+
+        /// <summary>Top-level elements exported per "link|category" (link = document title, host = "(host)"). Diagnostics only.</summary>
+        public Dictionary<string, int> ElementCounts { get; } = new Dictionary<string, int>();
+
+        /// <summary>Triangles exported inside each link instance, keyed by linked document title.</summary>
+        public Dictionary<string, int> LinkTriangles { get; } = new Dictionary<string, int>();
+
+        /// <summary>How many times the exporter entered a link instance (0 = links were never visited).</summary>
+        public int LinkBeginCount { get; private set; }
 
         public RevitGltfExportContext(Document document, GltfBuilder builder, Vec3 originOffsetMeters)
         {
@@ -47,6 +60,12 @@ namespace RevitMCP.Core.Walkthrough
             _transforms.Push(Transform.Identity);
             _documents.Clear();
             _documents.Push(_hostDocument);
+            _linkNames.Clear();
+            _linkNames.Push(HostName);
+            _linkStartTriangles.Clear();
+            ElementCounts.Clear();
+            LinkTriangles.Clear();
+            LinkBeginCount = 0;
             _currentMaterial = _builder.AddMaterial("Default", 0.75, 0.75, 0.75, 1.0);
             return true;
         }
@@ -69,7 +88,10 @@ namespace RevitMCP.Core.Walkthrough
             {
                 if (_elementDepth == 0)
                 {
-                    _builder.BeginElement(ReadElementInfo(elementId));
+                    var info = ReadElementInfo(elementId);
+                    _builder.BeginElement(info);
+                    var key = _linkNames.Peek() + "|" + (info.Category ?? "(none)");
+                    ElementCounts[key] = ElementCounts.TryGetValue(key, out var n) ? n + 1 : 1;
                 }
 
                 _elementDepth++;
@@ -119,7 +141,11 @@ namespace RevitMCP.Core.Walkthrough
         public RenderNodeAction OnLinkBegin(LinkNode node)
         {
             _transforms.Push(_transforms.Peek().Multiply(node.GetTransform()));
-            _documents.Push(node.GetDocument() ?? _documents.Peek());
+            var linkDocument = node.GetDocument();
+            _documents.Push(linkDocument ?? _documents.Peek());
+            _linkNames.Push(linkDocument?.Title ?? "(link)");
+            _linkStartTriangles.Push(_builder.TriangleCount);
+            LinkBeginCount++;
             return RenderNodeAction.Proceed;
         }
 
@@ -133,6 +159,13 @@ namespace RevitMCP.Core.Walkthrough
             if (_documents.Count > 1)
             {
                 _documents.Pop();
+            }
+
+            if (_linkNames.Count > 1)
+            {
+                var name = _linkNames.Pop();
+                var start = _linkStartTriangles.Count > 0 ? _linkStartTriangles.Pop() : 0;
+                LinkTriangles[name] = (LinkTriangles.TryGetValue(name, out var t) ? t : 0) + (_builder.TriangleCount - start);
             }
         }
 

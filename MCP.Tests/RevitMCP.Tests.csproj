@@ -20,6 +20,7 @@
     <Compile Include="..\MCP\Core\Grading\EarthworkGrid.cs" Link="Core\Grading\EarthworkGrid.cs" />
     <Compile Include="..\MCP\Core\Grading\GradingNames.cs" Link="Core\Grading\GradingNames.cs" Condition="Exists('..\MCP\Core\Grading\GradingNames.cs')" />
     <Compile Include="..\MCP\Core\Grading\SheetLayoutMath.cs" Link="Core\Grading\SheetLayoutMath.cs" Condition="Exists('..\MCP\Core\Grading\SheetLayoutMath.cs')" />
+    <Compile Include="..\MCP\Core\Grading\TitleBlockChoice.cs" Link="Core\Grading\TitleBlockChoice.cs" Condition="Exists('..\MCP\Core\Grading\TitleBlockChoice.cs')" />
     <Compile Include="..\MCP\Core\Grading\GradingSourceResolver.cs" Link="Core\Grading\GradingSourceResolver.cs" Condition="Exists('..\MCP\Core\Grading\GradingSourceResolver.cs')" />
     <Compile Include="..\MCP\Core\Grading\EdgeSlopePolicies.cs" Link="Core\Grading\EdgeSlopePolicies.cs" Condition="Exists('..\MCP\Core\Grading\EdgeSlopePolicies.cs')" />
     <Compile Include="..\MCP\Core\Grading\BoundaryRateField.cs" Link="Core\Grading\BoundaryRateField.cs" Condition="Exists('..\MCP\Core\Grading\BoundaryRateField.cs')" />
@@ -27,5 +28,12 @@
     <Compile Include="..\MCP\Core\Grading\FloorBurialCheck.cs" Link="Core\Grading\FloorBurialCheck.cs" Condition="Exists('..\MCP\Core\Grading\FloorBurialCheck.cs')" />
     <Compile Include="..\MCP\Core\Grading\RingBreakTracker.cs" Link="Core\Grading\RingBreakTracker.cs" Condition="Exists('..\MCP\Core\Grading\RingBreakTracker.cs')" />
     <Compile Include="..\MCP\Core\Grading\DisturbanceContour.cs" Link="Core\Grading\DisturbanceContour.cs" Condition="Exists('..\MCP\Core\Grading\DisturbanceContour.cs')" />
+    <Compile Include="..\MCP\Core\Grading\AnnotationLayoutMath.cs" Link="Core\Grading\AnnotationLayoutMath.cs" Condition="Exists('..\MCP\Core\Grading\AnnotationLayoutMath.cs')" />
+    <Compile Include="..\MCP\Core\Grading\ParcelSlopeMath.cs" Link="Core\Grading\ParcelSlopeMath.cs" Condition="Exists('..\MCP\Core\Grading\ParcelSlopeMath.cs')" />
+    <Compile Include="..\MCP\Core\Grading\ParcelLimitCheck.cs" Link="Core\Grading\ParcelLimitCheck.cs" Condition="Exists('..\MCP\Core\Grading\ParcelLimitCheck.cs')" />
+    <Compile Include="..\MCP\Core\Walkthrough\CameraPathMath.cs" Link="Core\Walkthrough\CameraPathMath.cs" />
+    <Compile Include="..\MCP\Core\Walkthrough\PlanProjection.cs" Link="Core\Walkthrough\PlanProjection.cs" />
+    <Compile Include="..\MCP\Core\Walkthrough\GltfBuilder.cs" Link="Core\Walkthrough\GltfBuilder.cs" />
+    <Compile Include="..\MCP\Core\Walkthrough\WebCompareMath.cs" Link="Core\Walkthrough\WebCompareMath.cs" />
   </ItemGroup>
 </Project>

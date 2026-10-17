@@ -68,8 +68,51 @@ namespace RevitMCP.Core
 
             Directory.CreateDirectory(outputDir);
 
+            var sectionOptions = ParseWebCompareSectionOptions(parameters);
             var originalView = uiDoc.ActiveView;
             var view = FindOrCreateWebCompareView(doc, viewName, originalView, warnings, out var viewCreated);
+
+            if (parameters["camera"] is JObject cameraParams)
+            {
+                try
+                {
+                    ApplyWebCompareCamera(doc, view, cameraParams);
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"相機設定失敗：{ex.Message}");
+                }
+            }
+
+            // Section box first: every PNG, the IFC and the GLB temp view (a duplicate) then share the same range.
+            var linkedDocs = WebCompareDocuments(doc);
+            var sectionReport = new JObject { ["mode"] = sectionOptions.Mode };
+            var terrainPieces = new List<WebCompareTerrainPiece>();
+            MeterBox? sectionBox = null;
+            try
+            {
+                sectionBox = ResolveWebCompareSectionBox(linkedDocs, sectionOptions, terrainPieces, warnings, sectionReport);
+                if (sectionBox.HasValue && sectionOptions.Apply)
+                {
+                    ApplyWebCompareSectionBox(doc, view, sectionBox.Value);
+                    sectionReport["applied"] = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                sectionReport["error"] = ex.Message;
+                warnings.Add($"section box 設定失敗：{ex.Message}");
+            }
+
+            var linkReport = new JObject();
+            try
+            {
+                DescribeWebCompareLinks(doc, view, linkedDocs, linkReport);
+            }
+            catch (Exception ex)
+            {
+                linkReport["error"] = ex.Message;
+            }
 
             var originalStyle = view.DisplayStyle;
             bool activeSwitched = false;
@@ -108,17 +151,15 @@ namespace RevitMCP.Core
                         }
                     }
 
-                    foreach (var pair in new[] { ("consistent", "cpc_consistent.png"), ("realistic", "cpc_realistic.png") })
+                    // 不再另存 cpc_consistent.png／cpc_realistic.png：它們與 revit_*.png 位元相同，只會造成「兩份圖像是兩個來源」的誤會。
+                    foreach (var stale in new[] { "cpc_consistent.png", "cpc_realistic.png" })
                     {
-                        if (!produced.TryGetValue(pair.Item1, out var src))
+                        var stalePath = Path.Combine(outputDir, stale);
+                        if (File.Exists(stalePath))
                         {
-                            continue;
+                            File.Delete(stalePath);
+                            warnings.Add($"已刪除舊版複本 {stale}（與 revit_*.png 相同，請改用 revit_consistent.png／revit_realistic.png）。");
                         }
-
-                        var sw = Stopwatch.StartNew();
-                        var dest = Path.Combine(outputDir, pair.Item2);
-                        File.Copy(src, dest, true);
-                        files.Add(WebCompareFileEntry(pair.Item2, dest, sw, warnings));
                     }
 
                     var firstPng = produced.Values.FirstOrDefault();
@@ -183,7 +224,8 @@ namespace RevitMCP.Core
                 var glbPath = Path.Combine(outputDir, "cpc.glb");
                 try
                 {
-                    ExportWebCompareGlb(doc, view, glbPath, offset, maxTriangles, warnings, out glbTriangles, out glbNodes);
+                    ExportWebCompareGlb(doc, view, glbPath, offset, maxTriangles, warnings, out glbTriangles, out glbNodes,
+                        linkedDocs, sectionOptions, sectionBox, terrainPieces, linkReport);
                     files.Add(WebCompareFileEntry("cpc.glb", glbPath, sw, warnings, new JObject
                     {
                         ["triangleCount"] = glbTriangles,
@@ -221,6 +263,8 @@ namespace RevitMCP.Core
                 viewCreated,
                 files,
                 camera = camera["gltf"],
+                sectionBox = sectionReport,
+                linkDiagnostics = linkReport,
                 totalElapsedMs = total.ElapsedMilliseconds,
                 warnings
             };
@@ -297,7 +341,8 @@ namespace RevitMCP.Core
             {
                 var options = new ImageExportOptions
                 {
-                    ExportRange = ExportRange.VisibleRegionOfCurrentView,
+                    // 明確指定視圖，不依賴 UI 目前畫面（同一外部事件內切換作用中視圖時畫面尚未重繪，會匯出空白圖）。
+                    ExportRange = ExportRange.SetOfViews,
                     FilePath = Path.Combine(tempDir, "img"),
                     HLRandWFViewsFileType = ImageFileType.PNG,
                     ShadowViewsFileType = ImageFileType.PNG,
@@ -306,6 +351,7 @@ namespace RevitMCP.Core
                     FitDirection = FitDirectionType.Horizontal,
                     PixelSize = pixelSize
                 };
+                options.SetViewsAndSheets(new List<ElementId> { uiDoc.ActiveView.Id });
                 doc.ExportImage(options);
 
                 var produced = Directory.GetFiles(tempDir, "*.png")
@@ -608,7 +654,9 @@ namespace RevitMCP.Core
         // ── GLB ─────────────────────────────────────────
 
         private static void ExportWebCompareGlb(Document doc, View3D source, string glbPath, Vec3 offset, int maxTriangles,
-            List<string> warnings, out int triangleCount, out int elementNodeCount)
+            List<string> warnings, out int triangleCount, out int elementNodeCount,
+            List<WebCompareDoc> linkedDocs, WebCompareSectionOptions sectionOptions, MeterBox? sectionBox,
+            List<WebCompareTerrainPiece> terrainPieces, JObject linkReport)
         {
             ElementId tempViewId;
             using (var tx = new Transaction(doc, "WEB_COMPARE：建立 GLB 匯出暫存視圖"))
@@ -665,6 +713,44 @@ namespace RevitMCP.Core
                     tx.Commit();
                 }
             }
+
+            // Linked terrain: CustomExporter is expected to include links, but terrain from a link was missing in
+            // practice. Report what it did, and triangulate the link's Toposolid/Topography ourselves when absent.
+            var nativeTerrain = context.ElementCounts
+                .Where(kv => !kv.Key.StartsWith(RevitGltfExportContext.HostName + "|", StringComparison.Ordinal) &&
+                             (kv.Key.EndsWith("|Toposolid", StringComparison.OrdinalIgnoreCase) ||
+                              kv.Key.EndsWith("|Toposolids", StringComparison.OrdinalIgnoreCase) ||
+                              kv.Key.EndsWith("|Topography", StringComparison.OrdinalIgnoreCase)))
+                .Sum(kv => kv.Value);
+            var terrainReport = new JObject
+            {
+                ["mode"] = sectionOptions.TerrainMode,
+                ["nativeLinkTerrainElements"] = nativeTerrain,
+                ["linkBeginCount"] = context.LinkBeginCount,
+                ["elementCountsByLinkAndCategory"] = JObject.FromObject(context.ElementCounts),
+                ["trianglesByLink"] = JObject.FromObject(context.LinkTriangles)
+            };
+            var useFallback = sectionOptions.TerrainMode == "always" || (sectionOptions.TerrainMode == "auto" && nativeTerrain == 0);
+            terrainReport["fallbackUsed"] = useFallback;
+            if (useFallback)
+            {
+                var far = new MeterBox(-WebCompareFarMeters, -WebCompareFarMeters, -WebCompareFarMeters, WebCompareFarMeters, WebCompareFarMeters, WebCompareFarMeters);
+                var pieces = terrainPieces;
+                if (pieces.Count == 0)
+                {
+                    pieces = CollectLinkedTerrain(linkedDocs, sectionBox ?? far, Math.Max(0, maxTriangles - builder.TriangleCount), warnings, out _);
+                }
+
+                var added = AddTerrainPiecesToBuilder(builder, pieces, sectionBox ?? far, offset);
+                terrainReport["fallbackElements"] = pieces.Count;
+                terrainReport["fallbackTriangles"] = added;
+                if (pieces.Count == 0)
+                {
+                    warnings.Add("連結模型中找不到 Toposolid／Topography 幾何（或全在 section box 外），GLB 沒有地形。");
+                }
+            }
+
+            linkReport["glbTerrain"] = terrainReport;
 
             if (context.BudgetExceeded)
             {
