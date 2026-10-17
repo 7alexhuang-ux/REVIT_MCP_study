@@ -154,6 +154,10 @@ namespace RevitMCP.Core
                         result = GetAllViews(parameters);
                         break;
                     
+                    case "export_web_compare":
+                        result = ExportWebCompare(parameters);
+                        break;
+
                     case "get_active_view":
                         result = GetActiveView();
                         break;

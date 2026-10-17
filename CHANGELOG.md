@@ -6,6 +6,17 @@
 
 ---
 
+## [Unreleased]
+
+### 🆕 新增 — `export_web_compare`：網頁檢視器 × Revit 顯示模式比對包（2026-10-17）
+
+一次呼叫為 issue-manager S1 驗證產出同視圖、同相機的檔案：六種顯示模式 PNG（`revit_wireframe`／`hiddenLine`／`shaded`／`shadedEdges`／`consistent`／`realistic`）與 `cpc_consistent.png`／`cpc_realistic.png`、`cpc.ifc`（IFC4 Reference View，失敗退 IFC2x3 CV2.0）、`cpc.glb`（每元素一節點，`extras` 帶 elementId／uniqueId／category／family）、`camera.txt` 與 `camera.json`（Revit 與 glTF 座標、原點偏移、FOV／正交尺寸、PNG 像素）。回傳每檔路徑、大小、耗時、warnings，超過 500 MB 提醒。
+
+- 新增 `MCP/Core/Commands/CommandExecutor.WebCompare.cs`、`MCP-Server/src/tools/web-compare-tools.ts`（full／architect profile）、`docs/WEB_COMPARE_EXPORT.md`
+- `GltfBuilder` 新增 `BeginElement`／`EndElement`（逐元素節點，未使用時行為不變）；`RevitGltfExportContext` 新增 `TrackElements`（預設 false，走動展示不受影響）
+- 測試：NUnit +3（逐元素節點、空元素、合併與逐元素並存）、MCP Server +4
+- 未實機驗收；部署需先關閉 Revit
+
 ## [1.5.1] - 2026-03-09
 
 ### 🐛 Bug 修正（C# — 需重新編譯）
