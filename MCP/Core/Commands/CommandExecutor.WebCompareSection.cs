@@ -304,10 +304,14 @@ namespace RevitMCP.Core
 
             var eye = V("eye");
             var forward = V("forward").Normalized();
-            var up = V("up").Normalized();
+            // Revit rejects a slightly non-orthogonal basis ("view basis is corrupted"), e.g. from 4-decimal rounded vectors.
+            var up = V("up");
+            up = (up - forward * up.Dot(forward)).Normalized();
             var fov = cam["fovVerticalDeg"]?.Value<double?>() ?? 40.0;
             var aspect = cam["aspect"]?.Value<double?>() ?? 1600.0 / 1095.0;
-            var crop = CameraPathMath.CropBoxFromFieldOfView(fov, aspect, 1.0, 20000.0);
+            var nearFeet = (cam["nearMeters"]?.Value<double?>() ?? 0.3048) * toFt;
+            var farFeet = (cam["farMeters"]?.Value<double?>() ?? 6096.0) * toFt;
+            var crop = CameraPathMath.CropBoxFromFieldOfView(fov, aspect, nearFeet, farFeet);
             using (var tx = new Transaction(doc, "WEB_COMPARE：設定相機"))
             {
                 tx.Start();
@@ -318,10 +322,15 @@ namespace RevitMCP.Core
 
                 view.SetOrientation(new ViewOrientation3D(
                     new XYZ(eye.X * toFt, eye.Y * toFt, eye.Z * toFt), new XYZ(up.X, up.Y, up.Z), new XYZ(forward.X, forward.Y, forward.Z)));
-                var cropBox = view.CropBox;
-                cropBox.Min = new XYZ(crop.Min.X, crop.Min.Y, crop.Min.Z);
-                cropBox.Max = new XYZ(crop.Max.X, crop.Max.Y, crop.Max.Z);
-                view.CropBox = cropBox;
+                // Setting a crop box from a field of view (setCrop=true) made Revit render an all-white image in this
+                // project (the pyramid values are not what Revit expects), so the default only moves the eye/target.
+                if (cam["setCrop"]?.Value<bool?>() ?? false)
+                {
+                    var cropBox = view.CropBox;
+                    cropBox.Min = new XYZ(crop.Min.X, crop.Min.Y, crop.Min.Z);
+                    cropBox.Max = new XYZ(crop.Max.X, crop.Max.Y, crop.Max.Z);
+                    view.CropBox = cropBox;
+                }
                 tx.Commit();
             }
         }

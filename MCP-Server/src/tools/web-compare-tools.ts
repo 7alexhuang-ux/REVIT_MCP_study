@@ -67,7 +67,7 @@ export const webCompareTools: Tool[] = [
                 camera: {
                     type: "object",
                     description:
-                        "匯出前先把視圖相機設為指定位置（Revit 內部座標、公尺、Z 向上）與垂直視角。只支援透視視圖；不給就沿用視圖目前相機。",
+                        "匯出前先把視圖相機設為指定位置（Revit 內部座標、公尺、Z 向上）。只改方向（eye/forward/up），不改裁剪框：Revit 透視裁剪框不是真正的視錐，由視角反推會出全白 PNG；fovVerticalDeg/aspect 只在 setCrop=true 時使用。只支援透視視圖；不給就沿用視圖目前相機。",
                     properties: {
                         eye: { type: "array", items: { type: "number" }, description: "眼點 [x, y, z]" },
                         forward: { type: "array", items: { type: "number" }, description: "視線方向 [x, y, z]" },
@@ -76,6 +76,48 @@ export const webCompareTools: Tool[] = [
                         aspect: { type: "number", default: 1.4612, description: "寬高比（預設 1600/1095）" },
                     },
                     required: ["eye", "forward", "up"],
+                },
+                contourIntervalMeters: {
+                    type: "number",
+                    default: 1,
+                    minimum: 0,
+                    description: "GLB 內地形（Toposolid／Topography 朝上面）等高線間距，公尺，絕對高程的整數倍；0 表示不產生等高線。",
+                },
+                excludeCategories: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "GLB 略過的類別（Revit 介面語言的類別名稱，例如 Planting、Entourage）；用來控制三角面數。",
+                },
+                excludeElements: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "GLB 略過的元件，格式「來源:元件ID」，來源為 (host) 或連結文件標題，例如 \"ID_CPC:123456\"。",
+                },
+                maxElementTriangles: {
+                    type: "integer",
+                    default: 100000,
+                    minimum: 0,
+                    description: "單一元件三角面門檻；超過的元件依 overCapMode 處理。0 表示不設門檻。注意：門檻只省檔案與載入時間，不省 Revit 細分時間（要省時間用 excludeElements）。",
+                },
+                overCapMode: {
+                    type: "string",
+                    enum: ["simplify", "box", "drop"],
+                    default: "simplify",
+                    description: "超過門檻元件的處理：simplify＝二次誤差邊收縮簡化（不改 Revit 模型）；box＝外框盒佔位；drop＝不匯出。",
+                },
+                simplifyRatio: {
+                    type: "number",
+                    minimum: 0,
+                    maximum: 1,
+                    default: 0.1,
+                    description: "simplify 的保留比例（預設 0.1＝保留 10%）；給 0 則簡化到 maxElementTriangles。",
+                },
+                levelOfDetail: {
+                    type: "integer",
+                    minimum: -1,
+                    maximum: 15,
+                    default: -1,
+                    description: "Revit 曲面細分等級（ViewNode.LevelOfDetail，0 最粗、15 最細）；-1 沿用 Revit 預設。只影響 Revit 自己細分的曲面，不影響匯入的網格。",
                 },
                 linkedTerrain: {
                     type: "string",

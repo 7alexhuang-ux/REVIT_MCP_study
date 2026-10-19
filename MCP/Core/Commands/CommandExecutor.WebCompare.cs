@@ -65,12 +65,26 @@ namespace RevitMCP.Core
             var includeIfc = parameters["includeIfc"]?.Value<bool?>() ?? true;
             var includeGlb = parameters["includeGlb"]?.Value<bool?>() ?? true;
             var maxTriangles = parameters["maxTriangles"]?.Value<int?>() ?? 3_000_000;
+            var contourInterval = parameters["contourIntervalMeters"]?.Value<double?>() ?? 1.0;
+            var excludedCategories = WebCompareStringList(parameters["excludeCategories"]);
+            var excludedElements = WebCompareStringList(parameters["excludeElements"]);
+            var maxElementTriangles = parameters["maxElementTriangles"]?.Value<int?>() ?? 100_000;
+            var dumpAppearance = parameters["dumpAppearance"]?.Value<bool?>() ?? false;
+            var heavyOptions = new WebCompareHeavyOptions
+            {
+                OverCapMode = (parameters["overCapMode"]?.Value<string>() ?? "simplify").Trim().ToLowerInvariant(),
+                // Default from the S1 round-3 triangle study (ROUND3.md / ADR): 10 % keeps the statue and sofas visually identical.
+                SimplifyRatio = parameters["simplifyRatio"]?.Value<double?>() ?? 0.1,
+                LevelOfDetail = parameters["levelOfDetail"]?.Value<int?>() ?? -1
+            };
 
             Directory.CreateDirectory(outputDir);
 
             var sectionOptions = ParseWebCompareSectionOptions(parameters);
             var originalView = uiDoc.ActiveView;
             var view = FindOrCreateWebCompareView(doc, viewName, originalView, warnings, out var viewCreated);
+
+            DisableWebCompareFarClip(doc, view, warnings);
 
             if (parameters["camera"] is JObject cameraParams)
             {
@@ -225,7 +239,8 @@ namespace RevitMCP.Core
                 try
                 {
                     ExportWebCompareGlb(doc, view, glbPath, offset, maxTriangles, warnings, out glbTriangles, out glbNodes,
-                        linkedDocs, sectionOptions, sectionBox, terrainPieces, linkReport);
+                        linkedDocs, sectionOptions, sectionBox, terrainPieces, linkReport, contourInterval, excludedCategories,
+                        excludedElements, maxElementTriangles, dumpAppearance, heavyOptions);
                     files.Add(WebCompareFileEntry("cpc.glb", glbPath, sw, warnings, new JObject
                     {
                         ["triangleCount"] = glbTriangles,
@@ -256,10 +271,11 @@ namespace RevitMCP.Core
 
             Logger.Info($"[WebCompare] 完成：{files.Count} 個檔、{total.Elapsed.TotalSeconds:0.0} 秒、{warnings.Count} 則警告");
 
-            return new
+            var result = new
             {
                 outputDir,
                 viewName = view.Name,
+                viewState = DescribeWebCompareViewState(view),
                 viewCreated,
                 files,
                 camera = camera["gltf"],
@@ -268,6 +284,100 @@ namespace RevitMCP.Core
                 totalElapsedMs = total.ElapsedMilliseconds,
                 warnings
             };
+            try
+            {
+                // The MCP client may time out long exports; the full report always lands next to the files.
+                File.WriteAllText(Path.Combine(outputDir, "export_report.json"), JsonConvert.SerializeObject(result, Formatting.Indented), new UTF8Encoding(false));
+            }
+            catch (IOException ex)
+            {
+                Logger.Info("[WebCompare] 無法寫入 export_report.json：" + ex.Message);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// A view that still has "Far Clip Active" makes ExportImage return an all-white PNG (observed with a 154 m far clip
+        /// on a 190 m site), so the comparison view always runs with the far clip off.
+        /// </summary>
+        private static void DisableWebCompareFarClip(Document doc, View3D view, List<string> warnings)
+        {
+            try
+            {
+                var parameter = view.get_Parameter(BuiltInParameter.VIEWER_BOUND_ACTIVE_FAR);
+                if (parameter == null || parameter.IsReadOnly || parameter.AsInteger() == 0)
+                {
+                    return;
+                }
+
+                using (var tx = new Transaction(doc, "WEB_COMPARE：關閉遠裁剪"))
+                {
+                    tx.Start();
+                    parameter.Set(0);
+                    tx.Commit();
+                }
+
+                warnings.Add("比對視圖原本啟用遠裁剪（Far Clip Active），已關閉，否則 PNG 會全白。");
+            }
+            catch (Exception ex)
+            {
+                warnings.Add("關閉遠裁剪失敗：" + ex.Message);
+            }
+        }
+
+        private static JObject DescribeWebCompareViewState(View3D view)
+        {
+            var state = new JObject();
+            try
+            {
+                var o = view.GetOrientation();
+                var crop = view.CropBox;
+                state["eyeFeet"] = new JArray(o.EyePosition.X, o.EyePosition.Y, o.EyePosition.Z);
+                state["cropActive"] = view.CropBoxActive;
+                state["cropVisible"] = view.CropBoxVisible;
+                state["cropMinFeet"] = new JArray(crop.Min.X, crop.Min.Y, crop.Min.Z);
+                state["cropMaxFeet"] = new JArray(crop.Max.X, crop.Max.Y, crop.Max.Z);
+                state["farClipActive"] = view.get_Parameter(BuiltInParameter.VIEWER_BOUND_ACTIVE_FAR)?.AsInteger();
+                state["farClipOffsetFeet"] = view.get_Parameter(BuiltInParameter.VIEWER_BOUND_OFFSET_FAR)?.AsDouble();
+                state["displayStyle"] = view.DisplayStyle.ToString();
+                state["isPerspective"] = view.IsPerspective;
+            }
+            catch (Exception ex)
+            {
+                state["error"] = ex.Message;
+            }
+
+            return state;
+        }
+
+        /// <summary>Reads a string list that may arrive as a JSON array, a JSON-array string (clients without a typed schema stringify it) or a comma list.</summary>
+        private static List<string> WebCompareStringList(JToken token)
+        {
+            if (token == null || token.Type == JTokenType.Null)
+            {
+                return new List<string>();
+            }
+
+            if (token is JArray array)
+            {
+                return array.Select(t => t.Value<string>()).Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+            }
+
+            var text = token.Value<string>()?.Trim() ?? string.Empty;
+            if (text.StartsWith("[", StringComparison.Ordinal))
+            {
+                try
+                {
+                    return JArray.Parse(text).Select(t => t.Value<string>()).Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+                }
+                catch (JsonException)
+                {
+                    // fall through to the comma split
+                }
+            }
+
+            return text.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(t => t.Trim()).Where(t => t.Length > 0).ToList();
         }
 
         // ── view ────────────────────────────────────────
@@ -468,10 +578,50 @@ namespace RevitMCP.Core
                         ["symmetric"] = fov.IsSymmetric,
                         ["source"] = "view crop box (Max corner on front clip plane); three.js PerspectiveCamera.fov = fovVerticalDeg"
                     };
-                    if (!fov.IsSymmetric)
+                    try
                     {
-                        warnings.Add("透視裁剪框不對稱（相機有位移），three.js 預設相機無法完全重現，網頁截圖構圖會略有偏差。");
+                        // Revit's perspective crop box is not the true view frustum. Working hypothesis (S1 round 2):
+                        // true tangent = (crop near-plane half extent / near plane distance) / tan(20 deg), centred.
+                        // NOT verified: the silhouette IoU used to fit it is non-discriminative when the model fills the
+                        // frame, and round 3 still saw ~2x framing error (docs/LESSONS.md L-06).
+                        var crop = view.CropBox;
+                        var eyeLocal = crop.Transform.Inverse.OfPoint(orientation.EyePosition);
+                        var nearV = crop.Max - eyeLocal;
+                        var minV = crop.Min - eyeLocal;
+                        var depthNear = -nearV.Z;
+                        if (depthNear > 1e-9)
+                        {
+                            const double scale = 2.7475; // 1 / tan(20 deg)
+                            var halfH = (nearV.X - minV.X) / 2.0 / depthNear * scale;
+                            var halfV = (nearV.Y - minV.Y) / 2.0 / depthNear * scale;
+                            camera["projection"]["frustumTan"] = new JObject
+                            {
+                                ["left"] = Math.Round(-halfH, 6),
+                                ["right"] = Math.Round(halfH, 6),
+                                ["bottom"] = Math.Round(-halfV, 6),
+                                ["top"] = Math.Round(halfV, 6),
+                                ["fovVerticalDeg"] = Math.Round(2.0 * Math.Atan(halfV) * 180.0 / Math.PI, 3),
+                                ["source"] = "empirical hypothesis, NOT verified: crop near-plane half extent / near distance / tan(20deg); centred. Round 3 still saw ~2x framing error (docs/LESSONS.md L-06)",
+                                ["rawCropTanNearPlane"] = new JObject
+                                {
+                                    ["left"] = Math.Round(minV.X / depthNear, 6),
+                                    ["right"] = Math.Round(nearV.X / depthNear, 6),
+                                    ["bottom"] = Math.Round(minV.Y / depthNear, 6),
+                                    ["top"] = Math.Round(nearV.Y / depthNear, 6)
+                                }
+                            };
+                            camera["projection"]["fovVerticalDeg"] = camera["projection"]["frustumTan"]["fovVerticalDeg"];
+                            camera["projection"]["fovHorizontalDeg"] = Math.Round(2.0 * Math.Atan(halfH) * 180.0 / Math.PI, 3);
+                            camera["projection"]["aspect"] = Math.Round(halfH / halfV, 5);
+                            camera["projection"]["symmetric"] = true;
+                            camera["projection"]["source"] = "frustumTan (empirical, see frustumTan.source); the raw crop box is NOT the true frustum";
+                        }
                     }
+                    catch (Exception ex)
+                    {
+                        warnings.Add("無法計算視錐切線（frustumTan）：" + ex.Message);
+                    }
+
                 }
                 else
                 {
@@ -653,10 +803,20 @@ namespace RevitMCP.Core
 
         // ── GLB ─────────────────────────────────────────
 
+        /// <summary>How heavy elements are handled: over-cap mode, simplification ratio and Revit tessellation detail.</summary>
+        private sealed class WebCompareHeavyOptions
+        {
+            public string OverCapMode = "simplify";
+            public double SimplifyRatio;
+            public int LevelOfDetail = -1;
+        }
+
         private static void ExportWebCompareGlb(Document doc, View3D source, string glbPath, Vec3 offset, int maxTriangles,
             List<string> warnings, out int triangleCount, out int elementNodeCount,
             List<WebCompareDoc> linkedDocs, WebCompareSectionOptions sectionOptions, MeterBox? sectionBox,
-            List<WebCompareTerrainPiece> terrainPieces, JObject linkReport)
+            List<WebCompareTerrainPiece> terrainPieces, JObject linkReport, double webCompareContourInterval, List<string> webCompareExcludedCategories,
+            List<string> webCompareExcludedElements, int webCompareMaxElementTriangles, bool webCompareDumpAppearance,
+            WebCompareHeavyOptions heavyOptions)
         {
             ElementId tempViewId;
             using (var tx = new Transaction(doc, "WEB_COMPARE：建立 GLB 匯出暫存視圖"))
@@ -695,13 +855,54 @@ namespace RevitMCP.Core
                 context = new RevitGltfExportContext(doc, builder, offset)
                 {
                     TrackElements = true,
-                    TriangleBudget = maxTriangles
+                    TriangleBudget = maxTriangles,
+                    ContourIntervalMeters = webCompareContourInterval,
+                    DiagPath = Path.ChangeExtension(glbPath, ".diag.log")
                 };
-                using (var exporter = new CustomExporter(doc, context))
+                foreach (var excluded in webCompareExcludedCategories)
                 {
-                    exporter.IncludeGeometricObjects = false;
-                    exporter.ShouldStopOnError = false;
-                    exporter.Export(tempView);
+                    context.ExcludedCategories.Add(excluded);
+                }
+
+                foreach (var key in webCompareExcludedElements)
+                {
+                    context.ExcludedElementKeys.Add(key);
+                }
+
+                context.MaxElementTriangles = webCompareMaxElementTriangles;
+                context.OverCapMode = heavyOptions.OverCapMode;
+                context.SimplifyRatio = heavyOptions.SimplifyRatio;
+                context.LevelOfDetail = heavyOptions.LevelOfDetail;
+                context.DumpAppearance = webCompareDumpAppearance;
+
+                File.WriteAllText(context.DiagPath, "");
+                context.Diag($"export start view={tempView.Name} perspective={tempView.IsPerspective} cropActive={tempView.CropBoxActive} sectionBoxActive={tempView.IsSectionBoxActive}");
+                try
+                {
+                    using (var exporter = new CustomExporter(doc, context))
+                    {
+                        exporter.IncludeGeometricObjects = false;
+                        exporter.ShouldStopOnError = false;
+                        exporter.Export(tempView);
+                    }
+                    context.Diag("export finished normally");
+                    context.Flush();
+                }
+                catch (Exception ex)
+                {
+                    context.Diag("CustomExporter.Export exception: " + ex);
+                    throw;
+                }
+                finally
+                {
+                    context.Diag($"summary linkBegin={context.LinkBeginCount} triangles={builder.TriangleCount} nodes={builder.ElementNodeCount} exceptions={context.ExceptionCount} skippedPolymesh={context.SkippedPolymeshes}");
+                    context.Diag("elementsSeenByDoc=" + JsonConvert.SerializeObject(context.ElementsSeenByDoc));
+                    context.Diag("elementCounts=" + JsonConvert.SerializeObject(context.ElementCounts));
+                    context.Diag("trianglesByKey=" + JsonConvert.SerializeObject(context.TrianglesByKey.OrderByDescending(kv => kv.Value).Take(40).ToDictionary(kv => kv.Key, kv => kv.Value)));
+                    context.Diag("droppedElements=" + JsonConvert.SerializeObject(context.DroppedElements));
+                    context.Diag($"textured={context.TexturedMaterials} images={builder.ImageCount} contourSegments={context.ContourSegments}");
+                    context.Diag("textureProblems=" + JsonConvert.SerializeObject(context.TextureProblems));
+                    context.Diag("transparentMaterials=" + JsonConvert.SerializeObject(context.TransparentMaterials));
                 }
             }
             finally
@@ -728,8 +929,39 @@ namespace RevitMCP.Core
                 ["nativeLinkTerrainElements"] = nativeTerrain,
                 ["linkBeginCount"] = context.LinkBeginCount,
                 ["elementCountsByLinkAndCategory"] = JObject.FromObject(context.ElementCounts),
-                ["trianglesByLink"] = JObject.FromObject(context.LinkTriangles)
+                ["trianglesByLink"] = JObject.FromObject(context.LinkTriangles),
+                ["elementsSeenByDoc"] = JObject.FromObject(context.ElementsSeenByDoc),
+                ["exceptions"] = context.ExceptionCount,
+                ["trianglesByKey"] = JObject.FromObject(context.TrianglesByKey),
+                ["texturedMaterials"] = context.TexturedMaterials,
+                ["images"] = builder.ImageCount,
+                ["textureProblems"] = JObject.FromObject(context.TextureProblems),
+                ["transparentMaterials"] = JObject.FromObject(context.TransparentMaterials),
+                ["contourSegments"] = context.ContourSegments,
+                ["droppedElements"] = JArray.FromObject(context.DroppedElements),
+                ["heavyElements"] = new JObject
+                {
+                    ["maxElementTriangles"] = webCompareMaxElementTriangles,
+                    ["overCapMode"] = heavyOptions.OverCapMode,
+                    ["simplifyRatio"] = heavyOptions.SimplifyRatio,
+                    ["levelOfDetail"] = heavyOptions.LevelOfDetail,
+                    ["simplifySeconds"] = Math.Round(context.SimplifyTime.Elapsed.TotalSeconds, 2),
+                    ["trianglesBeforeCap"] = context.ElementTriangleStats.Sum(e => (long)e.Triangles),
+                    ["trianglesAfterCap"] = context.ElementTriangleStats.Sum(e => (long)e.Kept),
+                    ["top"] = JArray.FromObject(context.ElementTriangleStats.OrderByDescending(e => e.Triangles).Take(40))
+                }
             };
+            try
+            {
+                // Full per-element list for the triangle study (every element with geometry, heaviest first).
+                File.WriteAllText(Path.ChangeExtension(glbPath, ".elements.json"),
+                    JsonConvert.SerializeObject(context.ElementTriangleStats.OrderByDescending(e => e.Triangles), Formatting.Indented),
+                    new UTF8Encoding(false));
+            }
+            catch (IOException ex)
+            {
+                warnings.Add("無法寫入元件三角面清單：" + ex.Message);
+            }
             var useFallback = sectionOptions.TerrainMode == "always" || (sectionOptions.TerrainMode == "auto" && nativeTerrain == 0);
             terrainReport["fallbackUsed"] = useFallback;
             if (useFallback)

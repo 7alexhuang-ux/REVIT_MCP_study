@@ -54,7 +54,9 @@ namespace RevitMCP.Tests.Walkthrough
             StringAssert.Contains("\"POSITION\":0", json);
             StringAssert.Contains("\"min\":[0,0,-1]", json);
             StringAssert.Contains("\"max\":[2,3,0]", json);
-            StringAssert.Contains("\"baseColorFactor\":[0.8,0.2,0.1,1]", json);
+            // baseColorFactor is linear: sRGB 0.8/0.2/0.1 -> 0.6038/0.0331/0.0100; the sRGB values stay in material extras.
+            StringAssert.Contains("\"baseColorFactor\":[0.6038", json);
+            StringAssert.Contains("\"srgb\":[0.8,0.2,0.1]", json);
             StringAssert.DoesNotContain("BLEND", json);
             StringAssert.Contains("\"byteLength\":" + bin.Length, json);
 
@@ -156,8 +158,8 @@ namespace RevitMCP.Tests.Walkthrough
             Assert.That(builder.MaterialCount, Is.EqualTo(2));
 
             ParseGlb(builder.BuildGlb(), out var json, out var bin);
-            StringAssert.Contains("\"extras\":{\"elementId\":12345,\"uniqueId\":\"uid-1\",\"category\":\"牆\",\"family\":\"基本牆\"}", json);
-            StringAssert.Contains("\"extras\":{\"elementId\":67890,\"uniqueId\":\"uid-2\",\"category\":\"門\",\"family\":\"單扇門\"}", json);
+            StringAssert.Contains("\"extras\":{\"elementId\":12345,\"uniqueId\":\"uid-1\",\"category\":\"牆\",\"family\":\"基本牆\",\"source\":\"(host)\"}", json);
+            StringAssert.Contains("\"extras\":{\"elementId\":67890,\"uniqueId\":\"uid-2\",\"category\":\"門\",\"family\":\"單扇門\",\"source\":\"(host)\"}", json);
             StringAssert.Contains("\"scenes\":[{\"nodes\":[0,1]}]", json);
             // element 1: 2 primitives (red+blue), element 2: 1 primitive; 3 primitives x (pos+normal+index) accessors.
             StringAssert.Contains("\"name\":\"Element 67890\"", json);
