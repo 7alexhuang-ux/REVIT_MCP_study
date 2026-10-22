@@ -32,7 +32,7 @@
 | `wall-check.md` | wall-orientation-check | 牆壁方向、內外側 |
 | `dependent-view-crop-workflow.md` | dependent-view-crop | 從屬視圖、分區出圖 |
 
-### 不需要成為 Skill 的 Domain（21 個，含 README）
+### 不需要成為 Skill 的 Domain（22 個，含 README）
 
 | Domain 文件 | 類型 | 不成為 Skill 的原因 |
 |------------|------|-------------------|
@@ -58,6 +58,7 @@
 | `archicad-adapter-boundary.md` | 轉譯邊界定義 | 定義 Archicad backend 的架構原則、執行前提與能力降級策略，是 opt-in Archicad 路線的 meta-reference，不由使用者直接觸發 |
 | `archicad-terminology-map.md` | 名詞對照與單位合約 | Revit↔Archicad 名詞的中文導讀，以及讀取數值前的單位鐵律；權威正本在 `.claude/skills/archicad-skill-adapter/references/revit-archicad-terminology.md` |
 | `archicad-portability-matrix.md` | 可攜性分級與進度 | A/B/C 分級判準與各 Wave 驗證狀態的中文速查；權威正本在 `docs/integrations/archicad-skill-portability.md` |
+| `archicad-structural-dwg-sync.md` | Archicad 結構 DWG/DXF 逐層校準、建模、版次比對、Property 標記與報表 SOP | 尚無 Skill 引用，待接線 |
 | `README.md` | 目錄導航 | 本檔案，不是工作流程 |
 
 ---
