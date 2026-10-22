@@ -98,9 +98,9 @@
   <h2 class="bim-section-title">先看懂三個標記</h2>
   <p>每張卡右上角的標記來自工具自己宣告的 <code>annotations</code>，不是這一頁另外標的——閘門 <code>9-1</code> 會驗證它們與程式碼一致。</p>
   <ul>
-    <li><strong>唯讀</strong>（96 個）——只讀不寫。跑錯了不會留下痕跡，可以放心探索。</li>
-    <li><strong>會寫入</strong>（123 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
-    <li><strong>破壞性</strong>（3 個）——刪除或不可逆地取代既有內容：<code>curate_mep_sizes · dedup_detail_elements_in_view · delete_element</code>。這份名單是白名單，程式碼裡多一個就會被閘門擋下。</li>
+    <li><strong>唯讀</strong>（89 個）——只讀不寫。跑錯了不會留下痕跡，可以放心探索。</li>
+    <li><strong>會寫入</strong>（129 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
+    <li><strong>破壞性</strong>（4 個）——刪除或不可逆地取代既有內容：<code>curate_mep_sizes · dedup_detail_elements_in_view · delete_element · import_excel_to_drafting_views</code>。這份名單是白名單，程式碼裡多一個就會被閘門擋下。</li>
   </ul>
   <p style="color:var(--text-muted);font-size:13px;">「唯讀」是工具作者的宣告，不是執行時的沙箱。它告訴你這支工具<em>設計上</em>不寫入，不是保證它<em>不可能</em>寫入。</p>
 </section>
@@ -143,11 +143,11 @@
     <div class="tool-card" id="analyze_floor_slopes" data-tool="analyze_floor_slopes">
       <div>
         <div class="tool-name">analyze_floor_slopes</div>
-        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
         <div class="tool-module">base-tools</div>
       </div>
       <div>
-        <div class="tool-desc">分析樓板頂面排水坡度：以 Solid→PlanarFace 法向量與 Z 軸夾角計算每片朝上頂面的坡度百分比，回傳每片樓板的 Min/Max 坡度，並可回寫至指定參數（預設 Comments）。未指定 elementIds 時自動收集 Function=Exterior 的樓板。</div>
+        <div class="tool-desc">分析樓板頂面排水坡度：以 Solid→PlanarFace 法向量與 Z 軸夾角計算每片朝上頂面的坡度百分比，回傳每片樓板的 Min/Max 坡度。預設只分析、不寫入模型（不開 Transaction）；只有明確指定 paramName 時才會回寫該參數。未指定 elementIds 時自動收集 Function=Exterior 的樓板。</div>
       </div>
     </div>
     <div class="tool-card" id="close_document" data-tool="close_document">
@@ -980,7 +980,7 @@
     <div class="tool-card" id="check_exterior_wall_openings" data-tool="check_exterior_wall_openings">
       <div>
         <div class="tool-name">check_exterior_wall_openings</div>
-        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
         <div class="tool-module">room-tools</div>
       </div>
       <div>
@@ -1040,7 +1040,7 @@
     <div class="tool-card" id="get_room_surface_areas" data-tool="get_room_surface_areas">
       <div>
         <div class="tool-name">get_room_surface_areas</div>
-        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
         <div class="tool-module">room-tools</div>
       </div>
       <div>
@@ -1284,7 +1284,7 @@
     <div class="tool-card" id="check_floor_effective_openings" data-tool="check_floor_effective_openings">
       <div>
         <div class="tool-name">check_floor_effective_openings</div>
-        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
         <div class="tool-module">smoke-exhaust-tools</div>
       </div>
       <div>
@@ -1294,7 +1294,7 @@
     <div class="tool-card" id="check_smoke_exhaust_windows" data-tool="check_smoke_exhaust_windows">
       <div>
         <div class="tool-name">check_smoke_exhaust_windows</div>
-        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
         <div class="tool-module">smoke-exhaust-tools</div>
       </div>
       <div>
@@ -1304,7 +1304,7 @@
     <div class="tool-card" id="check_stair_headroom" data-tool="check_stair_headroom">
       <div>
         <div class="tool-name">check_stair_headroom</div>
-        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
         <div class="tool-module">stair-compliance-tools</div>
       </div>
       <div>
@@ -1958,7 +1958,7 @@
     <div class="tool-card" id="import_excel_to_drafting_views" data-tool="import_excel_to_drafting_views">
       <div>
         <div class="tool-name">import_excel_to_drafting_views</div>
-        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-flags"><span class="tool-badge destructive">破壞性</span></div>
         <div class="tool-module">legend-tools</div>
       </div>
       <div>

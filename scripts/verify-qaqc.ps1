@@ -11,7 +11,8 @@
 #   6. Domain Metadata and Shared SOP Quality
 #   7. Cross-Document Alignment (CLAUDE.md / BIM_MCP web / scripts must report same Skill/Domain/Tool counts)
 #   8. Document Audience and Encoding Hygiene
-#   9. MCP 2026 Compliance (tool annotation coverage: title / readOnlyHint / destructiveHint allow-list)
+#   9. MCP 2026 Compliance (annotation coverage: title / readOnlyHint / destructiveHint allow-list;
+#      MCP Apps ui:// integrity; readOnlyHint honesty against the C# handler)
 
 param(
     [switch]$SkipBuild,
@@ -894,6 +895,88 @@ function Get-ToolNames {
     return @($result | Where-Object { $_ -match '\S' })
 }
 
+# ─────────────────────────────────────────────
+# Shared C#-dispatcher source helpers — used by BOTH 7-15 (registered tool -> dispatcher case)
+# and 9-3 (readOnlyHint honesty). Factored out deliberately: both checks have to agree on three
+# things or they stop talking about the same handler — the tool-name rename map, the dispatcher
+# file set, and comment stripping. A second, independently written copy of any of the three
+# would drift, and the direction it drifts in is always the same: the newer check sees less C#
+# than the older one and reports a silent false PASS. One implementation, two callers.
+# ─────────────────────────────────────────────
+
+function Remove-CSharpComments {
+    param([string]$Text)
+    if (-not $Text) { return "" }
+    # Block comments first (they span lines), replaced with a SPACE rather than removed so tokens
+    # on either side can never fuse into a new match; then line comments on what remains. A
+    # `case "x":` or a `new Transaction(` inside a comment cannot execute, so neither check may
+    # count it (this exact bug - block comments never stripped - once made 7-15 report a
+    # commented-out dispatcher case as "implemented").
+    $stripped = ([regex]'(?s)/\*.*?\*/').Replace($Text, ' ')
+    return ([regex]'//[^\r\n]*').Replace($stripped, '')
+}
+
+function Get-ToolNameRenameMap {
+    # PARSED out of MCP-Server/src/tools/revit-tools.ts, never hardcoded, so a future rename does
+    # not require editing any check. Today that file rewrites exactly one tool name before sending
+    # it to C# - a ternary in executeRevitTool():
+    #   const commandName = toolName === "query_elements_with_filter" ? "query_elements" : toolName;
+    # Comparing raw tool names without applying this map would falsely flag that redirect as having
+    # no dispatcher case (no `case "query_elements_with_filter"` exists - only `case "query_elements"`).
+    $map = @{}
+    $text = Read-FileText (Join-Path $projectRoot "MCP-Server\src\tools\revit-tools.ts")
+    if ($text) {
+        $renameRx = [regex]'toolName\s*===\s*"([^"]+)"\s*\?\s*"([^"]+)"\s*:\s*toolName'
+        foreach ($m in $renameRx.Matches($text)) { $map[$m.Groups[1].Value] = $m.Groups[2].Value }
+    }
+    return $map
+}
+
+function Get-DispatcherSource {
+    # CommandExecutor.cs + every MCP/Core/Commands/*.cs, GLOBBED - never a hand-typed file list.
+    # A hand-typed list of "the partials that carry case labels" was already wrong once (issue
+    # #125's reporter named six; the actual number is eight) and rots again the next time a partial
+    # is added or a case moves between files. Returns comment-stripped text per file.
+    $paths = @(Join-Path $projectRoot "MCP\Core\CommandExecutor.cs") +
+        @(Get-ChildItem -Path "$projectRoot\MCP\Core\Commands\*.cs" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    $out = @()
+    foreach ($p in $paths) {
+        $text = Remove-CSharpComments (Read-FileText $p)
+        if (-not $text) { continue }
+        $out += @{ Path = $p; Text = $text }
+    }
+    return $out
+}
+
+function Get-DispatcherCaseLabels {
+    param($Sources)
+    # Case labels are matched WITHOUT a `^` line-start anchor: an anchor only finds the FIRST label
+    # on a physical line, missing any second-or-later label on lines like `case "a": case "b":`.
+    # That direction is fail-safe for a real orphan but silently defeats the quarantine DRIFT
+    # self-check (a quarantined tool implemented as a second label would WARN forever instead of
+    # FAILing as drifted). The HashSet de-duplicates.
+    $caseLabelRx = [regex]'case\s+"([^"]+)"\s*:'
+    $labels = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($s in $Sources) {
+        foreach ($m in $caseLabelRx.Matches($s.Text)) { [void]$labels.Add($m.Groups[1].Value) }
+    }
+    return $labels
+}
+
+# Quarantine: a list of NAMED, REASONED exceptions to a still-live check - never a filter applied
+# before the check runs. Issue #111 explicitly rejected a "known unimplemented" list that removes
+# tools from consideration at registration time, because that demotes "declaration and
+# implementation disagree" from a bug to a permanent normal state. This list does the opposite: the
+# tool stays fully visible in tools/list and in $toolNames, the mismatch stays on the books, and
+# the reason prints as a WARN on every single run.
+# Hoisted to script scope (it used to live inside 7-15) because 9-3 needs it too: a registered tool
+# with no dispatcher case cannot commit a transaction, so 9-3 must not re-report as a readOnlyHint
+# violation what 7-15 already carries as a reasoned orphan.
+$knownUnimplemented = @(
+    @{ Name = 'check_sanitary_fixture_requirements'; Reason = 'Registered at MCP-Server/src/tools/room-tools.ts:300. No domain/*.md defines a sanitary-fixture-count-by-building-occupancy table, and CLAUDE.md Domain Method Compliance forbids supplying that table from model knowledge - so it cannot be implemented right now. It cannot be unregistered either: that would drop the tool count by one and force a CLAUDE.md count-table edit, out of scope here. Pending: an authoritative legal source, requested from the maintainer by the issue reporter.' }
+)
+$knownUnimplementedNames = @($knownUnimplemented | ForEach-Object { $_.Name })
+
 function Get-DomainCount {
     # All domain/*.md including meta — single grand total
     $rootCount = (Get-ChildItem -Path "$projectRoot\domain" -Filter "*.md" -ErrorAction SilentlyContinue |
@@ -1515,66 +1598,19 @@ if (-not $toolNames) {
     Write-Skip "Tool -> dispatcher reconciliation" "runtime tool registry unavailable (run npm run build)"
 }
 else {
-    # Rename map is PARSED out of MCP-Server/src/tools/revit-tools.ts, not hardcoded, so a future
-    # rename doesn't require editing this check. Today that file rewrites exactly one tool name
-    # before sending it to C# - a ternary in executeRevitTool():
-    #   const commandName = toolName === "query_elements_with_filter" ? "query_elements" : toolName;
-    # Comparing raw tool names without applying this map would falsely flag that redirect as an
-    # orphan (registered name query_elements_with_filter has no case of that name - only
-    # query_elements does).
-    $revitToolsTsPath = Join-Path $projectRoot "MCP-Server\src\tools\revit-tools.ts"
-    $renameMap = @{}
-    $revitToolsTsText = Read-FileText $revitToolsTsPath
-    if ($revitToolsTsText) {
-        $renameRx = [regex]'toolName\s*===\s*"([^"]+)"\s*\?\s*"([^"]+)"\s*:\s*toolName'
-        foreach ($m in $renameRx.Matches($revitToolsTsText)) { $renameMap[$m.Groups[1].Value] = $m.Groups[2].Value }
-    }
+    # Rename map, dispatcher sources (comment-stripped) and case labels all come from the shared
+    # helpers defined at the top of Phase 7 - the SAME three primitives 9-3 uses, on purpose. See
+    # the header comment there for why there must be exactly one implementation of each. The
+    # reasoning that used to live inline here (parse the rename map instead of hardcoding it; glob
+    # the dispatcher partials instead of hand-typing them; strip comments and do not anchor the
+    # case-label regex to line start) now lives on those functions, unchanged.
+    $renameMap = Get-ToolNameRenameMap
+    $dispatcherSources = @(Get-DispatcherSource)
+    $dispatcherFiles = @($dispatcherSources | ForEach-Object { $_.Path })
+    $dispatcherCaseLabels = Get-DispatcherCaseLabels $dispatcherSources
 
-    # C# case labels: CommandExecutor.cs + every MCP/Core/Commands/*.cs, GLOBBED - never a hand-typed
-    # file list. A hand-typed list of "the partials that carry case labels" was already wrong once
-    # (issue #125's reporter named six; the actual number is eight) and a hardcoded list rots the
-    # same way again the next time a partial is added or a case moves between files.
-    $dispatcherFiles = @(Join-Path $projectRoot "MCP\Core\CommandExecutor.cs") +
-        @(Get-ChildItem -Path "$projectRoot\MCP\Core\Commands\*.cs" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
-    # Case labels are matched WITHOUT a `^` line-start anchor and AFTER stripping comments - two
-    # bugs found together by inspector review (loop-up S5 correction pass):
-    #  1) MAJOR silent false-negative: `/* ... */` block comments (and `// ...` line comments) were
-    #     never stripped before matching, so a case commented out - e.g. `/* TODO: case "x": */` -
-    #     still counted as "implemented". A dispatcher case inside a comment cannot execute; the real
-    #     dispatcher would still throw NotImplementedException while this check reported PASS.
-    #     Comments MUST be stripped before the case-label scan, not left to chance.
-    #  2) minor: a `^\s*` anchor only finds the FIRST case label on a physical line, missing any
-    #     second-or-later label on lines like `case "a": case "b":`. That direction is fail-safe for
-    #     a real orphan (extra unmatched labels only shrink the orphan set, never hide a genuine
-    #     orphan), but it silently defeats the QUARANTINE DRIFT self-check: a quarantined tool
-    #     implemented as a second label on a shared line would keep WARNing forever instead of
-    #     FAILing as drifted. Matching every occurrence in the text (not anchored to line start)
-    #     fixes both; the HashSet already de-duplicates.
-    $blockCommentRx = [regex]'(?s)/\*.*?\*/'
-    $lineCommentRx = [regex]'//[^\r\n]*'
-    $caseLabelRx = [regex]'case\s+"([^"]+)"\s*:'
-    $dispatcherCaseLabels = New-Object 'System.Collections.Generic.HashSet[string]'
-    foreach ($f in $dispatcherFiles) {
-        $text = Read-FileText $f
-        if (-not $text) { continue }
-        # Strip block comments first (they can span lines), then line comments on what remains.
-        # Block comments are replaced with a space, not removed outright, so tokens on either side
-        # of a stripped comment never accidentally fuse into a new match.
-        $stripped = $blockCommentRx.Replace($text, ' ')
-        $stripped = $lineCommentRx.Replace($stripped, '')
-        foreach ($m in $caseLabelRx.Matches($stripped)) { [void]$dispatcherCaseLabels.Add($m.Groups[1].Value) }
-    }
-
-    # Quarantine: a list of NAMED, REASONED exceptions to a still-live check - never a filter
-    # applied before the check runs. Issue #111 explicitly rejected a "known unimplemented" list
-    # that removes tools from consideration at registration time, because that demotes "declaration
-    # and implementation disagree" from a bug to a permanent normal state. This list does the
-    # opposite: the tool stays fully visible in tools/list and in $toolNames above, the mismatch
-    # stays on the books, and the reason prints as a WARN on every single run.
-    $knownUnimplemented = @(
-        @{ Name = 'check_sanitary_fixture_requirements'; Reason = 'Registered at MCP-Server/src/tools/room-tools.ts:300. No domain/*.md defines a sanitary-fixture-count-by-building-occupancy table, and CLAUDE.md Domain Method Compliance forbids supplying that table from model knowledge - so it cannot be implemented right now. It cannot be unregistered either: that would drop the tool count by one and force a CLAUDE.md count-table edit, out of scope here. Pending: an authoritative legal source, requested from the maintainer by the issue reporter.' }
-    )
-    $knownUnimplementedNames = @($knownUnimplemented | ForEach-Object { $_.Name })
+    # $knownUnimplemented / $knownUnimplementedNames are script-scope (hoisted next to the shared
+    # helpers) so 9-3 can honor the same quarantine. Same list, same reasons, same WARN-every-run.
 
     $orphans = @()
     $quarantinedStillOrphan = @()
@@ -1687,7 +1723,10 @@ Write-Host "──────────────────────�
 # already exists. Returns $null if the built registry is unavailable so the caller can Skip
 # instead of failing the whole phase.
 function Get-ToolAnnotationReport {
-    $nodeScript = "import('./MCP-Server/build/tools/index.js').then(m=>{const tools=m.registerRevitTools();const allow=new Set(['delete_element','dedup_detail_elements_in_view','curate_mep_sizes']);const missingTitle=[];const missingReadOnlyHint=[];const badDestructive=[];for(const t of tools){const title=t.title;if(typeof title!=='string'||title.trim().length===0)missingTitle.push(t.name);const ro=t.annotations?t.annotations.readOnlyHint:undefined;if(typeof ro!=='boolean')missingReadOnlyHint.push(t.name);const destructive=t.annotations?t.annotations.destructiveHint:undefined;if(destructive===true&&!allow.has(t.name))badDestructive.push(t.name);}console.log(JSON.stringify({total:tools.length,missingTitle:missingTitle,missingReadOnlyHint:missingReadOnlyHint,badDestructive:badDestructive}));}).catch(()=>process.exit(2))"
+    # Allow-list kept in lockstep with $destructiveAllowList below and with CLAUDE.md's QA/QC
+    # section. import_excel_to_drafting_views joined it in issue #137: overwrite defaults to true
+    # and a same-named Drafting View is doc.Delete'd before being rebuilt.
+    $nodeScript = "import('./MCP-Server/build/tools/index.js').then(m=>{const tools=m.registerRevitTools();const allow=new Set(['delete_element','dedup_detail_elements_in_view','curate_mep_sizes','import_excel_to_drafting_views']);const missingTitle=[];const missingReadOnlyHint=[];const badDestructive=[];for(const t of tools){const title=t.title;if(typeof title!=='string'||title.trim().length===0)missingTitle.push(t.name);const ro=t.annotations?t.annotations.readOnlyHint:undefined;if(typeof ro!=='boolean')missingReadOnlyHint.push(t.name);const destructive=t.annotations?t.annotations.destructiveHint:undefined;if(destructive===true&&!allow.has(t.name))badDestructive.push(t.name);}console.log(JSON.stringify({total:tools.length,missingTitle:missingTitle,missingReadOnlyHint:missingReadOnlyHint,badDestructive:badDestructive}));}).catch(()=>process.exit(2))"
     Push-Location $projectRoot
     $result = & node --input-type=module -e $nodeScript 2>$null
     $exit = $LASTEXITCODE
@@ -1723,6 +1762,121 @@ function Get-AppResourceReport {
     return $null
 }
 
+# 9-3 support: the names of every tool that DECLARES readOnlyHint=true, taken from the same built
+# registry 9-1 and Phase 7 use. $null when the built registry cannot be evaluated, so the caller
+# can distinguish "cannot verify" from "nothing to verify".
+function Get-ReadOnlyToolNames {
+    $nodeScript = "import('./MCP-Server/build/tools/index.js').then(m=>{console.log(m.registerRevitTools().filter(t=>t.annotations&&t.annotations.readOnlyHint===true).map(t=>t.name).join('\n'))}).catch(()=>process.exit(2))"
+    Push-Location $projectRoot
+    $result = & node --input-type=module -e $nodeScript 2>$null
+    $exit = $LASTEXITCODE
+    Pop-Location
+    if ($exit -ne 0 -or -not $result) { return $null }
+    return @($result | Where-Object { $_ -match '\S' })
+}
+
+# Returns the brace-delimited body (braces included) that follows the parameter list whose opening
+# '(' sits at $ParenIndex, or $null when there is none (abstract / interface / expression-bodied
+# member) or when braces do not balance. Deliberately returns $null instead of guessing: a
+# half-parsed body would be scanned for write constructs and could report a false clean result.
+function Get-BracedBodyAfter {
+    param([string]$Text, [int]$ParenIndex)
+    $len = $Text.Length
+    if ($ParenIndex -lt 0 -or $ParenIndex -ge $len -or $Text[$ParenIndex] -ne '(') { return $null }
+    $depth = 0
+    $i = $ParenIndex
+    while ($i -lt $len) {
+        $c = $Text[$i]
+        if ($c -eq '(') { $depth++ }
+        elseif ($c -eq ')') { $depth--; if ($depth -eq 0) { break } }
+        $i++
+    }
+    if ($depth -ne 0) { return $null }
+    $k = $i + 1
+    while ($k -lt $len -and [char]::IsWhiteSpace($Text[$k])) { $k++ }
+    if ($k -ge $len -or $Text[$k] -ne '{') { return $null }
+    $d = 0
+    $e = $k
+    while ($e -lt $len) {
+        $c = $Text[$e]
+        if ($c -eq '{') { $d++ }
+        elseif ($c -eq '}') { $d--; if ($d -eq 0) { break } }
+        $e++
+    }
+    if ($d -ne 0) { return $null }
+    return $Text.Substring($k, $e - $k + 1)
+}
+
+# Method-body index for the given method names, built over every tracked C# file under MCP/
+# (obj/ and bin/ excluded) with comments stripped by the SAME Remove-CSharpComments the dispatcher
+# scan uses. Only the names asked for are indexed - the alternative (index all ~1700 methods in
+# ~4 MB of C#) costs seconds of brace matching for nothing.
+# Keyed by SIMPLE method name, so an overload or a same-named method on another class is indexed
+# under the same key and also gets scanned. That over-approximates in the FAIL direction (more
+# bodies scanned -> more likely to flag), which is the safe direction for this check; a genuine
+# false positive from a name collision is what the exemption list below is for, with a reason.
+function Get-CSharpMethodBodies {
+    param([string[]]$Names)
+    $index = @{}
+    $wanted = @($Names | Where-Object { $_ } | Sort-Object -Unique)
+    if ($wanted.Count -eq 0) { return $index }
+    $alternation = ($wanted | ForEach-Object { [regex]::Escape($_) }) -join '|'
+    $declRx = [regex]("(?:(?:public|private|protected|internal|static|override|virtual|sealed|async|partial|new|extern|unsafe)\s+)+[\w<>\[\]\,\.\?]+\s+($alternation)\s*\(")
+    $csFiles = @(Get-ChildItem -Path "$projectRoot\MCP" -Filter "*.cs" -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '\\(obj|bin)\\' })
+    foreach ($f in $csFiles) {
+        $text = Remove-CSharpComments (Read-FileText $f.FullName)
+        if (-not $text) { continue }
+        foreach ($m in $declRx.Matches($text)) {
+            # The regex ends with `\s*\(`, so the last matched char IS the opening paren.
+            $body = Get-BracedBodyAfter $text ($m.Index + $m.Length - 1)
+            if ($null -eq $body) { continue }
+            $name = $m.Groups[1].Value
+            if (-not $index.ContainsKey($name)) { $index[$name] = @() }
+            $index[$name] += @{ Path = $f.FullName; Name = $name; Body = $body }
+        }
+    }
+    return $index
+}
+
+# The body of `case "<CaseName>":` inside the dispatcher sources, i.e. the code that actually runs
+# for one tool call. The body ends at the EARLIEST of the first `break;`, the next `case "..."`
+# label, or `default:`. The next label is a hard stop so a body can never bleed into the following
+# case and attribute another tool's writes to this one; `break;` keeps it tight for the normal
+# `result = X(parameters); break;` idiom. A fall-through label group (`case "a": case "b": <body>`)
+# produces a whitespace-only slice for the first label, so the loop hops to the following segment
+# rather than reporting "no handler" - today only internal non-tool switches (filter operators,
+# camera modes) use that form, but a tool could join one tomorrow.
+function Get-DispatcherCaseBody {
+    param($Sources, [string]$CaseName)
+    $labelRx = [regex]('case\s+"' + [regex]::Escape($CaseName) + '"\s*:')
+    $breakRx = [regex]'\bbreak\s*;'
+    $nextCaseRx = [regex]'case\s+"'
+    $defaultRx = [regex]'\bdefault\s*:'
+    $anyLabelRx = [regex]'case\s+"[^"]*"\s*:'
+    foreach ($s in $Sources) {
+        $m = $labelRx.Match($s.Text)
+        if (-not $m.Success) { continue }
+        $pos = $m.Index + $m.Length
+        for ($hop = 0; $hop -lt 5; $hop++) {
+            $rest = $s.Text.Substring($pos)
+            $ends = @()
+            $b = $breakRx.Match($rest); if ($b.Success) { $ends += ($b.Index + $b.Length) }
+            $n = $nextCaseRx.Match($rest); if ($n.Success) { $ends += $n.Index }
+            $d = $defaultRx.Match($rest); if ($d.Success) { $ends += $d.Index }
+            if ($ends.Count -gt 0) { $end = ($ends | Measure-Object -Minimum).Minimum }
+            else { $end = [Math]::Min(2000, $rest.Length) }
+            $slice = $rest.Substring(0, $end)
+            if ($slice.Trim().Length -gt 0) { return @{ Path = $s.Path; Body = $slice } }
+            $nextLabel = $anyLabelRx.Match($rest)
+            if (-not $nextLabel.Success) { break }
+            $pos = $pos + $nextLabel.Index + $nextLabel.Length
+        }
+        return @{ Path = $s.Path; Body = "" }
+    }
+    return $null
+}
+
 Write-Host ""
 Write-Host "  9-1. Tool annotation coverage (title / readOnlyHint / destructiveHint allow-list):" -ForegroundColor Cyan
 $builtRegistry = Join-Path $projectRoot "MCP-Server\build\tools\index.js"
@@ -1734,7 +1888,7 @@ elseif (-not ($annotationReport = Get-ToolAnnotationReport)) {
     Write-Check "Tool annotation coverage: built registry evaluates" $false "build/tools/index.js exists but registerRevitTools() failed to evaluate - run: node --input-type=module -e ""import('./MCP-Server/build/tools/index.js').then(m=>m.registerRevitTools())"""
 }
 else {
-    $destructiveAllowList = @('delete_element', 'dedup_detail_elements_in_view', 'curate_mep_sizes')
+    $destructiveAllowList = @('delete_element', 'dedup_detail_elements_in_view', 'curate_mep_sizes', 'import_excel_to_drafting_views')
     $missingTitle = @($annotationReport.missingTitle)
     $missingReadOnlyHint = @($annotationReport.missingReadOnlyHint)
     $badDestructive = @($annotationReport.badDestructive)
@@ -1762,6 +1916,184 @@ else {
     foreach ($res in $appReport.resources) {
         $detail = if (-not $res.ok) { "mime=$($res.mime) bytes=$($res.bytes) externalRefs=$($res.ext)" } else { "" }
         Write-Check "App '$($res.name)' -> $($res.uri) self-contained $($res.mime)" ([bool]$res.ok) $detail
+    }
+}
+
+Write-Host ""
+# 9-3: readOnlyHint honesty — the DECLARATION must agree with the C# that runs
+Write-Host "  9-3. readOnlyHint honesty (declared read-only -> handler must not commit or delete):" -ForegroundColor Cyan
+# Why this exists (issue #137): MCP-Server/src/tools/annotations.ts derives readOnlyHint from the
+# TOOL-NAME PREFIX (analyze_, check_, get_, diagnose_, ...) and never looks at the C# that runs.
+# 9-1, the only other annotation gate, checks that readOnlyHint is a BOOLEAN - not that it is TRUE.
+# So "declare readOnlyHint: true" was the single easiest way to pass every gate in this file, and
+# seven tools did exactly that while their handlers committed transactions and deleted elements
+# (analyze_floor_slopes overwrote the Comments parameter of every exterior floor in the model by
+# default). The 2026-10-12 run was 67 PASS / 0 FAIL with all seven live.
+#
+# This check cannot be satisfied by a declaration, because the declaration is its INPUT, not its
+# evidence: readOnlyHint=true is what puts a tool INTO the scanned set. The evidence is the C# the
+# dispatcher reaches for that tool - `new Transaction(` / `new TransactionGroup(` / `.Delete(`,
+# and whether that transaction is committed. Flipping a hint to true moves a tool under the lamp;
+# the only way out is for the handler to actually not persist anything, or for a named exemption
+# with a written reason to say why the evidence is misleading.
+if (-not (Test-Path $builtRegistry)) {
+    Write-Skip "readOnlyHint honesty" "Built registry missing - run npm run build in MCP-Server first"
+}
+elseif (-not ($readOnlyToolNames = Get-ReadOnlyToolNames)) {
+    # Built but not evaluable → FAIL, never SKIP: identical reasoning to 9-1's elseif branch.
+    Write-Check "readOnlyHint honesty: built registry evaluates" $false "build/tools/index.js exists but the readOnlyHint=true tool list could not be read - run: node --input-type=module -e ""import('./MCP-Server/build/tools/index.js').then(m=>m.registerRevitTools())"""
+}
+else {
+    $roSources = @(Get-DispatcherSource)
+    if ($roSources.Count -eq 0) {
+        Write-Check "readOnlyHint honesty: dispatcher sources readable" $false "No readable dispatcher source (MCP/Core/CommandExecutor.cs + MCP/Core/Commands/*.cs) - cannot verify, which is not the same as clean"
+    }
+    else {
+        $roRenameMap = Get-ToolNameRenameMap
+
+        # Exemption list — NAMED, REASONED exceptions to a still-live check, same shape and spirit
+        # as 7-15's $knownUnimplemented: the tool stays in the scanned set, the finding stays on the
+        # books, the reason prints as a WARN on EVERY run, and the entry FAILs the moment its stated
+        # condition stops holding. `Condition = 'rollback-only'` is the machine-checked part: the
+        # handler must still open a transaction that is never committed and is explicitly rolled
+        # back. If someone adds a Commit, or removes the transaction entirely, or the tool stops
+        # declaring readOnlyHint=true, the entry drifts and this check FAILs instead of quietly
+        # excusing whatever the handler does now.
+        $readOnlyWriteExempt = @(
+            @{ Name = 'diagnose_curtain_wall_elevation_direction'; Condition = 'rollback-only'; Reason = 'Builds a temporary ElevationMarker/ViewSection inside a transaction purely to read back the direction Revit would give it, then always calls trans.RollBack() (MCP/Core/Commands/CommandExecutor.CurtainWall.cs) - nothing is persisted, so readOnlyHint=true is honest. Exempted on the machine-checked condition that the transaction is still never committed.' },
+            @{ Name = 'diagnose_curtain_wall_elevation_directions'; Condition = 'rollback-only'; Reason = 'Same probe as the singular tool, batched over several curtain walls: temporary ElevationMarker/ViewSection inside a transaction that always ends in trans.RollBack() (MCP/Core/Commands/CommandExecutor.CurtainWall.cs). Nothing is persisted. Exempted on the machine-checked condition that the transaction is still never committed.' }
+        )
+        $readOnlyWriteExemptNames = @($readOnlyWriteExempt | ForEach-Object { $_.Name })
+
+        # Pass 1: resolve each declared-read-only tool to its dispatcher case body and collect the
+        # method names that body calls, so pass 2 can index only those methods.
+        $callRx = [regex]'(?:([A-Za-z_]\w*)\s*\.\s*)?([A-Za-z_]\w*)\s*\('
+        $csKeywords = @('if', 'else', 'while', 'for', 'foreach', 'switch', 'case', 'catch', 'return', 'new',
+            'using', 'lock', 'try', 'throw', 'do', 'fixed', 'checked', 'unchecked', 'typeof', 'sizeof',
+            'nameof', 'default', 'await', 'is', 'as', 'in', 'out', 'ref', 'when', 'where')
+        $roCaseBodies = @{}
+        $roCalledNames = @{}
+        $roUnresolved = @()
+        $neededMethodNames = New-Object 'System.Collections.Generic.HashSet[string]'
+        foreach ($t in $readOnlyToolNames) {
+            $mapped = $t
+            if ($roRenameMap.ContainsKey($t)) { $mapped = $roRenameMap[$t] }
+            $case = Get-DispatcherCaseBody $roSources $mapped
+            if ($null -eq $case) {
+                # No dispatcher case at all. 7-15 owns that defect class; a tool it already carries
+                # as a reasoned orphan must not be double-reported here (an unimplemented tool
+                # cannot commit anything). Anything else is a 7-15 FAIL already, and is reported
+                # here too rather than silently passing.
+                if ($knownUnimplementedNames -contains $t) { continue }
+                $roUnresolved += "$t : no case ""$mapped"" in any dispatcher file (7-15 reports this as an orphan)"
+                continue
+            }
+            $names = @()
+            foreach ($m in $callRx.Matches($case.Body)) {
+                $n = $m.Groups[2].Value
+                if ($csKeywords -contains $n) { continue }
+                $names += $n
+                [void]$neededMethodNames.Add($n)
+            }
+            $roCaseBodies[$t] = $case
+            $roCalledNames[$t] = @($names | Sort-Object -Unique)
+        }
+
+        # Pass 2: index the called methods, then scan each tool's handler for write constructs.
+        $methodBodies = Get-CSharpMethodBodies @($neededMethodNames)
+        $txnRx = [regex]'new\s+Transaction\s*\(|new\s+TransactionGroup\s*\('
+        $deleteRx = [regex]'\.Delete\s*\('
+        $commitRx = [regex]'\.Commit\s*\(|\.Assimilate\s*\('
+        $rollbackRx = [regex]'\.RollBack\s*\('
+
+        $roFindings = @{}
+        $roScanned = 0
+        foreach ($t in $readOnlyToolNames) {
+            if (-not $roCaseBodies.ContainsKey($t)) { continue }
+            $case = $roCaseBodies[$t]
+            $bodies = @(@{ Label = "case body @$([System.IO.Path]::GetFileName($case.Path))"; Body = $case.Body })
+            $resolvedMethods = 0
+            foreach ($n in $roCalledNames[$t]) {
+                if (-not $methodBodies.ContainsKey($n)) { continue }
+                foreach ($entry in $methodBodies[$n]) {
+                    $resolvedMethods++
+                    $bodies += @{ Label = "$($entry.Name)() @$([System.IO.Path]::GetFileName($entry.Path))"; Body = $entry.Body }
+                }
+            }
+            if ($resolvedMethods -eq 0) {
+                # The case exists but nothing it calls could be located. Reporting PASS here would
+                # be the exact failure this gate exists to prevent: a file that is never read
+                # produces the same green line as a file that passes.
+                $roUnresolved += "$t : case ""$($case.Path | Split-Path -Leaf)"" found but none of the methods it calls could be located in MCP/**/*.cs - handler unverified"
+                continue
+            }
+            $roScanned++
+            $sites = @()
+            $commitTotal = 0
+            $rollbackTotal = 0
+            foreach ($b in $bodies) {
+                $w = $txnRx.Matches($b.Body).Count + $deleteRx.Matches($b.Body).Count
+                if ($w -eq 0) { continue }
+                $c = $commitRx.Matches($b.Body).Count
+                $r = $rollbackRx.Matches($b.Body).Count
+                $commitTotal += $c
+                $rollbackTotal += $r
+                $sites += "$($b.Label): writeConstructs=$w commit=$c rollback=$r"
+            }
+            if ($sites.Count -eq 0) { continue }
+            if ($commitTotal -gt 0) { $verdict = 'commits a transaction' }
+            elseif ($rollbackTotal -gt 0) { $verdict = 'rollback-only' }
+            else { $verdict = 'opens a transaction with no visible commit or rollback' }
+            $roFindings[$t] = @{ Verdict = $verdict; Sites = $sites }
+        }
+
+        # Verdicts: a flagged tool FAILs unless an exemption entry covers it AND that entry's
+        # stated condition still holds. An exemption whose condition no longer holds - including
+        # one whose tool is no longer flagged at all, or no longer declares readOnlyHint=true -
+        # FAILs as drift rather than rotting into a permanent excuse.
+        $roViolations = @()
+        foreach ($t in ($roFindings.Keys | Sort-Object)) {
+            if ($readOnlyWriteExemptNames -contains $t) { continue }
+            $roViolations += "$t : $($roFindings[$t].Verdict) | $($roFindings[$t].Sites -join ' ; ')"
+        }
+        $roDrift = @()
+        $roExemptActive = @()
+        foreach ($e in $readOnlyWriteExempt) {
+            if ($readOnlyToolNames -notcontains $e.Name) {
+                $roDrift += "$($e.Name) : exempted here but it is no longer a registered readOnlyHint=true tool - remove the entry"
+                continue
+            }
+            if (-not $roFindings.ContainsKey($e.Name)) {
+                $roDrift += "$($e.Name) : exempted as $($e.Condition) but its handler no longer shows any write construct - the exemption is stale, remove the entry"
+                continue
+            }
+            if ($roFindings[$e.Name].Verdict -ne $e.Condition) {
+                $roDrift += "$($e.Name) : exempted as $($e.Condition) but its handler now $($roFindings[$e.Name].Verdict) - re-audit, then fix the handler or flip the declaration"
+                continue
+            }
+            $roExemptActive += $e
+        }
+
+        $roProblems = @()
+        if ($roViolations.Count -gt 0) { $roProblems += "$($roViolations.Count) tool(s) declare readOnlyHint=true but their handler persists model changes: $(($roViolations | ForEach-Object { ($_ -split ' : ')[0] }) -join ', ')" }
+        if ($roDrift.Count -gt 0) { $roProblems += "$($roDrift.Count) exemption entry(ies) drifted - update the `$readOnlyWriteExempt list in scripts/verify-qaqc.ps1" }
+        if ($roUnresolved.Count -gt 0) { $roProblems += "$($roUnresolved.Count) declared-read-only tool(s) could not be resolved to a C# handler (unverified, not clean)" }
+
+        Write-Check "All $($readOnlyToolNames.Count) readOnlyHint=true tools have non-persisting handlers ($roScanned handler(s) scanned, $($readOnlyWriteExempt.Count) exempted)" ($roProblems.Count -eq 0) `
+            $(if ($roProblems.Count -gt 0) { $roProblems -join ' | ' } else { "" })
+        if ($roViolations.Count -gt 0) {
+            $roViolations | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+        }
+        if ($roDrift.Count -gt 0) {
+            $roDrift | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+        }
+        if ($roUnresolved.Count -gt 0) {
+            $roUnresolved | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+        }
+
+        foreach ($e in $roExemptActive) {
+            Write-Warn "readOnlyHint write-construct exemption: $($e.Name) ($($e.Condition))" $e.Reason
+        }
     }
 }
 

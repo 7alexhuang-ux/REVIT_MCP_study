@@ -324,7 +324,7 @@ export const baseTools: Tool[] = [
     },
     {
         name: "analyze_floor_slopes",
-        description: "分析樓板頂面排水坡度：以 Solid→PlanarFace 法向量與 Z 軸夾角計算每片朝上頂面的坡度百分比，回傳每片樓板的 Min/Max 坡度，並可回寫至指定參數（預設 Comments）。未指定 elementIds 時自動收集 Function=Exterior 的樓板。",
+        description: "分析樓板頂面排水坡度：以 Solid→PlanarFace 法向量與 Z 軸夾角計算每片朝上頂面的坡度百分比，回傳每片樓板的 Min/Max 坡度。預設只分析、不寫入模型（不開 Transaction）；只有明確指定 paramName 時才會回寫該參數。未指定 elementIds 時自動收集 Function=Exterior 的樓板。",
         inputSchema: {
             type: "object",
             properties: {
@@ -335,7 +335,7 @@ export const baseTools: Tool[] = [
                 },
                 paramName: {
                     type: "string",
-                    description: "坡度回寫的目標參數名稱，預設 Comments"
+                    description: "選填。坡度回寫的目標參數名稱；**省略即完全不寫入模型**，分析結果仍會回傳。指定後會覆寫該參數既有內容：填 \"Comments\" 會寫入內建註解參數（BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS，不受 Revit 介面語言影響），其他名稱則以 LookupParameter 解析自訂／共用參數或本地化顯示名（例如「註解」）"
                 }
             }
         }

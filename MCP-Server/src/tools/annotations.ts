@@ -83,7 +83,11 @@ type ClassificationHints = Pick<ToolAnnotations, "readOnlyHint" | "destructiveHi
 
 /**
  * 精確工具名稱覆寫表：前綴規則無法正確反映實際行為的例外
- *   - export_*, import_excel_to_drafting_views：會讀取模型，但寫入的是外部檔案，非 Revit 模型本身 → readOnlyHint=true
+ *   - export_*：會讀取模型，但寫入的是外部檔案，非 Revit 模型本身 → readOnlyHint=true
+ *   - import_excel_to_drafting_views：方向相反，不是 export。它讀的是外部 Excel，寫的是 Revit 模型
+ *     （`overwrite ?? true`，同名 Drafting View 會先 `doc.Delete` 再重建；
+ *     MCP/Core/Commands/CommandExecutor.Legend.cs）。曾被歸類為「寫外部檔」而標成唯讀，那是把
+ *     export 的理由套在 import 上 → 現為 readOnlyHint=false + destructiveHint=true（issue #137）。
  *   - select_element, set_active_view, override_element_graphics, clear_element_override,
  *     colorize_clashes, set_category_visibility, hide_elements, unhide_elements：
  *     只異動環境／視圖狀態（選取、作用視圖、圖形覆寫、可見性），不異動 Revit 模型本身
@@ -95,9 +99,29 @@ export const OVERRIDE: Record<string, ClassificationHints> = {
     export_families: { readOnlyHint: true, destructiveHint: false },
     export_clash_report: { readOnlyHint: true, destructiveHint: false },
     export_smoke_review_excel: { readOnlyHint: true, destructiveHint: false },
-    import_excel_to_drafting_views: { readOnlyHint: true, destructiveHint: false },
+    // 讀外部 Excel、寫 Revit 模型：同名 Drafting View 預設先刪後建（overwrite 預設 true）→ 破壞性寫入
+    import_excel_to_drafting_views: { readOnlyHint: false, destructiveHint: true },
     // 讀模型、寫系統暫存圖檔（預設用完即刪），不異動 Revit 模型 → 同 export_* 歸類為唯讀
     capture_view_image: { readOnlyHint: true, destructiveHint: false },
+
+    // ── issue #137：前綴規則（analyze_ / check_ / get_）判為唯讀，但這些工具的 C# handler
+    //    在「預設參數」下就會開 Transaction 並 Commit。前綴本身仍由其他約 80 支工具倚賴，
+    //    因此逐支覆寫而不動 READONLY_PREFIXES。QA/QC 9-3 會以 C# handler 反查驗證這些宣稱。
+    //    附帶一致性說明：下面 override_element_graphics / clear_element_override /
+    //    colorize_clashes / hide_elements 之所以是 readOnlyHint=false，就是因為它們做的事
+    //    （圖形覆寫、可見性）正是這三支 check_* 預設會做的事。修正後兩組宣稱才一致。
+    // 預設 paramName 未指定時不再寫入；但明確給 paramName 時會回寫樓板參數 → 仍是寫入型工具
+    analyze_floor_slopes: { readOnlyHint: false, destructiveHint: false },
+    // colorizeViolations 預設 true：會覆寫牆的圖形（MCP/Core/CommandExecutor.cs）
+    check_exterior_wall_openings: { readOnlyHint: false, destructiveHint: false },
+    // colorize 預設 true：會複製視圖並上色（MCP/Core/Commands/CommandExecutor.SmokeExhaust.cs）
+    check_smoke_exhaust_windows: { readOnlyHint: false, destructiveHint: false },
+    // colorize 預設 true：同上，樓層有效開口版本
+    check_floor_effective_openings: { readOnlyHint: false, destructiveHint: false },
+    // 預設會清除舊標記（doc.Delete）並建立 FilledRegion 標示不足淨高處
+    check_stair_headroom: { readOnlyHint: false, destructiveHint: false },
+    // includeFinishLayers 預設 false，但只要帶入任一 default*Finish 就會寫入房間粉刷參數並建明細表
+    get_room_surface_areas: { readOnlyHint: false, destructiveHint: false },
 
     select_element: { readOnlyHint: false, destructiveHint: false },
     set_active_view: { readOnlyHint: false, destructiveHint: false },
