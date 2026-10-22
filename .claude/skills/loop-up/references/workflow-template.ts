@@ -65,7 +65,7 @@ async function runStage(stage: StageBrief, runAdvisorCount: { n: number }) {
   while (true) {
     attempt++;
     const implOut = await implement(brief);                     // Sonnet
-    const obs = await observe(implOut, stage.targetFiles);       // Haiku, quote-only —— 見角色表
+    const obs = await observe(implOut, stage.targetFiles);       // Sonnet, quote-only —— 見角色表
     const insp = await inspect(stage.acceptanceCriteria, obs);   // Fable/Opus
     appendObserverLog({ stageId: stage.stageId, attempt, tier, implOut, obs, insp }); // → Observer 記錄格式
 

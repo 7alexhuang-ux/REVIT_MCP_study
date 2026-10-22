@@ -46,7 +46,7 @@ orchestrator 在建立 Stage Plan **之前**，必須先明確判定以下四項
 |---|---|---|---|---|---|---|
 | **orchestrator** | Fable | （當前 session，或 `Agent({model:"fable"})`） | 把使用者需求拆成有序 Stage Plan；每個 Stage 定義「做什麼」＋「怎麼算過」（驗收條件必須可由 inspector-ops 自動判定）；決定何時進下一階段、何時觸發修正迴圈、何時升級 advisor | 使用者原始需求＋repo 現況 | Stage Plan（清單）＋ 逐階段 go/no-go 決定 | 只能規劃／審定／組裝 prompt；**不可直接改檔案**——要改要透過 implementer |
 | **implementer** | Sonnet | `general-purpose` 或 `claude`（需要 Write/Edit/Bash） | 執行「當前 Stage Brief」描述的變更 | Stage Brief（首輪＝orchestrator 原始描述；重試輪＝套用 Correction Preface 後的版本） | 變更本身（diff）＋ implementer 自陳完成了什麼 | Read/Write/Edit/Grep/Glob/Bash，範圍限於 repo working tree；**禁止 `git commit` / `git push` / 任何發佈指令**（見安全護欄） |
-| **observer** | **Haiku**（quote-only 契約，見下） | `Explore`（唯讀，`model: "haiku"` 覆寫） | implementer 每輪跑完後，**獨立於 implementer 的自陳**，只憑 `git diff`／`git status`／執行結果的原文摘錄重建一份結構化紀錄；**不做任何斷言或判斷** | implementer 該輪的目標範圍（哪些檔案理論上會動）＋ repo 現況 | 一則結構化 observation record（見「Observer 記錄格式」），內容全部是指令輸出的引用 | Read/Grep/Glob/Bash **僅限唯讀指令**（`git diff`、`git status`、`git log`、`ls` 等）；不得 edit；輸出禁止評價性語句（「看起來完成了」「應該沒問題」一律不合格） |
+| **observer** | **Sonnet**（quote-only 契約，見下） | `Explore`（唯讀，`model: "sonnet"` 覆寫） | implementer 每輪跑完後，**獨立於 implementer 的自陳**，只憑 `git diff`／`git status`／執行結果的原文摘錄重建一份結構化紀錄；**不做任何斷言或判斷** | implementer 該輪的目標範圍（哪些檔案理論上會動）＋ repo 現況 | 一則結構化 observation record（見「Observer 記錄格式」），內容全部是指令輸出的引用 | Read/Grep/Glob/Bash **僅限唯讀指令**（`git diff`、`git status`、`git log`、`ls` 等）；不得 edit；輸出禁止評價性語句（「看起來完成了」「應該沒問題」一律不合格） |
 | **inspector-ops** | **Fable 或 Opus** | `Plan`（唯讀、架構師型，`model` 覆寫為 `fable`/`opus`） | 對照 Stage 的驗收條件，**唯讀**檢查 implementer 的產出是否真的達標（跑測試／跑 QA 腳本／比對規格），輸出結構化 findings | Stage 驗收條件＋ implementer 該輪的變更＋ observer 的一手紀錄 | `InspectorOutput`（見 Workflow Script 範本）：`pass`／`positiveOk`／`negativeOk`／`noRegression`／`findings[]` | Read/Grep/Bash（**唯讀指令**，可執行測試/建置/驗證腳本本身，但不得修改任何被稽核的產物） |
 | **advisor** | Fable | `Plan`（架構師型，天生沒有 Edit/Write） | 只在同一 Stage 的 Tier A 修正**連續失敗 3 次**後才被叫入場；讀完整個失敗歷程，判斷問題出在 Stage Brief 太粗還是 Stage Plan 本身切錯／漏了前置階段，輸出修正版本——**只提修正建議，不動手改 code** | 該 Stage 完整失敗歷程（Brief／findings／observer log） | 修正後的 Stage Brief 或修正後的 Stage Plan（含理由） | Read/Grep/Glob/Bash（唯讀）＋ 重寫 Stage Brief/Plan 文字本身；**不可直接編輯被審對象的程式碼** |
 
@@ -67,10 +67,15 @@ inspector 看到了、在 summary 描述了，卻沒判 blocker，Stage 照樣 P
 
 - **orchestrator = Fable**：規劃階段最需要的是預判技術陷阱的能力，讓 Stage Plan 一開始就少踩坑，比事後靠迴圈修正更省。
 - **implementer = Sonnet**：實際動手改 code 的執行力已經足夠，不是這個流程的風險瓶頸，不需要為此加碼模型。
-- **observer 降到 Haiku，但契約要跟著改**：observer 只准引用「實際指令輸出」，**不准做任何斷言或判斷**——會不會 PASS 一律留給
-  inspector。這是**結構性防呆，不是信任模型**：依本 skill 試跑時的觀察，8 支 agent 中唯一產出編造內容的，是工具呼叫數為 0 的
-  那一支；其餘 7 支只要有實際工具呼叫，內容就都正確。換句話說，失敗成因是「被要求斷言它無法查證的事」，不是模型能力不足。
-  把 observer 的職責限縮成「純引用」，就從結構上消除這個失敗模式，不必用更貴的模型硬扛。
+- **observer = Sonnet，契約是「只准引用」**：observer 只准引用「實際指令輸出」，**不准做任何斷言或判斷**——會不會 PASS
+  一律留給 inspector。職責限縮成純引用，是為了消除「被要求斷言它無法查證的事」這個失敗模式。
+  ⚠️ **但 quote-only 契約管的是形式，不是真假，所以它不足以支撐把 observer 降級。** 本檔原本在這裡寫著一個更強的說法，
+  大意是「只要有實際工具呼叫，內容就都正確」。該說法已被本 skill 自己的 `runs.jsonl` 推翻：run
+  `loopup-2026-08-28-issues` 的 S1 attempt 2，Haiku observer **在已經做了 11 次工具呼叫的情況下**編造了一整段 `sed` 輸出——
+  它聲稱的兩行程式碼內容與實際檔案不符，行號還跟它自己訊息裡的 grep 結果互相矛盾，是 orchestrator 交叉比對才攔下來的。
+  那次 run 從 S2 起把 observer 換成 Sonnet，其餘 6 個 Stage 未再出現編造。
+  紀錄見 `runs.jsonl` 的 `calibration.observer_model_downgrade_refuted`，對應 issue #129。
+  **教訓：工具呼叫數是風險信號，不是可信度證明。**
 - **inspector-ops 升級到 Fable 或 Opus**：這是後果不對稱的位置。orchestrator 規劃錯了，後面的 inspector 還擋得下來、可回復；
   **inspector 自己錯了就是假綠燈，沒有任何下游角色會發現**——它是最後一道防線。最後一道防線不該配最弱的模型。
   ⚠️ **舊版配置（planner=Fable、inspector=Sonnet）在這一點上是反的，不要沿用。**
@@ -102,7 +107,7 @@ inspector 看到了、在 summary 描述了，卻沒判 blocker，Stage 照樣 P
 1. orchestrator 把 Stage Brief 交給 implementer（首輪用 `Agent` 新開；重試輪用 `SendMessage` 接續同一個 implementer agent，
    保留上下文，而不是每次重開一個不知道歷史的新 agent）。
 2. implementer 執行變更，回報自己做了什麼。
-3. observer（Haiku，quote-only）**獨立**跑一遍（不讀 implementer 的自陳當作事實來源），只憑 `git diff`／檔案系統證據，寫一則
+3. observer（Sonnet，quote-only）**獨立**跑一遍（不讀 implementer 的自陳當作事實來源），只憑 `git diff`／檔案系統證據，寫一則
    observation record。
 4. 進入「Inspection Gate」。
 
@@ -255,7 +260,7 @@ async function runStage(stage: StageBrief, runAdvisorCount: { n: number }) {
   while (true) {
     attempt++;
     const implOut = await implement(brief);                     // Sonnet
-    const obs = await observe(implOut, stage.targetFiles);       // Haiku, quote-only —— 見角色表
+    const obs = await observe(implOut, stage.targetFiles);       // Sonnet, quote-only —— 見角色表
     const insp = await inspect(stage.acceptanceCriteria, obs);   // Fable/Opus
     appendObserverLog({ stageId: stage.stageId, attempt, tier, implOut, obs, insp }); // → Observer 記錄格式
 
@@ -314,7 +319,7 @@ Observer 的紀錄是**結構化、逐動作**的，且只憑一手證據（`git
 | `evidence_ref` | 佐證來源（`git diff` hash、指令輸出摘錄、inspector `checkId`） |
 | `notes` | 其他 |
 
-**Quote-only 契約**（observer 能降到 Haiku 的前提，動了這條契約，降模型的正當性就不成立）：`summary` 欄位只能是指令輸出的引用或
+**Quote-only 契約**（管的是**形式**，不是真假——引用格式完全正確、但引用內容是編造的，契約照樣過，見上方 `runs.jsonl` 反例。所以它是必要條件，不是充分條件）：`summary` 欄位只能是指令輸出的引用或
 忠實摘錄，例如「`git diff` 顯示 3 個檔案有變更：a.ts +12/-3, b.ts +5/-0, c.ts +0/-8」。**禁止**任何評價性語句——「看起來完成了」
 「應該沒問題」「符合預期」一類的判斷語言一律違反契約，要重寫。PASS/FAIL 的判斷完全不是 observer 的職責，那是 inspector 的事。
 
@@ -376,7 +381,7 @@ Stage Plan 裡的每個 Stage 是否都 `pass: true`。
 | 指標 | 說明 |
 |---|---|
 | 各角色 token 用量 | orchestrator/implementer/observer/inspector-ops/advisor 各自累積用了多少 token |
-| 各角色工具呼叫數 | 每個角色每輪實際呼叫了幾次工具（0 次工具呼叫卻要斷言事實，是已知的編造風險信號——見 observer 降模型的依據） |
+| 各角色工具呼叫數 | 每個角色每輪實際呼叫了幾次工具。0 次工具呼叫卻要斷言事實是風險信號，但**反過來不成立**——`runs.jsonl` 記錄過 11 次工具呼叫仍編造內容的案例，工具呼叫數不能當可信度證明 |
 | 每輪是否 PASS | 每個 attempt 的 `InspectorOutput.pass` |
 | 失敗 finding 的分類 | 見下——這是這個階段最重要的產出 |
 
