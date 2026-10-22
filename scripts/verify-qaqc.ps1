@@ -895,6 +895,43 @@ function Get-ToolNames {
     return @($result | Where-Object { $_ -match '\S' })
 }
 
+function Get-ToolDescriptions {
+    # Same built registry as Get-ToolCount / Get-ToolNames, but keyed name -> description.
+    # Transported as ONE JSON object rather than name<TAB>description lines on purpose: one
+    # registered description legitimately contains newlines (create_beams_from_dwg) and several
+    # contain quotes, so a line-oriented transport would truncate a description at its first line
+    # break and the comparison would then "pass" on a prefix.
+    # Returns $null when the map cannot be read, so the caller can distinguish "cannot verify"
+    # from "verified clean" - those are not the same result.
+    $nodeScript = "import('./MCP-Server/build/tools/index.js').then(m=>{const o={};for(const t of m.registerRevitTools()){o[t.name]=(typeof t.description==='string')?t.description:null;}console.log(JSON.stringify(o));}).catch(()=>process.exit(2))"
+    Push-Location $projectRoot
+    $result = & node --input-type=module -e $nodeScript 2>$null
+    $exit = $LASTEXITCODE
+    Pop-Location
+    if ($exit -ne 0 -or -not $result) { return $null }
+    try { $obj = (($result -join '') | ConvertFrom-Json) } catch { return $null }
+    if (-not $obj) { return $null }
+    $map = @{}
+    foreach ($p in $obj.PSObject.Properties) { $map[$p.Name] = $p.Value }
+    if ($map.Count -eq 0) { return $null }
+    return $map
+}
+
+function Get-TextDivergence {
+    # A LOCATOR, not a diff: the index of the first differing character plus a short window from
+    # each side. Deliberately not a hash and not a truncated prefix - registered descriptions run
+    # past 4000 characters (create_duct_system), so a one-word edit in the TAIL has to stay
+    # findable without dumping two 4000-character blobs into the report.
+    param([string]$Expected, [string]$Actual, [int]$Window = 48)
+    $n = [Math]::Min($Expected.Length, $Actual.Length)
+    $i = 0
+    while ($i -lt $n -and $Expected[$i] -eq $Actual[$i]) { $i++ }
+    $from = [Math]::Max(0, $i - 12)
+    $exp = $(if ($from -ge $Expected.Length) { '<string ends here>' } else { $Expected.Substring($from, [Math]::Min($Window, $Expected.Length - $from)) })
+    $act = $(if ($from -ge $Actual.Length) { '<string ends here>' } else { $Actual.Substring($from, [Math]::Min($Window, $Actual.Length - $from)) })
+    return "diverges at char $i (runtime len $($Expected.Length), card len $($Actual.Length)) | runtime: ...$exp | card: ...$act"
+}
+
 # ─────────────────────────────────────────────
 # Shared C#-dispatcher source helpers — used by BOTH 7-15 (registered tool -> dispatcher case)
 # and 9-3 (readOnlyHint honesty). Factored out deliberately: both checks have to agree on three
@@ -1512,14 +1549,21 @@ if ($deadPatterns.Count -gt 0) { $deadPatterns | ForEach-Object { Write-Host "  
 Write-Host ""
 # 7-14: Real tools <-> BIM_MCP tools-index
 Write-Host ""
-Write-Host "  7-14. Real tools -> BIM_MCP tools-index (exactly one card each):" -ForegroundColor Cyan
+Write-Host "  7-14. Real tools -> BIM_MCP tools-index (exactly one card each, carrying the real description):" -ForegroundColor Cyan
 # Domain (7-9) and Skill (7-10) were enumerated against the hub; Tool - the largest layer - was not.
 # 7-1 only checks that the tool-count NUMBER is stated correctly; a correct count is compatible with zero
 # tools being documented. This check closes that gap by enumerating, not counting.
 $toolsIndex = Join-Path $projectRoot "docs\BIM_MCP\reference\tools-index.html"
 $toolNames  = Get-ToolNames
-if (-not $toolNames) {
-    Write-Skip "tools-index enumeration" "runtime tool registry unavailable (run npm run build)"
+$builtToolRegistry = Join-Path $projectRoot "MCP-Server\build\tools\index.js"
+if (-not $toolNames -and -not (Test-Path -LiteralPath $builtToolRegistry)) {
+    Write-Skip "tools-index enumeration" "runtime tool registry not built (run npm run build in MCP-Server)"
+}
+elseif (-not $toolNames) {
+    # Built but not evaluable -> FAIL, never SKIP. Same reasoning as 9-1 / 9-3: a registry that
+    # exists on disk and still cannot be read leaves the page UNVERIFIED, and unverified must not
+    # report the same green as verified.
+    Write-Check "tools-index enumeration: built registry evaluates" $false "MCP-Server/build/tools/index.js exists but registerRevitTools() yielded no tool names - run: node --input-type=module -e ""import('./MCP-Server/build/tools/index.js').then(m=>m.registerRevitTools())"""
 }
 elseif (-not (Test-Path -LiteralPath $toolsIndex)) {
     Write-Check "Every tool has exactly one tools-index card" $false "docs/BIM_MCP/reference/tools-index.html is missing"
@@ -1575,6 +1619,73 @@ else {
     Write-Check "Every one of $($toolNames.Count) tools has exactly one tools-index card, and the page's own tallies agree" ($cardProblems.Count -eq 0) `
         $(if ($cardProblems.Count -gt 0) { "$($cardProblems.Count) problem(s). Regenerate the page from registerRevitTools() rather than hand-editing." } else { "" })
     if ($cardProblems.Count -gt 0) { $cardProblems | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow } }
+
+    # --- card description <-> runtime description ------------------------------------------------
+    # Everything above this line counts and tallies cards; none of it ever READ one. A tool's
+    # description can be rewritten in MCP-Server/src/tools/*.ts while its card keeps the old prose,
+    # and every check still reports PASS: the card is present, present exactly once, and every
+    # tally still adds up. That is the shape CLAUDE.md warns about one level higher ("a correct
+    # count is fully compatible with zero items being documented") reproduced one level down - a
+    # present card is fully compatible with a WRONG card. It has bitten three times already
+    # (analyze_floor_slopes when its default-write behaviour was fixed; create_wall and
+    # create_floor when their level/type selection was hardened), each time with 7-14 green, and
+    # the first run of this comparison found 45 drifted cards nobody had noticed. So the page's
+    # text is now evidence, not decoration.
+    $toolDescriptions = Get-ToolDescriptions
+    if (-not $toolDescriptions) {
+        # $toolNames came out of the same built registry a few lines up, so the registry IS
+        # evaluable; a missing description map therefore means "could not verify". FAIL, never
+        # SKIP - identical reasoning to 9-1 / 9-3.
+        Write-Check "tools-index descriptions: runtime descriptions readable" $false "registerRevitTools() yielded $($toolNames.Count) tool names but no description map - run: node --input-type=module -e ""import('./MCP-Server/build/tools/index.js').then(m=>m.registerRevitTools())"""
+    }
+    else {
+        $descProblems = @()
+        $wsCollapseRx = [regex]'\s+'
+        # Slice the page at every data-tool= boundary and take the tool-desc found INSIDE that
+        # slice, instead of matching data-tool and tool-desc together in one lazy regex: a card
+        # that lost its tool-desc would otherwise borrow the NEXT card's and compare clean.
+        $cardBlockRx = [regex]'(?s)data-tool="([^"]+)"(.*?)(?=data-tool="|\z)'
+        $toolDescRx = [regex]'(?s)<div class="tool-desc">(.*?)</div>'
+        $cardDesc = @{}
+        foreach ($m in $cardBlockRx.Matches($indexText)) {
+            $dm = $toolDescRx.Match($m.Groups[2].Value)
+            $cardDesc[$m.Groups[1].Value] = $(if ($dm.Success) { $dm.Groups[1].Value } else { $null })
+        }
+        foreach ($t in $toolNames) {
+            $rawCard = $cardDesc[$t]
+            $runtimeDesc = $toolDescriptions[$t]
+            if ($null -eq $runtimeDesc) {
+                $descProblems += "$t : runtime description is missing or not a string"
+                continue
+            }
+            if ($null -eq $rawCard) {
+                $descProblems += "$t : card carries no <div class=""tool-desc"">"
+                continue
+            }
+            # The description is DATA the page quotes, carried as escaped plain text. Raw markup
+            # inside the card would hand the page a way to say something the registry never said
+            # while still normalising to a matching string, so markup is REJECTED rather than
+            # stripped. A real angle bracket in a description survives this: escaped as &lt; / &gt;
+            # it carries no literal '<'.
+            if ($rawCard.Contains('<')) {
+                $descProblems += "$t : card description contains markup - carry the runtime description as escaped plain text"
+                continue
+            }
+            # HtmlDecode, not a hand-rolled replace chain: it covers every entity the page actually
+            # uses (&#x27; &quot; &lt; &gt;) plus &amp;, and it gets the ORDER right - unescaping
+            # &amp; before the rest is exactly how "&amp;lt;" becomes "<" and a mismatch hides.
+            # Then collapse whitespace runs and trim, so re-wrapping the HTML is not a failure
+            # while a changed word is.
+            $cardNorm = $wsCollapseRx.Replace([System.Net.WebUtility]::HtmlDecode($rawCard), ' ').Trim()
+            $runtimeNorm = $wsCollapseRx.Replace($runtimeDesc, ' ').Trim()
+            if ($cardNorm -cne $runtimeNorm) {
+                $descProblems += "$t : $(Get-TextDivergence -Expected $runtimeNorm -Actual $cardNorm)"
+            }
+        }
+        Write-Check "All $($toolNames.Count) tools-index card descriptions match the runtime description" ($descProblems.Count -eq 0) `
+            $(if ($descProblems.Count -gt 0) { "$($descProblems.Count) card description(s) drifted from registerRevitTools(). Regenerate the page from the registry rather than rewriting the prose by hand." } else { "" })
+        if ($descProblems.Count -gt 0) { $descProblems | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow } }
+    }
 }
 
 Write-Host ""

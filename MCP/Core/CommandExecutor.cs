@@ -31,22 +31,77 @@ namespace RevitMCP.Core
         }
 
         /// <summary>
-        /// 共用方法：查找樓層
+        /// 共用方法：查找樓層（確定性比對階梯）
+        ///
+        /// 1. 名稱完全相同
+        /// 2. 名稱忽略大小寫相同
+        /// 3. 僅當「恰好一個」樓層名稱包含 levelName 時才採用；多個候選就拋例外並列出候選名單
+        ///
+        /// 舊版用 l.Name == levelName || l.Name.Contains(levelName) || levelName.Contains(l.Name)
+        /// 做雙向模糊比對，會讓 "1F" 命中 "B1F"、"L1" 命中 "L10"，而且先命中者勝
+        /// （取決於 FilteredElementCollector 的順序），屬於單純的 bug，不是刻意的寬鬆比對。
         /// </summary>
-        private Level FindLevel(Document doc, string levelName, bool useFirstIfNotFound = true)
+        /// <param name="useFirstIfNotFound">
+        /// 找不到時是否退回最低樓層。各呼叫端的既有預設值刻意不動（改動的影響面無法在沒有
+        /// 實機 Revit 的情況下驗證），這一輪只負責「讓退路不再靜默」。
+        /// </param>
+        /// <param name="fellBackToLowest">
+        /// 最低樓層退路真的被觸發時為 true。呼叫端必須把這件事回報給使用者，
+        /// 不可讓打錯的樓層名稱看起來像成功。
+        /// </param>
+        private Level FindLevel(Document doc, string levelName, bool useFirstIfNotFound, out bool fellBackToLowest)
         {
-            var level = new FilteredElementCollector(doc)
+            fellBackToLowest = false;
+
+            var levels = new FilteredElementCollector(doc)
                 .OfClass(typeof(Level))
                 .Cast<Level>()
-                .FirstOrDefault(l => l.Name == levelName || l.Name.Contains(levelName) || levelName.Contains(l.Name));
+                .ToList();
+
+            Level level = null;
+
+            if (!string.IsNullOrEmpty(levelName))
+            {
+                // 階梯 1：完全相符
+                level = levels.FirstOrDefault(l => l.Name == levelName);
+
+                // 階梯 2：忽略大小寫完全相符
+                if (level == null)
+                {
+                    level = levels.FirstOrDefault(l => string.Equals(l.Name, levelName, StringComparison.OrdinalIgnoreCase));
+                }
+
+                // 階梯 3：唯一的部分相符才算命中；曖昧就報錯並列出候選
+                if (level == null)
+                {
+                    var partial = levels
+                        .Where(l => l.Name.IndexOf(levelName, StringComparison.OrdinalIgnoreCase) >= 0)
+                        .ToList();
+
+                    if (partial.Count == 1)
+                    {
+                        level = partial[0];
+                    }
+                    else if (partial.Count > 1)
+                    {
+                        throw new Exception(
+                            $"樓層名稱「{levelName}」同時符合多個樓層，無法判定：" +
+                            string.Join("、", partial.Select(l => l.Name).OrderBy(n => n)) +
+                            "。請改用完整樓層名稱。");
+                    }
+                }
+            }
 
             if (level == null && useFirstIfNotFound)
             {
-                level = new FilteredElementCollector(doc)
-                    .OfClass(typeof(Level))
-                    .Cast<Level>()
-                    .OrderBy(l => l.Elevation)
-                    .FirstOrDefault();
+                level = levels.OrderBy(l => l.Elevation).FirstOrDefault();
+
+                if (level != null)
+                {
+                    fellBackToLowest = true;
+                    // Logger 目前沒有 Warning()，以 [WARN] 前綴寫入 Info 以免靜默。
+                    Logger.Info($"[WARN] FindLevel: 你指定的樓層「{levelName}」找不到，已改用最低樓層「{level.Name}」。");
+                }
             }
 
             if (level == null)
@@ -55,6 +110,17 @@ namespace RevitMCP.Core
             }
 
             return level;
+        }
+
+        /// <summary>
+        /// 共用方法：查找樓層（不回報退路的相容多載）。
+        /// 既有呼叫端沿用此簽章，行為與 out 版本完全相同；新寫的程式若會用到
+        /// useFirstIfNotFound 的退路，請改用 out 版本並把退路回報給使用者。
+        /// </summary>
+        private Level FindLevel(Document doc, string levelName, bool useFirstIfNotFound = true)
+        {
+            bool ignored;
+            return FindLevel(doc, levelName, useFirstIfNotFound, out ignored);
         }
 
         /// <summary>
@@ -927,21 +993,98 @@ namespace RevitMCP.Core
         #region 命令實作
 
         /// <summary>
-        /// 建立牆
+        /// 建立牆（issue #144）
+        ///
+        /// 舊版有兩個各自獨立的缺陷：
+        /// (1) 樓層用未排序的 FirstOrDefault() 隨便抓一個，連「最低樓層」都不是；
+        /// (2) TS schema 宣告的 wallType 從頭到尾沒有被讀取——Wall.Create(doc, line, level.Id, false)
+        ///     用的是文件預設牆類型，使用者指定的類型被靜默忽略，且回傳值裡看不出來。
+        ///
+        /// 現在：可明確指定 levelId/levelName 與 wallTypeId/wallType（同時給 id 與名稱時必須一致）；
+        /// 未指定樓層時改用目前平面視圖的樓層，沒有樓層就報錯而不是亂抓；限定基本牆（拒絕帷幕／堆疊牆）；
+        /// 基準線放在選定樓層標高、基準偏移為零、定位線為牆中心線；並一律回報實際採用的樓層與牆類型。
+        ///
+        /// 來源 fork：raychiu/fix/create-wall-level-type（@ray92chiu-png）
         /// </summary>
         private object CreateWall(JObject parameters)
         {
             Document doc = _uiApp.ActiveUIDocument.Document;
 
-            double startX = parameters["startX"]?.Value<double>() ?? 0;
-            double startY = parameters["startY"]?.Value<double>() ?? 0;
-            double endX = parameters["endX"]?.Value<double>() ?? 0;
-            double endY = parameters["endY"]?.Value<double>() ?? 0;
+            foreach (string key in new[] { "startX", "startY", "endX", "endY" })
+                if (parameters[key] == null || parameters[key].Type == JTokenType.Null)
+                    throw new ArgumentException($"缺少牆座標: {key}");
+
+            double startX = parameters["startX"].Value<double>();
+            double startY = parameters["startY"].Value<double>();
+            double endX = parameters["endX"].Value<double>();
+            double endY = parameters["endY"].Value<double>();
             double height = parameters["height"]?.Value<double>() ?? 3000;
 
-            // 轉換為英尺 (Revit 內部單位)
-            XYZ start = new XYZ(startX / 304.8, startY / 304.8, 0);
-            XYZ end = new XYZ(endX / 304.8, endY / 304.8, 0);
+            if (new[] { startX, startY, endX, endY, height }.Any(v => double.IsNaN(v) || double.IsInfinity(v)) || height <= 0)
+                throw new ArgumentException("牆座標必須為有限數值，高度必須大於零。");
+
+            // 絕不靜默退回「專案的第一個樓層」。
+            IdType? levelId = parameters["levelId"]?.Value<IdType>();
+            string levelName = parameters["levelName"]?.Value<string>();
+            string levelSource;
+            Level level;
+            if (levelId.HasValue)
+            {
+                level = doc.GetElement(new ElementId(levelId.Value)) as Level;
+                if (level == null || (levelName != null && level.Name != levelName))
+                    throw new ArgumentException("指定的樓層 ID 無效或與樓層名稱不一致。");
+                levelSource = "levelId";
+            }
+            else if (levelName != null)
+            {
+                var levelMatches = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
+                    .Where(l => l.Name == levelName).ToList();
+                if (levelMatches.Count != 1)
+                    throw new ArgumentException($"樓層名稱必須唯一且存在: {levelName}");
+                level = levelMatches[0];
+                levelSource = "levelName";
+            }
+            else
+            {
+                level = (doc.ActiveView as ViewPlan)?.GenLevel;
+                if (level == null)
+                    throw new ArgumentException("目前視圖沒有基準樓層；請指定 levelId 或 levelName。");
+                levelSource = "activeViewGenLevel";
+            }
+
+            IdType? wallTypeId = parameters["wallTypeId"]?.Value<IdType>();
+            string wallTypeName = parameters["wallType"]?.Value<string>();
+            string wallTypeSource;
+            WallType wallType;
+            if (wallTypeId.HasValue)
+            {
+                wallType = doc.GetElement(new ElementId(wallTypeId.Value)) as WallType;
+                if (wallType == null || (wallTypeName != null && wallType.Name != wallTypeName))
+                    throw new ArgumentException("指定的牆類型 ID 無效或與類型名稱不一致。");
+                wallTypeSource = "wallTypeId";
+            }
+            else if (wallTypeName != null)
+            {
+                var typeMatches = new FilteredElementCollector(doc).OfClass(typeof(WallType)).Cast<WallType>()
+                    .Where(t => t.Name == wallTypeName && t.Kind == WallKind.Basic).ToList();
+                if (typeMatches.Count != 1)
+                    throw new ArgumentException($"基本牆類型名稱必須唯一且存在: {wallTypeName}");
+                wallType = typeMatches[0];
+                wallTypeSource = "wallType";
+            }
+            else
+            {
+                wallType = doc.GetElement(doc.GetDefaultElementTypeId(ElementTypeGroup.WallType)) as WallType;
+                wallTypeSource = "projectDefault";
+            }
+            if (wallType == null || wallType.Kind != WallKind.Basic)
+                throw new ArgumentException("請指定基本牆類型；此工具不建立帷幕牆或堆疊牆。");
+
+            // 模型 XY 為公釐；基準線放在選定樓層的標高，基準偏移為零。
+            XYZ start = new XYZ(startX / 304.8, startY / 304.8, level.Elevation);
+            XYZ end = new XYZ(endX / 304.8, endY / 304.8, level.Elevation);
+            if (start.DistanceTo(end) <= _uiApp.Application.ShortCurveTolerance)
+                throw new ArgumentException("牆長度小於 Revit 最短曲線容許值。");
 
             using (Transaction trans = new Transaction(doc, "建立牆"))
             {
@@ -950,33 +1093,27 @@ namespace RevitMCP.Core
                 // 建立線
                 Line line = Line.CreateBound(start, end);
 
-                // 取得預設樓層
-                Level level = new FilteredElementCollector(doc)
-                    .OfClass(typeof(Level))
-                    .Cast<Level>()
-                    .FirstOrDefault();
+                Wall wall = Wall.Create(doc, line, wallType.Id, level.Id, height / 304.8, 0, false, false);
 
-                if (level == null)
-                {
-                    throw new Exception("找不到樓層");
-                }
+                // 定位線 = 牆中心線
+                Parameter keyRef = wall.get_Parameter(BuiltInParameter.WALL_KEY_REF_PARAM);
+                if (keyRef != null && !keyRef.IsReadOnly) keyRef.Set(0);
 
-                // 建立牆
-                Wall wall = Wall.Create(doc, line, level.Id, false);
-                
-                // 設定高度
-                Parameter heightParam = wall.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM);
-                if (heightParam != null && !heightParam.IsReadOnly)
-                {
-                    heightParam.Set(height / 304.8);
-                }
-
-                trans.Commit();
+                if (trans.Commit() != TransactionStatus.Committed)
+                    throw new InvalidOperationException("建立牆未提交；請檢查 Revit 錯誤訊息，勿自動重試。");
 
                 return new
                 {
                     ElementId = wall.Id.GetIdValue(),
-                    Message = $"成功建立牆，ID: {wall.Id.GetIdValue()}"
+                    LevelId = level.Id.GetIdValue(),
+                    LevelName = level.Name,
+                    LevelSource = levelSource,
+                    WallTypeId = wallType.Id.GetIdValue(),
+                    WallTypeName = wallType.Name,
+                    WallTypeSource = wallTypeSource,
+                    BaseElevationMm = level.Elevation * 304.8,
+                    HeightMm = height,
+                    Message = $"成功建立牆，ID: {wall.Id.GetIdValue()}（樓層 {level.Name}／類型 {wallType.Name}）"
                 };
             }
         }
@@ -1097,14 +1234,20 @@ namespace RevitMCP.Core
 
         /// <summary>
         /// 建立樓板
+        ///
+        /// 修正（與 issue #144 同一類缺陷）：TS schema 宣告的 floorType 原本沒有被讀取，
+        /// 型別一律用 FloorType…FirstOrDefault() 隨便抓；樓層找不到時 FindLevel 的最低樓層
+        /// 退路也是靜默的。現在：指定了就必須命中（找不到或重名都報錯），
+        /// 沒指定則用專案預設並把實際採用者與退路一併回報。
         /// </summary>
         private object CreateFloor(JObject parameters)
         {
             Document doc = _uiApp.ActiveUIDocument.Document;
-            
+
             var pointsArray = parameters["points"] as JArray;
             string levelName = parameters["levelName"]?.Value<string>() ?? "Level 1";
-            
+            string floorTypeName = parameters["floorType"]?.Value<string>();
+
             if (pointsArray == null || pointsArray.Count < 3)
             {
                 throw new Exception("需要至少 3 個點來建立樓板");
@@ -1114,8 +1257,9 @@ namespace RevitMCP.Core
             {
                 trans.Start();
 
-                // 取得樓層
-                Level level = FindLevel(doc, levelName, true);
+                // 取得樓層（退路觸發時必須回報，不可讓打錯的樓層名稱看起來像成功）
+                bool levelFellBack;
+                Level level = FindLevel(doc, levelName, true, out levelFellBack);
 
                 // 建立邊界曲線
                 var points = pointsArray.Select(p => new XYZ(
@@ -1124,15 +1268,37 @@ namespace RevitMCP.Core
                     0
                 )).ToList();
 
-                // 取得預設樓板類型
-                FloorType floorType = new FilteredElementCollector(doc)
-                    .OfClass(typeof(FloorType))
-                    .Cast<FloorType>()
-                    .FirstOrDefault();
+                // 取得樓板類型：指定了就必須命中，沒指定才用專案預設
+                FloorType floorType;
+                string floorTypeSource;
+                if (!string.IsNullOrEmpty(floorTypeName))
+                {
+                    var typeMatches = new FilteredElementCollector(doc)
+                        .OfClass(typeof(FloorType))
+                        .Cast<FloorType>()
+                        .Where(ft => ft.Name == floorTypeName || (ft.FamilyName + ": " + ft.Name) == floorTypeName)
+                        .ToList();
+
+                    if (typeMatches.Count == 0)
+                        throw new Exception($"找不到樓板類型: {floorTypeName}。請用 get_types_by_category 確認可用類型名稱。");
+                    if (typeMatches.Count > 1)
+                        throw new Exception(
+                            $"樓板類型名稱「{floorTypeName}」同時符合多個類型，無法判定：" +
+                            string.Join("、", typeMatches.Select(ft => ft.FamilyName + ": " + ft.Name).OrderBy(n => n)) +
+                            "。請改用「族群名: 類型名」完整名稱。");
+
+                    floorType = typeMatches[0];
+                    floorTypeSource = "floorType";
+                }
+                else
+                {
+                    floorType = doc.GetElement(doc.GetDefaultElementTypeId(ElementTypeGroup.FloorType)) as FloorType;
+                    floorTypeSource = "projectDefault";
+                }
 
                 if (floorType == null)
                 {
-                    throw new Exception("找不到樓板類型");
+                    throw new Exception("專案沒有預設樓板類型；請用 floorType 明確指定。");
                 }
 
                 // 建立 CurveLoop (Revit 2022+ 使用)
@@ -1153,7 +1319,15 @@ namespace RevitMCP.Core
                 {
                     ElementId = floor.Id.GetIdValue(),
                     Level = level.Name,
-                    Message = $"成功建立樓板，ID: {floor.Id.GetIdValue()}"
+                    LevelId = level.Id.GetIdValue(),
+                    LevelFellBackToLowest = levelFellBack,
+                    FloorType = floorType.Name,
+                    FloorTypeId = floorType.Id.GetIdValue(),
+                    FloorTypeSource = floorTypeSource,
+                    Warning = levelFellBack
+                        ? $"你指定的樓層「{levelName}」找不到，已改用最低樓層「{level.Name}」。"
+                        : null,
+                    Message = $"成功建立樓板，ID: {floor.Id.GetIdValue()}（樓層 {level.Name}／類型 {floorType.Name}）"
                 };
             }
         }
@@ -1244,7 +1418,10 @@ namespace RevitMCP.Core
 
         /// <summary>
         /// 建立門。支援 doorType 篩選與 sourceElementId 來源複製（poisonsam fork 擴寫）
-        /// 4 級類型 fallback：doorType → sourceElement type → 任意第一個
+        /// 類型選取順序：doorType（指定了就必須命中，否則報錯）→ sourceElement type
+        ///   → 專案預設門類型 → 依名稱排序的第一個（並寫 WARN log）
+        /// 修正：舊版 doorType 命中失敗會靜默落到未排序的 FirstOrDefault()，
+        ///       使用者指定的類型被換掉卻回報成功；回傳值新增 DoorTypeSource 揭露實際來源。
         /// 來源 fork: poisonsam/main:MCP/Core/Commands/CommandExecutor.Architecture.cs:217-318
         /// </summary>
         private object CreateDoor(JObject parameters)
@@ -1275,30 +1452,63 @@ namespace RevitMCP.Core
                     sourceElement = doc.GetElement(new ElementId(sourceElementId.Value));
                 }
 
-                // 2. 優先使用指定類型名稱
+                string doorTypeSource = null;
+
+                // 2. 優先使用指定類型名稱。指定了卻找不到／重名就報錯，不再靜默換成別的類型
                 if (!string.IsNullOrEmpty(doorType))
                 {
-                    doorSymbol = new FilteredElementCollector(doc)
+                    var typeMatches = new FilteredElementCollector(doc)
                         .OfClass(typeof(FamilySymbol))
                         .OfCategory(BuiltInCategory.OST_Doors)
                         .Cast<FamilySymbol>()
-                        .FirstOrDefault(fs => fs.Name == doorType || (fs.FamilyName + ": " + fs.Name) == doorType);
+                        .Where(fs => fs.Name == doorType || (fs.FamilyName + ": " + fs.Name) == doorType)
+                        .ToList();
+
+                    if (typeMatches.Count == 0)
+                        throw new Exception($"找不到門類型: {doorType}。請用 list_family_symbols 確認可用名稱（可用「族群名: 類型名」完整名稱）。");
+                    if (typeMatches.Count > 1)
+                        throw new Exception(
+                            $"門類型名稱「{doorType}」同時符合多個類型，無法判定：" +
+                            string.Join("、", typeMatches.Select(fs => fs.FamilyName + ": " + fs.Name).OrderBy(n => n)) +
+                            "。請改用「族群名: 類型名」完整名稱。");
+
+                    doorSymbol = typeMatches[0];
+                    doorTypeSource = "doorType";
                 }
 
-                // 3. 如果沒指定名稱或找不到，則使用來源元素的類型
+                // 3. 沒指定名稱時，沿用來源元素的類型
                 if (doorSymbol == null && sourceElement != null)
                 {
                     doorSymbol = doc.GetElement(sourceElement.GetTypeId()) as FamilySymbol;
+                    if (doorSymbol != null) doorTypeSource = "sourceElement";
                 }
 
-                // 4. 最後回退到預設（第一個）
+                // 4. 回退到專案預設門類型（不是未排序的任意第一個）
+                if (doorSymbol == null)
+                {
+                    try
+                    {
+                        doorSymbol = doc.GetElement(
+                            doc.GetDefaultFamilyTypeId(new ElementId((IdType)(int)BuiltInCategory.OST_Doors))) as FamilySymbol;
+                    }
+                    catch { doorSymbol = null; }
+                    if (doorSymbol != null) doorTypeSource = "projectDefault";
+                }
+
+                // 5. 連專案預設都沒有，才依名稱排序取第一個——至少是確定性的，而且會留下 WARN
                 if (doorSymbol == null)
                 {
                     doorSymbol = new FilteredElementCollector(doc)
                         .OfClass(typeof(FamilySymbol))
                         .OfCategory(BuiltInCategory.OST_Doors)
                         .Cast<FamilySymbol>()
+                        .OrderBy(fs => fs.FamilyName).ThenBy(fs => fs.Name)
                         .FirstOrDefault();
+                    if (doorSymbol != null)
+                    {
+                        doorTypeSource = "firstByName";
+                        Logger.Info($"[WARN] CreateDoor: 未指定 doorType 且專案無預設門類型，已依名稱排序採用「{doorSymbol.FamilyName}: {doorSymbol.Name}」。");
+                    }
                 }
 
                 if (doorSymbol == null)
@@ -1338,6 +1548,8 @@ namespace RevitMCP.Core
                 {
                     ElementId = door.Id.GetIdValue(),
                     DoorType = doorSymbol.Name,
+                    DoorFamilyName = doorSymbol.FamilyName,
+                    DoorTypeSource = doorTypeSource,
                     WallId = wallId,
                     SourceElementId = sourceElement?.Id.GetIdValue(),
                     Message = $"成功建立門，ID: {door.Id.GetIdValue()}"
@@ -1347,7 +1559,10 @@ namespace RevitMCP.Core
 
         /// <summary>
         /// 建立窗。支援 windowType 篩選與 sourceElementId 來源複製（poisonsam fork 擴寫）
-        /// 4 級類型 fallback：windowType → sourceElement type → 任意第一個
+        /// 類型選取順序：windowType（指定了就必須命中，否則報錯）→ sourceElement type
+        ///   → 專案預設窗類型 → 依名稱排序的第一個（並寫 WARN log）
+        /// 修正：舊版 windowType 命中失敗會靜默落到未排序的 FirstOrDefault()，
+        ///       使用者指定的類型被換掉卻回報成功；回傳值新增 WindowTypeSource 揭露實際來源。
         /// 來源 fork: poisonsam/main:MCP/Core/Commands/CommandExecutor.Architecture.cs:320-420
         /// </summary>
         private object CreateWindow(JObject parameters)
@@ -1378,30 +1593,63 @@ namespace RevitMCP.Core
                     sourceElement = doc.GetElement(new ElementId(sourceElementId.Value));
                 }
 
-                // 2. 優先使用指定類型名稱
+                string windowTypeSource = null;
+
+                // 2. 優先使用指定類型名稱。指定了卻找不到／重名就報錯，不再靜默換成別的類型
                 if (!string.IsNullOrEmpty(windowType))
                 {
-                    windowSymbol = new FilteredElementCollector(doc)
+                    var typeMatches = new FilteredElementCollector(doc)
                         .OfClass(typeof(FamilySymbol))
                         .OfCategory(BuiltInCategory.OST_Windows)
                         .Cast<FamilySymbol>()
-                        .FirstOrDefault(fs => fs.Name == windowType || (fs.FamilyName + ": " + fs.Name) == windowType);
+                        .Where(fs => fs.Name == windowType || (fs.FamilyName + ": " + fs.Name) == windowType)
+                        .ToList();
+
+                    if (typeMatches.Count == 0)
+                        throw new Exception($"找不到窗類型: {windowType}。請用 list_family_symbols 確認可用名稱（可用「族群名: 類型名」完整名稱）。");
+                    if (typeMatches.Count > 1)
+                        throw new Exception(
+                            $"窗類型名稱「{windowType}」同時符合多個類型，無法判定：" +
+                            string.Join("、", typeMatches.Select(fs => fs.FamilyName + ": " + fs.Name).OrderBy(n => n)) +
+                            "。請改用「族群名: 類型名」完整名稱。");
+
+                    windowSymbol = typeMatches[0];
+                    windowTypeSource = "windowType";
                 }
 
-                // 3. 如果沒指定名稱或找不到，則使用來源元素的類型
+                // 3. 沒指定名稱時，沿用來源元素的類型
                 if (windowSymbol == null && sourceElement != null)
                 {
                     windowSymbol = doc.GetElement(sourceElement.GetTypeId()) as FamilySymbol;
+                    if (windowSymbol != null) windowTypeSource = "sourceElement";
                 }
 
-                // 4. 最後回退到預設（第一個）
+                // 4. 回退到專案預設窗類型（不是未排序的任意第一個）
+                if (windowSymbol == null)
+                {
+                    try
+                    {
+                        windowSymbol = doc.GetElement(
+                            doc.GetDefaultFamilyTypeId(new ElementId((IdType)(int)BuiltInCategory.OST_Windows))) as FamilySymbol;
+                    }
+                    catch { windowSymbol = null; }
+                    if (windowSymbol != null) windowTypeSource = "projectDefault";
+                }
+
+                // 5. 連專案預設都沒有，才依名稱排序取第一個——至少是確定性的，而且會留下 WARN
                 if (windowSymbol == null)
                 {
                     windowSymbol = new FilteredElementCollector(doc)
                         .OfClass(typeof(FamilySymbol))
                         .OfCategory(BuiltInCategory.OST_Windows)
                         .Cast<FamilySymbol>()
+                        .OrderBy(fs => fs.FamilyName).ThenBy(fs => fs.Name)
                         .FirstOrDefault();
+                    if (windowSymbol != null)
+                    {
+                        windowTypeSource = "firstByName";
+                        Logger.Info($"[WARN] CreateWindow: 未指定 windowType 且專案無預設窗類型，已依名稱排序採用「{windowSymbol.FamilyName}: {windowSymbol.Name}」。");
+                    }
                 }
 
                 if (windowSymbol == null)
@@ -1441,6 +1689,8 @@ namespace RevitMCP.Core
                 {
                     ElementId = window.Id.GetIdValue(),
                     WindowType = windowSymbol.Name,
+                    WindowFamilyName = windowSymbol.FamilyName,
+                    WindowTypeSource = windowTypeSource,
                     WallId = wallId,
                     SourceElementId = sourceElement?.Id.GetIdValue(),
                     Message = $"成功建立窗，ID: {window.Id.GetIdValue()}"
@@ -1570,8 +1820,9 @@ namespace RevitMCP.Core
             {
                 trans.Start();
 
-                // 取得底部樓層
-                Level bottomLevel = FindLevel(doc, bottomLevelName, true);
+                // 取得底部樓層（退路觸發時必須回報，不可讓打錯的樓層名稱看起來像成功）
+                bool bottomLevelFellBack;
+                Level bottomLevel = FindLevel(doc, bottomLevelName, true, out bottomLevelFellBack);
 
                 // 取得柱類型（FamilySymbol）
                 FamilySymbol columnSymbol = new FilteredElementCollector(doc)
@@ -1606,22 +1857,30 @@ namespace RevitMCP.Core
                     Autodesk.Revit.DB.Structure.StructuralType.Column
                 );
 
-                // 設定頂部樓層（如果有指定）
+                // 設定頂部樓層（如果有指定）。
+                // 修正：舊版名稱完全比對沒命中、或參數唯讀時都直接跳過，回報「成功建立柱子」，
+                // 但柱高其實沒有跟著 topLevel 走。指定了就必須生效，否則報錯並讓交易回滾。
+                Level appliedTopLevel = null;
                 if (!string.IsNullOrEmpty(topLevelName))
                 {
-                    Level topLevel = new FilteredElementCollector(doc)
+                    var topMatches = new FilteredElementCollector(doc)
                         .OfClass(typeof(Level))
                         .Cast<Level>()
-                        .FirstOrDefault(l => l.Name == topLevelName);
+                        .Where(l => l.Name == topLevelName)
+                        .ToList();
 
-                    if (topLevel != null)
-                    {
-                        Parameter topLevelParam = column.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_PARAM);
-                        if (topLevelParam != null && !topLevelParam.IsReadOnly)
-                        {
-                            topLevelParam.Set(topLevel.Id);
-                        }
-                    }
+                    if (topMatches.Count == 0)
+                        throw new Exception($"找不到頂部樓層: {topLevelName}。請用 get_all_levels 確認樓層名稱（需完全相符）。");
+                    if (topMatches.Count > 1)
+                        throw new Exception($"頂部樓層名稱「{topLevelName}」同時符合多個樓層，無法判定。");
+
+                    appliedTopLevel = topMatches[0];
+
+                    Parameter topLevelParam = column.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_PARAM);
+                    if (topLevelParam == null || topLevelParam.IsReadOnly)
+                        throw new Exception($"柱類型「{columnSymbol.FamilyName}: {columnSymbol.Name}」沒有可寫入的頂部樓層參數，無法套用 topLevel: {topLevelName}。");
+
+                    topLevelParam.Set(appliedTopLevel.Id);
                 }
 
                 trans.Commit();
@@ -1632,6 +1891,12 @@ namespace RevitMCP.Core
                     ColumnType = columnSymbol.Name,
                     FamilyName = columnSymbol.FamilyName,
                     Level = bottomLevel.Name,
+                    LevelId = bottomLevel.Id.GetIdValue(),
+                    LevelFellBackToLowest = bottomLevelFellBack,
+                    TopLevel = appliedTopLevel?.Name,
+                    Warning = bottomLevelFellBack
+                        ? $"你指定的樓層「{bottomLevelName}」找不到，已改用最低樓層「{bottomLevel.Name}」。"
+                        : null,
                     LocationX = x,
                     LocationY = y,
                     Message = $"成功建立柱子，ID: {column.Id.GetIdValue()}"
@@ -1692,8 +1957,9 @@ namespace RevitMCP.Core
             {
                 trans.Start();
 
-                // 取得樓層
-                Level level = FindLevel(doc, levelName, true);
+                // 取得樓層（退路觸發時必須回報，不可讓打錯的樓層名稱看起來像成功）
+                bool levelFellBack;
+                Level level = FindLevel(doc, levelName, true, out levelFellBack);
 
                 // 取得家具類型
                 FamilySymbol furnitureSymbol = new FilteredElementCollector(doc)
@@ -1738,6 +2004,11 @@ namespace RevitMCP.Core
                     FurnitureType = furnitureSymbol.Name,
                     FamilyName = furnitureSymbol.FamilyName,
                     Level = level.Name,
+                    LevelId = level.Id.GetIdValue(),
+                    LevelFellBackToLowest = levelFellBack,
+                    Warning = levelFellBack
+                        ? $"你指定的樓層「{levelName}」找不到，已改用最低樓層「{level.Name}」。"
+                        : null,
                     LocationX = x,
                     LocationY = y,
                     Rotation = rotation,

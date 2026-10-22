@@ -157,7 +157,7 @@
         <div class="tool-module">document-tools</div>
       </div>
       <div>
-        <div class="tool-desc">關閉這個 Revit 進程中已開啟的非連結文件（依標題比對）。常見情境：連結檔被獨立開啟編輯後，須先關閉才能讓宿主文件正常載入該連結。作用中的文件無法用程式關閉（Revit API 限制）；連結文件會被拒絕。文件已修改時預設拒絕關閉，需指定 save 先儲存或 discardChanges 放棄變更。</div>
+        <div class="tool-desc">關閉目前 Revit 進程中已開啟的非連結文件（依標題比對）。常見情境：某個連結檔被獨立開啟以編輯，編輯完須先關閉才能讓宿主文件正常載入該連結。文件為目前作用文件時，Revit API 無法程式關閉作用文件，會回傳明確錯誤，需使用者先切換或開啟其他文件；連結文件與家族文件不受此限（家族文件可關閉，連結文件會被拒絕，須改由宿主文件的連結管理處理）。文件已修改時，預設拒絕關閉，除非指定 save 先儲存，或 discardChanges 放棄變更。</div>
       </div>
     </div>
     <div class="tool-card" id="create_level" data-tool="create_level">
@@ -297,7 +297,7 @@
         <div class="tool-module">document-tools</div>
       </div>
       <div>
-        <div class="tool-desc">列出這個 Revit 進程目前開啟的所有非連結文件，含標題、路徑、是否為作用文件、是否已修改。</div>
+        <div class="tool-desc">列出目前 Revit 進程中所有非連結文件，適合在需要確認可操作的文件、作用文件或儲存目標前使用。</div>
       </div>
     </div>
     <div class="tool-card" id="load_shared_parameters" data-tool="load_shared_parameters">
@@ -307,7 +307,7 @@
         <div class="tool-module">base-tools</div>
       </div>
       <div>
-        <div class="tool-desc">載入共享參數檔 (Shared Parameter File) 並將參數綁定至指定品類的 Type 或 Instance 層級。用於在寫入自訂參數前，先確保專案已載入參數定義。例如載入 GreenMaterial_SharedParams.txt 的綠建材參數（Mat1~Mat6 六槽位）至 Walls/Floors/Ceilings，之後用 set_green_material_type_parameters 寫值。</div>
+        <div class="tool-desc">載入共享參數檔 (Shared Parameter File) 並將參數綁定至指定品類的 Type 或 Instance 層級。用於在寫入自訂參數前，先確保專案已載入參數定義。例如載入 GreenMaterial_SharedParams.txt 的 64 個綠建材參數（Mat1~Mat6 六槽位）至 Walls/Floors/Ceilings，之後用 set_green_material_type_parameters 寫值。</div>
       </div>
     </div>
     <div class="tool-card" id="measure_distance" data-tool="measure_distance">
@@ -347,7 +347,7 @@
         <div class="tool-module">document-tools</div>
       </div>
       <div>
-        <div class="tool-desc">開啟指定路徑的 Revit 文件並設為作用文件。已開啟的文件不會報錯，但 Revit API 無法用程式切換已開啟文件的作用視窗，此時需使用者手動點選該視窗。</div>
+        <div class="tool-desc">開啟指定的本機 Revit 文件並設為作用文件；可選擇從中央模型卸離並保留工作集。若文件已開啟，Revit API 無法用程式切換作用視窗，需使用者手動點選該文件視窗。</div>
       </div>
     </div>
     <div class="tool-card" id="query_elements" data-tool="query_elements">
@@ -377,7 +377,7 @@
         <div class="tool-module">document-tools</div>
       </div>
       <div>
-        <div class="tool-desc">重新載入專案中的連結模型（RevitLinkType）。可指定 ID 或名稱，省略 = 全部。逐個獨立處理，一個失敗不影響其他。</div>
+        <div class="tool-desc">重載作用文件中的 Revit 連結模型。可用連結類型 ID 或名稱篩選；兩者都省略時重載全部連結。個別連結失敗不會中斷其他連結的重載。</div>
       </div>
     </div>
     <div class="tool-card" id="rename_view" data-tool="rename_view">
@@ -397,7 +397,7 @@
         <div class="tool-module">document-tools</div>
       </div>
       <div>
-        <div class="tool-desc">儲存指定文件（省略 = 作用文件）。唯讀文件會明確報錯。不提供 SaveAs。</div>
+        <div class="tool-desc">儲存作用中的 Revit 文件，或依文件標題儲存已開啟的指定文件。此工具不支援另存新檔，唯讀文件無法儲存。</div>
       </div>
     </div>
     <div class="tool-card" id="select_element" data-tool="select_element">
@@ -592,7 +592,7 @@
         <div class="tool-module">wall-tools</div>
       </div>
       <div>
-        <div class="tool-desc">在 Revit 中建立樓板。需要指定邊界點座標。</div>
+        <div class="tool-desc">在 Revit 中建立樓板。需要指定邊界點座標。回傳值會揭露實際採用的樓層與樓板類型。</div>
       </div>
     </div>
     <div class="tool-card" id="create_wall" data-tool="create_wall">
@@ -602,7 +602,7 @@
         <div class="tool-module">wall-tools</div>
       </div>
       <div>
-        <div class="tool-desc">在 Revit 中建立一面牆。需要指定起點、終點座標和高度。</div>
+        <div class="tool-desc">建立非結構直線牆，座標與高度為公釐。可明確指定樓層與基本牆類型；未指定樓層時使用目前平面視圖的樓層，無樓層則報錯。定位線為牆中心線、基準偏移為零。回傳值會揭露實際採用的樓層與牆類型（LevelSource / WallTypeSource）。</div>
       </div>
     </div>
     <div class="tool-card" id="create_window" data-tool="create_window">
@@ -1298,7 +1298,7 @@
         <div class="tool-module">smoke-exhaust-tools</div>
       </div>
       <div>
-        <div class="tool-desc">排煙窗檢討：檢查天花板下 80cm 內可開啟窗面積是否 ≥ 區劃面積 2%。同時判定無窗居室。法源：建技規§101① + 消防§188。自動上色：綠=全開、黃=折減、紅=固定。</div>
+        <div class="tool-desc">排煙窗檢討：檢查天花板下 80cm 內可開啟窗面積是否 ≥ 區劃面積 2%。窗型採推射/外推、推開/平開、橫拉、固定的明確分類，並可傳入專案係數與未知窗型假設；假設值會保留人工確認標記。法源：建技規§101① + 消防§188。</div>
       </div>
     </div>
     <div class="tool-card" id="check_stair_headroom" data-tool="check_stair_headroom">
@@ -1420,7 +1420,7 @@
         <div class="tool-module">view-cropbox-tools</div>
       </div>
       <div>
-        <div class="tool-desc">將指定視圖對齊到目標元素的 BoundingBox。2D 使用 CropBox；3D 為舊客戶端相容入口，會轉交 set_3d_section_box 並使用真正的 View3D Section Box。3D 可分別設定 XY、上方與下方 padding。</div>
+        <div class="tool-desc">將指定視圖對齊到目標元素的 BoundingBox。2D 使用 CropBox（只調整 XY，保留原 Z 深度與 Transform）；3D 為舊客戶端相容入口，會轉交 set_3d_section_box 並使用真正的 View3D Section Box，不操作 CropBox。3D 可分別設定 XY、上方與下方 padding。viewId 不指定時使用 active view。</div>
       </div>
     </div>
     <div class="tool-card" id="arrange_viewports_on_sheet" data-tool="arrange_viewports_on_sheet">
@@ -1480,7 +1480,7 @@
         <div class="tool-module">camera-manager-tools</div>
       </div>
       <div>
-        <div class="tool-desc">管理相機的具名「視角版本」（與相機管理面板右鍵「視角版本 ▸」同一段程式碼）。版本存在相機視圖的 Extensible Storage（JSON：眼睛位置、前方向、上方向、裁剪框與其 Transform、遠裁剪），同事開同一個 .rvt 也能切換。action=list 唯讀列出；save 以 name 儲存目前視角（同名覆蓋）；restore 以一個交易「還原相機視角：&lt;名稱&gt;」套回該版本（面板已載入時相機標記會自動更新）；delete 只移除該筆版本資料，不刪除任何模型元素。回傳目前相機姿態與全部版本（眼睛 mm、水平角、俯仰角、裁剪框尺寸、遠裁剪）。</div>
+        <div class="tool-desc">管理相機的具名「視角版本」（與相機管理面板右鍵「視角版本 ▸」同一段程式碼）。版本存在相機視圖的 Extensible Storage（JSON：眼睛位置、前方向、上方向、裁剪框與其 Transform、遠裁剪），同事開同一個 .rvt 也能切換。action=list 唯讀列出；save 以 name 儲存目前視角（同名覆蓋）；restore 以一個交易「還原相機視角：&lt;名稱&gt;」套回該版本（面板已載入時相機標記會自動更新）；delete 只移除該筆版本資料，不刪除任何模型元素。回傳目前相機姿態與全部版本（眼睛 mm、水平角、俯仰角、裁剪框尺寸、遠裁剪）。觸發條件：相機版本、儲存視角、還原視角、A 案 B 案視角、camera version。</div>
       </div>
     </div>
     <div class="tool-card" id="capture_view_image" data-tool="capture_view_image">
@@ -1490,7 +1490,7 @@
         <div class="tool-module">view-capture-tools</div>
       </div>
       <div>
-        <div class="tool-desc">把指定視圖匯出成點陣圖並直接回傳影像，讓 AI 看得見 Revit 畫面，不必請使用者手動截圖。用於確認圖形設定的實際效果、判斷 hatch 密度與配色、排查「設了卻看不到」的問題。只寫系統暫存檔，不異動模型。</div>
+        <div class="tool-desc">把指定視圖（省略 = 目前作用中的視圖）匯出成點陣圖並直接回傳影像，讓 AI 看得見 Revit 畫面，不必再請使用者手動截圖。用於：確認一項圖形設定實際長什麼樣、判斷 hatch 密度與配色、排查「明明設了卻看不到」的問題、驗收批次操作的結果。只讀模型、只寫系統暫存檔（預設用完即刪），不異動 Revit 模型。明細表（Schedule）與瀏覽器類視圖無法匯出會直接報錯；視圖樣板本身也不行。影像過大時會自動降一階解析度重匯並在 Warnings 說明。觸發條件：使用者提到截圖、擷取畫面、看一下畫面、這樣對不對、幫我確認圖面、screenshot、capture view、或需要目視排查顯示問題。</div>
       </div>
     </div>
     <div class="tool-card" id="copy_camera_to_level" data-tool="copy_camera_to_level">
@@ -1500,7 +1500,7 @@
         <div class="tool-module">camera-manager-tools</div>
       </div>
       <div>
-        <div class="tool-desc">把一台透視相機複製到另一個樓層（同平面位置、同離樓板高度、同方向與視野），與相機管理面板「複製到其他樓層」／清單改樓層同一段程式碼；新名稱「原名 - 樓層名」，重名自動加序號。原相機與其 Key Plan 視圖不變。回傳新相機 id 與名稱。</div>
+        <div class="tool-desc">把一台透視相機複製到另一個樓層（同平面位置、同離樓板高度、同方向與視野），與相機管理面板「複製到其他樓層」／清單改樓層同一段程式碼；新名稱「原名 - 樓層名」，重名自動加序號。原相機與其 Key Plan 視圖不變。回傳新相機 id 與名稱。觸發條件：複製相機、相機複製到樓層、copy camera。</div>
       </div>
     </div>
     <div class="tool-card" id="copy_sheets_from_file" data-tool="copy_sheets_from_file">
@@ -1600,7 +1600,7 @@
         <div class="tool-module">camera-tools</div>
       </div>
       <div>
-        <div class="tool-desc">讀取 3D 視圖／相機的實際位置：眼睛的 XYZ 座標（內部原點座標系 mm）、在哪一層之上、離各樓層多高、視線俯仰角（0° = 水平）。同時讀出性質面板的 Eye Elevation / Target Elevation 參數，並用實際眼睛高度反推該參數的 0 點，逐一比對內部原點、專案基準點、測量點與每個樓層，回報它跟哪一個一致。用途：排查「在 1F 平面放相機，Eye Elevation 卻是負值」這類看不出基準的問題，以及確認人視高是否真的在樓板上方 150–175 cm。</div>
+        <div class="tool-desc">讀取 3D 視圖／相機的實際位置：眼睛的 XYZ 座標（內部原點座標系 mm）、在哪一層之上、離各樓層多高、視線俯仰角（0° = 水平）。同時讀出性質面板的 Eye Elevation / Target Elevation 參數，並用實際眼睛高度反推該參數的 0 點，逐一比對內部原點、專案基準點、測量點與每個樓層，回報它跟哪一個一致。用途：排查「在 1F 平面放相機，Eye Elevation 卻是負值」這類看不出基準的問題，以及確認人視高是否真的在樓板上方 150–175 cm。唯讀。viewId 可給 3D 視圖本身，也可給平面上選到的相機元件；省略時用目前作用中的 3D 視圖。觸發條件：使用者提到人視高、相機高度、camera、eye elevation、target elevation、視點高度、目標高度、透視圖高度不對、相機在地下。</div>
       </div>
     </div>
     <div class="tool-card" id="get_sheet_viewport_details" data-tool="get_sheet_viewport_details">
@@ -1630,7 +1630,7 @@
         <div class="tool-module">camera-manager-tools</div>
       </div>
       <div>
-        <div class="tool-desc">讀取任一視圖的範圍與表現設定：視圖類型、比例、裁剪框（啟用／可見、Min/Max 與 Transform，mm）、註解裁剪與四邊外擴、3D 視圖的 Section Box／眼睛／方向／透視遠裁剪、剖面遠裁剪、Display Model、詳細等級、視覺型式、視圖樣板、被隱藏的類別（名稱與數量）、各連結模型在此視圖的顯示設定，此視圖專屬的詳圖線／填滿區域／文字註記數量，以及 Scope Box（id／名稱）、方位、圖紙上的標題、目前可見的其他視圖標記數（剖面／立面／詳圖索引 viewer 與立面標記）。唯讀。</div>
+        <div class="tool-desc">讀取任一視圖的範圍與表現設定：視圖類型、比例、裁剪框（啟用／可見、Min/Max 與 Transform，mm）、註解裁剪與四邊外擴、3D 視圖的 Section Box／眼睛／方向／透視遠裁剪、剖面遠裁剪、Display Model、詳細等級、視覺型式、視圖樣板、被隱藏的類別（名稱與數量）、各連結模型在此視圖的顯示設定，此視圖專屬的詳圖線／填滿區域／文字註記數量，以及 Scope Box（id／名稱）、方位、圖紙上的標題、目前可見的其他視圖標記數（剖面／立面／詳圖索引 viewer 與立面標記）。唯讀。觸發條件：視圖範圍、裁剪框、Section Box、視圖為什麼看不到、view extents。</div>
       </div>
     </div>
     <div class="tool-card" id="get_view_range" data-tool="get_view_range">
@@ -1640,7 +1640,7 @@
         <div class="tool-module">view-range-tools</div>
       </div>
       <div>
-        <div class="tool-desc">讀取平面類視圖的視圖範圍四個平面（頂部／剖切面／底部／視圖深度）與偏移量，並回報是否被視圖樣板鎖住。排查「元素在模型裡卻在平面圖看不到」的第一順位檢查。</div>
+        <div class="tool-desc">讀取平面類視圖的視圖範圍（View Range）四個平面設定：topClip（頂部）、cutPlane（剖切面）、bottomClip（底部）、viewDepth（視圖深度），各含所指樓層與偏移量(mm)。排查「元素在模型裡、類別也開著、卻在平面圖看不到」時的第一順位檢查——最常見成因就是該元素落在 View Depth 之外（例如地形、基礎位於樓板下方）。同時回報該視圖的 View Range 是否被視圖樣板鎖住。唯讀。觸發條件：使用者提到視圖範圍、view range、視圖深度、view depth、剖切面高度、cut plane、平面圖看不到某個東西、平面圖顯示不出來。</div>
       </div>
     </div>
     <div class="tool-card" id="get_viewport_map" data-tool="get_viewport_map">
@@ -1660,7 +1660,7 @@
         <div class="tool-module">camera-manager-tools</div>
       </div>
       <div>
-        <div class="tool-desc">列出專案中所有透視相機，逐台回報相機管理面板看到的同一份資料：所在樓層（室內＝眼睛所在房間的樓層、室外＝眼睛正下方的建築樓層，附判定來源）、離樓板高度（cm 與 mm）、水平角（0°=+Y 順時針）、俯仰角、視野角（左／右／下／上邊界與水平／垂直總角）、遠裁剪、室內／室外與眼睛所在房間、相機放置時記錄的平面、③ 位置圖底圖挑選器會選哪張平面與步驟、已連結的 Key Plan 平面／剖面／等角視圖 id、剖面方向設定、剖面是否被手動移過。唯讀。</div>
+        <div class="tool-desc">列出專案中所有透視相機，逐台回報相機管理面板看到的同一份資料：所在樓層（室內＝眼睛所在房間的樓層、室外＝眼睛正下方的建築樓層，附判定來源）、離樓板高度（cm 與 mm）、水平角（0°=+Y 順時針）、俯仰角、視野角（左／右／下／上邊界與水平／垂直總角）、遠裁剪、室內／室外與眼睛所在房間、相機放置時記錄的平面、③ 位置圖底圖挑選器會選哪張平面與步驟、已連結的 Key Plan 平面／剖面／等角視圖 id（KeyPlan.PlanLevelMismatch＝平面的樓層與相機目前樓層不符，重跑一鍵 4 視圖會重建）、剖面方向與剖面位置設定、這台相機是否啟用「剖面轉 90°」（SectionOrientation.Rotate90）、剖面是否被手動移過。唯讀。觸發條件：相機清單、相機管理、Key Plan、人視高檢查、camera list。</div>
       </div>
     </div>
     <div class="tool-card" id="move_viewport_titles" data-tool="move_viewport_titles">
@@ -1700,7 +1700,7 @@
         <div class="tool-module">camera-manager-tools</div>
       </div>
       <div>
-        <div class="tool-desc">對一台透視相機執行相機管理面板的「一鍵 4 視圖」核心（建立或更新 Key Plan 平面／剖面／等角三張視圖＋相機標記），與面板同一段程式碼，不經面板 UI。回傳三張視圖的 id、名稱、比例、範圍（平面裁剪框、剖面裁剪框、等角 Section Box，mm）、各視圖內本相機標記元素數（依角色分組），以及關鍵判定（室內／室外、使用的房間、本層頂、扇形半徑、實際剖面方向、等角範圍模式、等角近側牆切掉哪兩面）、實際生效的相機標記型式，與裁剪框讀回不符預期（&gt; 1 %）的警告。複製來的平面會先解除 Scope Box、改專案北、圖紙上的標題改為「Key Plan 平面」；平面／剖面隱藏其他剖面／立面／詳圖索引標記（平面保留本相機剖面）。室內相機的等角預設切掉觀看者側兩道牆（isoNearWalls＝cut／keep）。寫入模型（一個交易「建立相機 Key Plan」），不刪除任何使用者元素。</div>
+        <div class="tool-desc">對一台透視相機執行相機管理面板的「一鍵 4 視圖」核心（建立或更新 Key Plan 平面／剖面／等角三張視圖＋相機標記），與面板同一段程式碼，不經面板 UI。回傳三張視圖的 id、名稱、比例、範圍（平面裁剪框、剖面裁剪框、等角 Section Box，mm）、各視圖內本相機標記元素數（依角色分組），以及關鍵判定（室內／室外、使用的房間、本層頂、扇形半徑、實際剖面方向、是否啟用剖面轉 90°、等角範圍模式、等角近側牆切掉哪兩面）、實際生效的相機標記型式，與裁剪框讀回不符預期（&gt; 1 %）的警告。複製來的平面會先解除 Scope Box、改專案北、圖紙上的標題改為「Key Plan 平面」；平面／剖面隱藏其他剖面／立面／詳圖索引標記（平面保留本相機剖面）。寫入模型（一個交易「建立相機 Key Plan」），不刪除任何使用者元素。室內相機的等角預設切掉觀看者側兩道牆（近側兩面＝房間邊界往內 100 mm，遠側維持房間 +0.6 m）。觸發條件：一鍵 4 視圖、Key Plan、相機平面剖面等角、run keyplan。</div>
       </div>
     </div>
     <div class="tool-card" id="run_camera_overview" data-tool="run_camera_overview">
@@ -1710,7 +1710,7 @@
         <div class="tool-module">camera-manager-tools</div>
       </div>
       <div>
-        <div class="tool-desc">建立或更新相機管理的每層總覽平面「Key Plan-總覽-&lt;樓層名&gt;」（與面板「一鍵 4 視圖 ▾ → 更新樓層總覽」同一段程式碼）：複製該樓層由底圖挑選器選出的平面、套淡化表現法，裁剪＝該層室內相機視野扇形聯集 +3 m（有室外相機時再聯集底圖的建築範圍），把該層每台相機的 B 型標記（眼睛圓圈、視線、扇形、眼睛楔形）與名稱文字畫在同一張平面上；重跑更新同一張、不重複。複製來的平面會先解除 Scope Box、改專案北、圖紙上的標題改為「樓層總覽 &lt;樓層&gt;」，並隱藏其他剖面／立面／詳圖索引標記。回傳每層的視圖 id、名稱、相機數與名稱、底圖來源、裁剪範圍（mm，讀回視圖的實際值，另附預期值與不符警告）與比例。室內相機以房間所在樓層分組。寫入模型（一個交易「更新樓層總覽」），不刪除任何使用者元素。</div>
+        <div class="tool-desc">建立或更新相機管理的每層總覽平面「Key Plan-總覽-&lt;樓層名&gt;」（與面板「一鍵 4 視圖 ▾ → 更新樓層總覽」同一段程式碼）：複製該樓層由底圖挑選器選出的平面、套淡化表現法，裁剪＝該層室內相機視野扇形聯集 +3 m（有室外相機時再聯集底圖的建築範圍），把該層每台相機的 B 型標記（眼睛圓圈、視線、扇形、眼睛楔形）與名稱文字畫在同一張平面上；重跑更新同一張、不重複。複製來的平面會先解除 Scope Box、改專案北、圖紙上的標題改為「樓層總覽 &lt;樓層&gt;」，並隱藏其他剖面／立面／詳圖索引標記。回傳每層的視圖 id、名稱、相機數與名稱、底圖來源、裁剪範圍（mm，讀回視圖的實際值，另附預期值與不符警告）與比例。室內相機以房間所在樓層分組。寫入模型（一個交易「更新樓層總覽」），不刪除任何使用者元素。觸發條件：樓層總覽、相機總覽平面、所有相機畫在一張平面、camera overview。</div>
       </div>
     </div>
     <div class="tool-card" id="scale_drafting_view_height" data-tool="scale_drafting_view_height">
@@ -1740,7 +1740,7 @@
         <div class="tool-module">view-cropbox-tools</div>
       </div>
       <div>
-        <div class="tool-desc">將非樣板 3D 視圖的真正 Section Box 對齊到指定元素的完整 XYZ BoundingBox，並關閉 CropBox。可分別設定水平、上方與下方 padding，也可自動納入與目標底面相接的完整支承樑，並以 upperStructureMode 選擇只看當層，或延伸到上層樓板底以顯示上層樑但不含樓板。</div>
+        <div class="tool-desc">將非樣板 3D 視圖的真正 Section Box 對齊到指定元素的完整 XYZ BoundingBox，並關閉 CropBox 避免雙重裁切。可分別設定水平、上方與下方 padding，並可自動納入與目標底面相接的完整支承樑，可用 upperStructureMode 選擇只看當層，或延伸到上層樓板底以顯示上層樑但不含樓板。若只需清理由舊流程誤啟用的 3D CropBox，設 clearCropOnly=true，此時可省略 elementId。</div>
       </div>
     </div>
     <div class="tool-card" id="set_camera_pose" data-tool="set_camera_pose">
@@ -1750,7 +1750,7 @@
         <div class="tool-module">camera-manager-tools</div>
       </div>
       <div>
-        <div class="tool-desc">修改透視相機的姿態，與相機管理面板清單就地編輯走同一條程式路徑（一個交易「編輯相機」）：可給離樓板高度 cm、水平角、俯仰角、平面 X/Y（cm，內部原點座標）、遠裁剪 cm，至少一項；未給的欄位維持原值。回傳修改前後的值。不會自動重算 Key Plan 視圖。</div>
+        <div class="tool-desc">修改透視相機的姿態，與相機管理面板清單就地編輯走同一條程式路徑（一個交易「編輯相機」）：可給離樓板高度 cm、水平角、俯仰角、平面 X/Y（cm，內部原點座標）、遠裁剪 cm，至少一項；未給的欄位維持原值（沿用相機目前實際值）。回傳修改前後的值與 Timing {transactionMs, refreshMs, totalMs}（編輯快速路徑：小交易＋立刻重繪透視圖）。Key Plan 標記／剖面於最後一次編輯 800 ms 後依變動分級自動更新（高度只重畫剖面標記；換樓層／房間才完整重算），不在回應中同步執行。觸發條件：調相機高度、改相機角度、移動相機、set camera pose。</div>
       </div>
     </div>
     <div class="tool-card" id="set_scope_box_for_views" data-tool="set_scope_box_for_views">
@@ -1770,7 +1770,7 @@
         <div class="tool-module">view-cropbox-tools</div>
       </div>
       <div>
-        <div class="tool-desc">直接設定非樣板 3D 視圖（正交或透視）的 Section Box，不需目標元素：minMm＋maxMm 世界座標絕對範圍，或 offsetsMm 在目前框各面相對外擴／內縮。enable 預設開啟；正交視圖同時關閉 CropBox。單一交易，回傳前後世界座標 min/max 與尺寸。</div>
+        <div class="tool-desc">直接設定非樣板 3D 視圖（正交或透視）的 Section Box，不需目標元素。二擇一：(A) minMm＋maxMm＝世界座標（內部原點，mm）軸向對齊的絕對範圍；(B) offsetsMm＝在「目前」Section Box 各面上的相對位移（正＝往外擴、負＝往內縮，可只給部分面；目前框有旋轉時在框自身座標系內位移）。enable 預設 true（開啟 Section Box）。與 set_3d_section_box 相同會關閉正交視圖的 CropBox 避免雙重裁切（透視視圖必須保留裁剪，不動）。每軸必須 min &lt; max。單一交易「設定剖面框」，回傳前後的世界座標 min/max 與尺寸。</div>
       </div>
     </div>
     <div class="tool-card" id="set_view_range" data-tool="set_view_range">
@@ -1780,7 +1780,7 @@
         <div class="tool-module">view-range-tools</div>
       </div>
       <div>
-        <div class="tool-desc">設定平面類視圖的視圖範圍。level 可填樓層名稱或 Unlimited / Level Above / Level Below / Current。典型用途：把視圖深度設成 Unlimited，讓樓板下方的地形或基礎在平面圖顯示出來。被視圖樣板鎖住時直接報錯而不是靜默失敗。</div>
+        <div class="tool-desc">設定平面類視圖的視圖範圍。四個平面各自獨立指定，只給要改的即可。level 可填樓層名稱，或四個特殊值：Unlimited（無限延伸，View Depth 最常用）、Level Above、Level Below、Current（視圖關聯樓層）。offsetMm 是相對該樓層的偏移，負值往下。典型用途：把 viewDepth 設成 Unlimited，讓樓板下方的地形或基礎在平面圖顯示出來。視圖範圍被視圖樣板鎖住時會直接報錯而不是靜默失敗；完成後會回讀實際落地的值作為驗收證據。觸發條件：使用者提到改視圖範圍、調 view range、改視圖深度、view depth 設成無限、讓平面圖看到下面的東西、剖切面調高調低。</div>
       </div>
     </div>
     <div class="tool-card" id="shift_view_cropbox" data-tool="shift_view_cropbox">
@@ -1942,7 +1942,7 @@
         <div class="tool-module">door-window-legend-tools</div>
       </div>
       <div>
-        <div class="tool-desc">門窗圖例工具。mode=list 列出專案中已使用的門/窗型；mode=create 以 seed Legend 複製生成 A+ managed 圖例（每個項目是一個 Detail Group，以 ExtensibleStorage 記錄 ownership，不再靠 TextNote 或位置猜測辨識成員）；mode=update 更新既有門窗圖例；mode=migrate 預覽或套用 legacy 項目的 A+ ownership migration（apply 預設 false 僅預覽不修改模型，true 才套用；itemKeys 可選，限定套用範圍，ambiguous/overlap/unresolved 一律跳過）。create/update 會要求使用者明確選擇 layoutDirection、maxPerLine、dimensionTypeId，create 另需 seedLegendViewId，update 另需 legendViewId。</div>
+        <div class="tool-desc">門窗圖例工具。mode=list 列出專案中已使用的門/窗型；mode=create 以 seed Legend 複製生成 A+ managed 圖例；mode=update 更新既有門窗圖例；mode=migrate 預覽或套用 legacy item 的 A+ ownership migration。</div>
       </div>
     </div>
     <div class="tool-card" id="get_detail_components" data-tool="get_detail_components">
@@ -2094,7 +2094,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">在 Revit 專案材質庫 (OST_Materials) 中實體發動 Duplicate/Create，獨立建立純淨綠建材或測試 Material（如 &#x27;test材質&#x27; 或 &#x27;GBM0104106_水性漆(居室外用)&#x27;）。支援 dryRun：只回報材質是否已存在、是否會新建，不建立任何 Material。</div>
+        <div class="tool-desc">在 Revit 專案材質庫 (OST_Materials) 中實體發動 Duplicate/Create 獨立建立純淨綠建材或測試 Material (如 &#x27;test材質&#x27; 或 &#x27;GBM0104106_水性漆(居室外用)&#x27;)。</div>
       </div>
     </div>
     <div class="tool-card" id="create_material" data-tool="create_material">
@@ -2104,7 +2104,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">在 Revit 專案資料庫 (OST_Materials) 中建立獨立 Material 並關聯獨立 AppearanceAssetElement。支援 dryRun 預覽。</div>
+        <div class="tool-desc">在 Revit 專案資料庫 (OST_Materials) 中建立獨立 Material 並關聯獨立 AppearanceAssetElement。</div>
       </div>
     </div>
     <div class="tool-card" id="create_material_by_domain" data-tool="create_material_by_domain">
@@ -2114,7 +2114,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">遵循 Domain 規範建立純淨獨立的 Revit Material（不加前綴、絕不套用預設牆字串）。支援 dryRun 預覽。</div>
+        <div class="tool-desc">遵循 Domain 規範建立純淨獨立的 Revit Material（不加前綴、絕不上預設牆字串）。</div>
       </div>
     </div>
     <div class="tool-card" id="create_multi_layer_type" data-tool="create_multi_layer_type">
@@ -2124,7 +2124,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">通用多材料構造層工具：複製指定 ElementType（Wall/Floor/Ceiling 皆可），依任意數量的材料清單建立獨立綠建材 Material，依序套入 CompoundStructure 各層。層數、材料、層位機能完全由呼叫端指定，適用於 2 個以上材料或非 Wall 品類的單一組合情境。</div>
+        <div class="tool-desc">通用多材料構造層工具：複製指定 ElementType（Wall/Floor/Ceiling 皆可），依任意數量的材料清單建立獨立綠建材 Material，依序套入 CompoundStructure 各層。跟 duplicate_element_type（寫死 2 個材料的牆體 Finish1/Structure/Finish2 三明治）不同，這裡層數、材料、層位機能完全由呼叫端指定，適用於 2 個以上材料、或非 Wall 品類的單一組合情境（例如地板：飾面地磚 Finish1 + 隔音緩衝墊 Substrate + 混凝土 Structure 三層）。layers 陣列請依實際構造由上到下（或由外到內）的順序排列。</div>
       </div>
     </div>
     <div class="tool-card" id="create_single_material_type" data-tool="create_single_material_type">
@@ -2134,7 +2134,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">情境「各別建立」：複製指定 ElementType（Wall/Floor/Ceiling Type）建立新類型，並實體建立一個純淨綠建材 Material，指派到新 Type 的全部 CompoundStructure 層。Type 名稱與 Material 名稱使用同一組字串（GBM編號_材料名稱），不套 TABC_ 前綴。</div>
+        <div class="tool-desc">情境 2「各別建立」：複製指定 ElementType（Wall/Floor/Ceiling Type）建立新類型，並實體建立一個純淨綠建材 Material，指派到新 Type 的全部 CompoundStructure 層。Type 名稱與 Material 名稱使用同一組字串（GBM編號_材料名稱），不套 TABC_ 前綴。用於一個 Set 裡每個材料各自獨立建 Type 的情境（例如地板材料各別建立），跟 duplicate_element_type（牆板+塗料兩材料合併一個 Type 的單一組合情境）是不同情境，不要混用。</div>
       </div>
     </div>
     <div class="tool-card" id="create_view_filter" data-tool="create_view_filter">
@@ -2144,7 +2144,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">建立視圖篩選器（ParameterFilterElement）並套用到指定視圖，含圖形覆寫。規則式上色：規則命中哪些元素就套哪種表現法，新增元素自動納入。回傳 MatchedElementCount 供立即驗證規則是否命中。</div>
+        <div class="tool-desc">建立視圖篩選器（ParameterFilterElement）並套用到指定視圖，含圖形覆寫。這是「規則式」上色：規則命中哪些元素就套哪種表現法，新增的元素會自動納入，改參數值就改顏色——與 override_element_graphics 的逐個元素覆寫不同，後者不是規則、不涵蓋新元素、也看不出意圖。回傳 MatchedElementCount 讓你立刻知道規則在該視圖內實際命中幾個元素（0 代表規則沒抓到東西，通常是參數值寫錯或元素不在視圖範圍內）。參數名稱請先用 get_filterable_parameters 確認。同名篩選器存在時預設報錯，帶 overwriteExisting=true 才會沿用並更新。視圖若被視圖樣板控制 V/G 篩選器，會在 Warnings 提醒（不擋執行）。</div>
       </div>
     </div>
     <div class="tool-card" id="duplicate_element_type" data-tool="duplicate_element_type">
@@ -2164,7 +2164,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">單純複製指定 ElementType（Wall/Floor/Ceiling 皆可），不修改 CompoundStructure、不建立或指派任何 Material，新類型與來源類型構造層完全一致。用於先複製出一個不影響既有元件的新 Type，再另外呼叫 set_green_material_type_parameters 寫入 adhesive/sealant/waterproofing 等 Construction 欄位。</div>
+        <div class="tool-desc">單純複製指定 ElementType（Wall/Floor/Ceiling 皆可），不修改 CompoundStructure、不建立或指派任何 Material，新類型與來源類型構造層完全一致。用於 TASK-005.5 情境 5「單選非模型綠建材」路徑 A：先複製出一個不影響既有元件的新 Type，再另外呼叫 set_green_material_type_parameters 寫入 adhesive/sealant/waterproofing 等 Construction 欄位。與 duplicate_element_type（寫死板材+塗料兩種材料）、create_single_material_type/create_multi_layer_type（會重新指派構造層材質）不同。</div>
       </div>
     </div>
     <div class="tool-card" id="get_all_materials" data-tool="get_all_materials">
@@ -2174,7 +2174,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">查詢 Project Materials（材質瀏覽器）清單中所有現存材質，可依名稱關鍵字篩選（如 &#x27;GBM&#x27;），用於在建立材質後主動驗收確認是否已實體存在。</div>
+        <div class="tool-desc">查詢 Project Materials（材質瀏覽器）清單中所有現存材質，用於在建立材質後主動驗收確認是否已實體存在。</div>
       </div>
     </div>
     <div class="tool-card" id="get_filterable_parameters" data-tool="get_filterable_parameters">
@@ -2184,7 +2184,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">列出指定類別可以拿來當「視圖篩選器規則」的參數清單（唯讀）。回傳的就是 Revit 篩選器對話框下拉選單的實際內容，每筆附 StorageType 與支援的運算子。</div>
+        <div class="tool-desc">列出指定類別可以拿來當「視圖篩選器規則」的參數清單（唯讀）。回傳的就是 Revit 篩選器對話框下拉選單的實際內容，用 ParameterFilterUtilities.GetFilterableParametersInCommon 取得，所以不必憑印象猜某個參數能不能拿來篩（例如樓層型的 Base Constraint / Reference Level 是否可用）。每筆附 StorageType 與該型別支援的運算子，可直接餵給 create_view_filter。多個類別時回傳的是「共同可用」的交集。專案中若該類別沒有任何實例，StorageType 會是 None（規則仍可建，但建議先放一個元素再查）。</div>
       </div>
     </div>
     <div class="tool-card" id="get_link_display_settings" data-tool="get_link_display_settings">
@@ -2194,7 +2194,7 @@
         <div class="tool-module">link-display-tools</div>
       </div>
       <div>
-        <div class="tool-desc">列出指定視圖中每個連結模型的 Display Settings（ByHostView / ByLinkView / Custom）。關鍵欄位 HostFiltersApply 為 false 時，主檔的篩選器與類別覆寫完全不會作用在連結元素上。</div>
+        <div class="tool-desc">列出指定視圖中每個連結模型（RevitLinkInstance）的 Display Settings：ByHostView / ByLinkView / Custom，以及它在該視圖是否被隱藏。關鍵欄位是 HostFiltersApply——為 false 時，主檔的視圖篩選器與類別覆寫完全不會作用在該連結的元素上，這是「主檔怎麼設、連結都沒反應」最常見也最難從畫面看出來的成因。唯讀。觸發條件：使用者提到連結模型的顯示設定、Revit Links 頁籤、By Host View、連結沒反應、篩選器對連結無效、link display settings。</div>
       </div>
     </div>
     <div class="tool-card" id="get_material_graphics" data-tool="get_material_graphics">
@@ -2204,7 +2204,7 @@
         <div class="tool-module">material-graphics-tools</div>
       </div>
       <div>
-        <div class="tool-desc">讀取材質「圖形」頁籤的設定：是否使用彩現外觀著色、著色顏色、透明度，以及表面／切割的前景與背景填充樣式與顏色。作用在目前作用中的文件；要讀連結檔的材質，須先把該連結檔開成作用文件。</div>
+        <div class="tool-desc">讀取材質「圖形」頁籤的設定：是否使用彩現外觀著色、著色顏色、透明度，以及表面／切割的前景與背景填充樣式與顏色。唯讀。作用在目前作用中的文件（要讀連結檔的材質，須先把該連結檔開成作用文件）。觸發條件：使用者問材質顏色、著色顏色、材質填充圖案、材質 hatch、為什麼這個材質在平面圖是這個顏色。</div>
       </div>
     </div>
     <div class="tool-card" id="get_types_by_category" data-tool="get_types_by_category">
@@ -2224,7 +2224,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">唯讀診斷「這張圖現在為什麼長這樣」：依 Revit 覆寫優先序一次回報視覺型式、視圖樣板與它鎖住的參數、篩選器（含是否抓到目標元素）、元素個別覆寫、品類覆寫、材料 Surface/Cut 填充樣式與顏色，並給出推定主因。不開 Transaction。</div>
+        <div class="tool-desc">唯讀診斷『這張圖現在為什麼長這樣』：依 Revit 覆寫優先序一次回報視覺型式 (DisplayStyle)、套用中的視圖樣板與它鎖住的參數、視圖篩選器（含是否抓到目標元素、是否把它隱藏）、指定元素的個別圖形覆寫、其品類覆寫與可見性，以及該元素材料的 Surface/Cut 填充樣式與顏色。Verdict 會列出『所有』命中的成因並依優先序排序（不是只回第一個），涵蓋填滿顏色、線色、線寬、半色調、透明度與隱藏，每筆附影響範圍與修正方式。用於接手他人模型時追查表現法被誰改掉，省去逐層手動比對。不開 Transaction、不修改模型。</div>
       </div>
     </div>
     <div class="tool-card" id="get_view_templates" data-tool="get_view_templates">
@@ -2254,7 +2254,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">門窗／獨立元件 RFA 綠建材導入：以使用者指定的既有 FamilySymbol 為基底，開啟家族文件→立即另存可復原備份→在家族文件內新增一個 Type（絕不改動來源 Type）→寫入 Identity Data 與 GreenMaterial_Mat1_* 共享參數＋遮陽係數/隔音等級等門窗專屬欄位→另存為新家族檔→LoadFamily 載回專案，並以載入前後同名 Type 的參數簽章快照比對，一偵測到非目標 Type 被異動就整批回滾不靜默覆蓋。單一原子呼叫涵蓋整個家族文件生命週期。</div>
+        <div class="tool-desc">門窗／獨立元件 RFA 綠建材導入（TASK-005.7 / domain/GM_rfa-family-injection.md）：以使用者指定的既有相似 FamilySymbol 為基底，開啟該家族文件 → 立即另存可復原備份（規則2，先於任何修改）→ 在家族文件內新增一個 Type，絕不改動來源 Type（規則1）→ 寫入 Identity Data 與 GreenMaterial_Mat1_* 共享參數、嘗試寫入 GreenMaterial_Certified 全域欄位（best-effort，部分家族會被 Revit 拒絕新增此 YESNO 欄位，屬已知限制，失敗不影響 Mat1 資料）+ 遮陽係數/隔音等級門窗專屬欄位（規則3）→ 另存為新家族檔名 → LoadFamily 載回專案，且在同一個 Transaction 內做載入前後同名家族 Type 參數簽章快照比對，一偵測到非目標 Type 被異動就整批回滾並報錯，不會靜默覆蓋（規則4）。單一原子呼叫涵蓋整個家族文件生命週期（開啟→備份→編輯→另存→關閉→載回），因為家族文件物件無法跨多次 MCP 呼叫保持開啟。呼叫前必須已由使用者明確指定 sourceTypeId——規則1禁止 AI 自行臆測或無型錄依據挑選基底 Family。</div>
       </div>
     </div>
     <div class="tool-card" id="list_fill_patterns" data-tool="list_fill_patterns">
@@ -2264,7 +2264,7 @@
         <div class="tool-module">fill-pattern-tools</div>
       </div>
       <div>
-        <div class="tool-desc">列出專案中所有填充樣式的名稱、ID 與 Model/Drafting 類型。指定任何 hatch 之前應先查這裡，不要憑印象猜名稱。Model 樣式隨視圖比例縮放，Drafting 樣式在圖紙上固定大小。</div>
+        <div class="tool-desc">列出專案中所有填充樣式（FillPatternElement）的名稱、ID 與 Model/Drafting 類型。在指定任何 hatch 之前應先呼叫這個工具確認名稱，不要憑印象猜——create_view_filter 的 patternName、以及材質表面樣式都吃這裡的名稱。Model 樣式隨視圖比例縮放（實際尺寸，地形與材質紋理用這種）；Drafting 樣式在圖紙上固定大小。唯讀。觸發條件：使用者提到填充樣式、hatch、剖面線、網格線、fill pattern、有哪些樣式可以選、或要設 hatch 但不知道名稱。</div>
       </div>
     </div>
     <div class="tool-card" id="override_element_graphics" data-tool="override_element_graphics">
@@ -2284,7 +2284,7 @@
         <div class="tool-module">material-graphics-tools</div>
       </div>
       <div>
-        <div class="tool-desc">遞迴搜尋使用者指定的材料影像資料夾，依完整檔名（含副檔名、不分大小寫）重新連結目前作用文件內遺失的 Material Appearance Asset 貼圖。原路徑仍有效者保持不變；唯一候選才自動重連，同名多檔只回報衝突、不自動挑選。逐 Asset 以 SubTransaction + AppearanceAssetEditScope 寫入，單筆失敗不影響其他材料。資料夾路徑必須由使用者提供，不得猜測；dryRun=true 只預覽不修改模型。方法見 <code>domain/material-image-relinking.md</code>。</div>
+        <div class="tool-desc">遞迴搜尋新的材料影像資料夾，依完整檔名（含副檔名、不分大小寫）重新連結目前作用中 Revit 文件內遺失的 Appearance Asset 貼圖。呼叫前必須取得使用者提供的資料夾路徑；若使用者尚未提供，請先要求使用者貼上新的材料影像根資料夾路徑，不要猜測或自行挑選。有效連結保持不變；同名多檔只回報衝突，不自動選擇。dryRun=true 只預覽，不修改模型。</div>
       </div>
     </div>
     <div class="tool-card" id="remove_view_filter" data-tool="remove_view_filter">
@@ -2294,7 +2294,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">把篩選器從指定視圖移除；deleteFilter=true 時一併從專案刪除該篩選器本身。用於還原 create_view_filter 的變更。</div>
+        <div class="tool-desc">把篩選器從指定視圖移除；deleteFilter=true 時一併從專案刪除該篩選器本身。用於還原 create_view_filter 的變更。以 name 或 filterId 指定其中之一。</div>
       </div>
     </div>
     <div class="tool-card" id="set_category_visibility" data-tool="set_category_visibility">
@@ -2314,7 +2314,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">將綠建材共享參數 Schema（GreenMaterial_SharedParams.txt，Mat1~Mat6 六槽位 + Construction 群組）實體寫入指定 ElementType 的 Identity Data。參數須已透過 load_shared_parameters 綁定至該 Type 所屬品類，否則對應欄位會列在回傳的 MissingParameters。Mat1=主體/牆板、Mat2=面材/塗料、Mat3=附屬/膠材（僅基本欄位）、Mat4~Mat6=追加構造層。</div>
+        <div class="tool-desc">將綠建材共享參數 Schema（GreenMaterial_SharedParams.txt，Mat1~Mat6 六槽位 + Construction 群組共 67 個欄位）實體寫入指定 ElementType 的 Identity Data。參數須已透過 load_shared_parameters 綁定至該 Type 所屬品類（如 Walls），否則對應欄位會列在回傳的 MissingParameters 中。Mat1=主體/牆板，Mat2=面材/塗料，Mat3=附屬/膠材（僅有基本欄位，無 TVOC/Formaldehyde/CNS），Mat4/Mat5/Mat6=追加構造層（欄位與 Mat1/Mat2 同樣完整）。一個 Set 有幾種材料就只傳幾個 matN 物件，其餘留空，不必寫滿 6 組；哪個材料進哪個槽位請依 GM_generate_revit_injection_plan.py 產出的 plan[&#x27;materialSlotAssignment&#x27;] 決定，不要自行猜測順序——非幾何輔助材料（接著劑/填縫劑/防水材料）一樣要填一個 matN 物件（Mat 槽位記錄的是「這個元件用了哪些綠建材」的完整清單，不是只有物理構造層才算數），另外再用 adhesive/sealant/waterproofing 額外補記它們的施工用途，兩者並存不衝突、不是二選一。</div>
       </div>
     </div>
     <div class="tool-card" id="set_link_display_settings" data-tool="set_link_display_settings">
@@ -2324,7 +2324,7 @@
         <div class="tool-module">link-display-tools</div>
       </div>
       <div>
-        <div class="tool-desc">設定視圖中連結模型的 Display Settings。設成 byHostView 後主檔的視圖篩選器與類別覆寫才會套用到連結元素，通常是讓主檔覆寫對連結生效的前置步驟。</div>
+        <div class="tool-desc">設定指定視圖中連結模型的 Display Settings。設成 byHostView 後，主檔的視圖篩選器與類別覆寫才會套用到連結元素——這通常是讓主檔覆寫對連結生效的前置步驟。可用 linkInstanceIds 或 linkNames 指定目標，兩者都省略 = 該視圖的所有連結。逐個連結獨立處理，一個失敗不影響其他。觸發條件：使用者提到把連結設成 By Host View、改連結顯示方式、讓篩選器對連結生效、連結改用主檔設定。</div>
       </div>
     </div>
     <div class="tool-card" id="set_material_graphics" data-tool="set_material_graphics">
@@ -2334,7 +2334,7 @@
         <div class="tool-module">material-graphics-tools</div>
       </div>
       <div>
-        <div class="tool-desc">修改材質「圖形」頁籤：著色顏色、透明度、表面／切割的前景與背景填充樣式與顏色。改的是材質本身，所有用到這個材質的元件與視圖會一起變——這是與 create_view_filter／V/G 覆寫（只作用單一視圖）的關鍵差異。支援 dryRun 只驗證不寫入，回傳 Before/After。</div>
+        <div class="tool-desc">修改材質「圖形」頁籤：著色顏色（shadingColor）、透明度、表面／切割的前景與背景填充樣式與顏色。改的是材質本身，所以所有用到這個材質的元件、所有視圖都會一起變——這是與 create_view_filter／V/G 覆寫（只作用單一視圖）的關鍵差異。給了 shadingColor 會自動關閉「使用彩現外觀」，否則顏色不會生效。只給要改的欄位即可；dryRun=true 只驗證輸入不寫入。回傳 Before / After（After 為寫入後回讀）。作用在目前作用中的文件：連結檔的材質要在該連結檔內改（改完存檔，主檔重新載入連結）。典型用途：地形草地顏色調淺、給草地材質加 hatch。觸發條件：使用者提到改材質顏色、材質太深/太淺、材質加 hatch、材質表面填充、所有視圖都要生效。</div>
       </div>
     </div>
     <div class="tool-card" id="set_material_surface_pattern" data-tool="set_material_surface_pattern">
@@ -2344,7 +2344,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">為綠建材 Material 建立（或依名稱重用既有）Model 目標的 Surface Pattern 並套入該材質的表面／剖切樣式。用於地磚網格縫線、木地板木紋等依產品規格需要在平面/剖面顯示紋理的飾面材料。</div>
+        <div class="tool-desc">為綠建材 Material 建立（或重用既有，依名稱去重不重複建立）Model 目標的 Surface Pattern 並套入該材質的表面／剖切樣式。用於地磚 600×600 網格縫線、木地板木紋等依產品規格需要在平面/剖面顯示紋理的飾面材料（TASK-005.2 情境 2）。</div>
       </div>
     </div>
     <div class="tool-card" id="set_view_template_controls" data-tool="set_view_template_controls">
@@ -2354,7 +2354,7 @@
         <div class="tool-module">visualization-tools</div>
       </div>
       <div>
-        <div class="tool-desc">列出或切換視圖樣版（View Template）的「控制參數」清單，對應 Revit「View Template」對話框每一列的 Include 勾選框。常見用途：使用者在視圖上看不到篩選器上色，原因是樣版正在控制『V/G Overrides Filters』——把該項目從控制中排除（uncontrol），使用者才能在個別視圖自行開關篩選器。不帶 uncontrol/control 時為純唯讀列表模式，用來查出合法的參數名稱；dryRun=true 只預覽變更、不寫入模型。</div>
+        <div class="tool-desc">列出或切換視圖樣版（View Template）的「控制參數」清單，對應 Revit「View Template」對話框每一列的 Include 勾選框。常見用途：使用者在視圖上看不到篩選器上色，原因是樣版正在控制『V/G Overrides Filters』——把該項目從控制中排除（uncontrol），使用者才能在個別視圖自行開關篩選器。不帶 uncontrol/control 時為純唯讀列表模式，用來查出合法的參數名稱（比對用，不分大小寫）；不確定名稱時應先這樣呼叫一次。dryRun=true 只預覽變更、不寫入模型。</div>
       </div>
     </div>
     <div class="tool-card" id="unhide_elements" data-tool="unhide_elements">
