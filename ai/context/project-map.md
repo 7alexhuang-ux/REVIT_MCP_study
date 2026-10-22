@@ -40,9 +40,9 @@
 | `MCP/RevitMCP.csproj` / `MCP/RevitMCP.addin` | 唯一的多版本 build project／唯一的版本無關 add-in manifest | 禁止新增版本專屬 csproj 或 addin |
 | `MCP-Server/src/index.ts` | MCP stdio server 入口 | |
 | `MCP-Server/src/socket.ts` | 連往 Revit 的 WebSocket client | |
-| `MCP-Server/src/tools/index.ts` | 工具模組註冊（`registerRevitTools()`）與 `MCP_PROFILE` 過濾 | 目前 192 個 runtime tool（`CLAUDE.md` 計數表，會隨版本變動，勿硬記） |
+| `MCP-Server/src/tools/index.ts` | 工具模組註冊（`registerRevitTools()`）與 `MCP_PROFILE` 過濾 | 目前 222 個 runtime tool（`CLAUDE.md` 計數表，會隨版本變動，勿硬記） |
 | `MCP-Server/src/tools/revit-tools.ts` | 工具名稱 → Revit 命令的執行橋接 | |
-| `domain/*.md` | 共用 BIM SOP／法規／公式，人類與 AI 共用 | 目前 83 個檔案（同上計數表） |
+| `domain/*.md` | 共用 BIM SOP／法規／公式，人類與 AI 共用 | 目前 90 個檔案（同上計數表） |
 | `.claude/skills/*/SKILL.md` | Claude Code skill（AI 工作流程編排） | 目前 61 個（同上計數表）；`ai/skills/*.md` 不算在內，見 `.agents/AGENTS.md` 開頭聲明 |
 | `scripts/verify-qaqc.ps1` | 全庫 QA/QC 閘門 | 改動文件／工具／skill／domain／build 設定後必跑 |
 | `tools/kanban/`、`ai/**`、`.agents/AGENTS.md`、`scripts/monstrare_mcp_server.py` | Monstrare（選用的 AI 開發流程套件） | 2026-08 由 PR #116（@CWLin0518）收編；非本專案預設工作流，見 `.agents/AGENTS.md` 開頭的治理位階聲明 |
@@ -61,4 +61,4 @@
 
 ## 維護備註
 
-`CLAUDE.md` 的 Key Source Files、Current Source-of-Truth Counts（192 工具／83 domain／61 skill）與 Build Commands 若更新，本檔的對應內容需一併同步，否則會變成過期的第二份事實來源，違背 `context-protocol.md` 要求 agent 先讀本檔取得情境的用意。
+`CLAUDE.md` 的 Key Source Files、Current Source-of-Truth Counts（222 工具／90 domain／61 skill）與 Build Commands 若更新，本檔的對應內容需一併同步，否則會變成過期的第二份事實來源，違背 `context-protocol.md` 要求 agent 先讀本檔取得情境的用意。

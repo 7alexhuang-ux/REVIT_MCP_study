@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Domain 索引（83 個 SOP）· BIM_MCP</title>
-<meta property="og:title" content="BIM_MCP Domain SOP Index — 83 個知識層檔案">
+<title>Domain 索引（90 個 SOP）· BIM_MCP</title>
+<meta property="og:title" content="BIM_MCP Domain SOP Index — 90 個知識層檔案">
 <meta property="og:description" content="依 domain/*.md 整理的 BIM compliance 與 workflow SOP 索引。五分類各自彩色，含觸發關鍵字、反查 Skill、5 個重點 domain 抽屜摘要。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -72,10 +72,10 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">DOMAIN INDEX <span class="accent">83 個 SOP / 5 分類</span></div>
+  <div class="bim-hero-eyebrow">DOMAIN INDEX <span class="accent">90 個 SOP / 5 分類</span></div>
   <h1 class="bim-hero-title">Domain · <span class="accent">知識層</span><br>方法寫一次，多個 Skill 共用</h1>
-  <p class="bim-hero-sub">Domain 是<strong>知識本身</strong>——法規條文、SOP、公式、例外。Skill 是<strong>編排</strong>（61 個）。Tool 是<strong>原子執行</strong>（221 個）。<strong>知識不應該重複在每個 Skill 裡</strong>——這是本專案核心架構原則。本頁列 83 個 <code>domain/*.md</code>，依五大類彩色標示，每張 card 含觸發關鍵字與反查 Skill。</p>
-  <figure class="bim-hero-figure"><img src="../images/domain__hero__grains.svg" alt="83 個 domain SOP，依五大類彩色方塊排列" width="1200" height="1142"></figure>
+  <p class="bim-hero-sub">Domain 是<strong>知識本身</strong>——法規條文、SOP、公式、例外。Skill 是<strong>編排</strong>（61 個）。Tool 是<strong>原子執行</strong>（222 個）。<strong>知識不應該重複在每個 Skill 裡</strong>——這是本專案核心架構原則。本頁列 90 個 <code>domain/*.md</code>，依五大類彩色標示，每張 card 含觸發關鍵字與反查 Skill。</p>
+  <figure class="bim-hero-figure"><img src="../images/domain__hero__grains.svg" alt="90 個 domain SOP，依五大類彩色方塊排列" width="1200" height="1142"></figure>
 </header>
 
 <section data-collapse class="bim-section bim-anchor" data-cat="frame" id="frame">
@@ -102,8 +102,8 @@
   </div>
 
   <div class="bim-grid bim-grid-3">
-    <div class="bim-card"><h4>Tool（221）</h4><p style="font-size:13px;">執行 Revit 查詢、建立、修改。<strong>所有具體資料</strong>必須來自工具回傳。</p></div>
-    <div class="bim-card bim-card-accent"><h4>Domain（83）</h4><p style="font-size:13px;">保存 SOP、公式、例外與判斷流程。<strong>方法的單一來源</strong>。</p></div>
+    <div class="bim-card"><h4>Tool（222）</h4><p style="font-size:13px;">執行 Revit 查詢、建立、修改。<strong>所有具體資料</strong>必須來自工具回傳。</p></div>
+    <div class="bim-card bim-card-accent"><h4>Domain（90）</h4><p style="font-size:13px;">保存 SOP、公式、例外與判斷流程。<strong>方法的單一來源</strong>。</p></div>
     <div class="bim-card"><h4><a href="skills-index.html" style="border-bottom:1px solid var(--accent-border);">Skill（61）</a></h4><p style="font-size:13px;">把 Domain 與工具串成工作流。<strong>不藏方法在 Skill body</strong>。</p></div>
   </div>
   <p class="bim-section-desc" style="margin-top:var(--gap-sm);">完整三層定義見 <a href="architecture-v2.html">三層架構 V2</a>。</p>
@@ -250,11 +250,11 @@
 </section>
 
 <!-- ============================================ -->
-<!-- B · WORKFLOW（38 個 · 青）-->
+<!-- B · WORKFLOW（46 個 · 青）-->
 <!-- ============================================ -->
 <section data-collapse class="bim-section bim-anchor" data-cat="workflow" id="workflow">
   <div class="bim-section-eyebrow">SECTION 03 · MODEL WORKFLOW</div>
-  <h2 class="bim-section-title">模型操作與圖面 workflow（42）</h2>
+  <h2 class="bim-section-title">模型操作與圖面 workflow（46）</h2>
   <p class="bim-section-desc">非法規驅動的日常 BIM 作業 SOP——查詢、上色、標註、出圖、視圖管理、立面/帷幕牆設計。</p>
 
   <div class="bim-grid bim-grid-3">
@@ -711,15 +711,56 @@
       </div>
     </div>
 
+    <div id="view-template-comparison" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">view-template-comparison.md</div>
+        <div class="domain-desc">多 View Template 差異矩陣比對：品類覆蓋、過濾器與基礎屬性的逐項比對演算法，加上只顯示差異、差異高亮、匯出與一鍵生成對比製圖視圖的矩陣 UI 規範。<strong>純審計唯讀</strong>——嚴格禁止 SetCategoryOverrides／SetFilterOverrides 等寫回按鈕，修改必須回 Revit 原生 UI 二次確認。尚無對應 MCP 工具與 Skill。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">視圖樣板比對</span><span class="domain-trigger">view template 差異</span><span class="domain-trigger">出圖 QC</span><span class="domain-trigger">Overrides</span>
+      </div>
+    </div>
+
+    <div id="archicad-structural-dwg-sync" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">archicad-structural-dwg-sync.md</div>
+        <div class="domain-desc">結構 DWG/DXF 進入 Archicad 後的兩條受控流程：新建模型時由結構 CAD 輔助柱放樣，以及新版 CAD 與既有柱／梁／板逐層比對。預設只產 dry-run 報表與 Property 覆核標記，不自動大規模改動幾何；適用設計協調，不取代結構專業判定。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">archicad 結構</span><span class="domain-trigger">dwg 逐層校準</span><span class="domain-trigger">版次比對</span><span class="domain-trigger">Property 標記</span>
+      </div>
+    </div>
+
+    <div id="revit-batch-family-shared-param-injection-spec" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">revit-batch-family-shared-param-injection-spec.md</div>
+        <div class="domain-desc">門（OST_Doors）與窗（OST_Windows）族群共用參數批次注入規範：全量範圍掃描 → 模型檢查器預檢 → WPF 多選清單 → 批次注入服務的四段解耦架構。<code>.rvt</code> 專案層走 CategoryBinding，<code>.rfa</code> 族群層走 <code>FamilyManager.AddParameter</code>。本研習庫未含其實做程式碼，僅供開發架構參考。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">共用參數批次注入</span><span class="domain-trigger">門窗族群</span><span class="domain-trigger">CategoryBinding</span><span class="domain-trigger">FamilyManager</span>
+      </div>
+    </div>
+
+    <div id="material-image-relinking" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">material-image-relinking.md</div>
+        <div class="domain-desc">材料外觀影像重連 SOP：遞迴掃描使用者提供的影像資料夾，依完整檔名（含副檔名、Windows 不分大小寫）比對遺失的 Appearance Asset 貼圖。原路徑仍有效則保留；唯一候選才自動重連，同名多檔只回報衝突不自動挑選；逐 Asset SubTransaction 可單筆 rollback。不以資料夾名稱、檔案大小或相似度猜測。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">材料影像</span><span class="domain-trigger">材質貼圖</span><span class="domain-trigger">missing texture</span><span class="domain-trigger">Appearance Asset</span>
+        <a href="tools-index.html#relink_material_images" class="domain-skill">↔ relink_material_images</a>
+      </div>
+    </div>
+
   </div>
 </section>
 
 <!-- ============================================ -->
-<!-- C · OPS（11 個 · 黃）-->
+<!-- C · OPS（14 個 · 黃）-->
 <!-- ============================================ -->
 <section data-collapse class="bim-section bim-anchor" data-cat="ops" id="ops">
   <div class="bim-section-eyebrow">SECTION 04 · OPS / QA / AUTHORING</div>
-  <h2 class="bim-section-title">維運、QA 與 authoring 標準（11）</h2>
+  <h2 class="bim-section-title">維運、QA 與 authoring 標準（14）</h2>
   <p class="bim-section-desc">不是 BIM 作業本身，而是<strong>專案治理層</strong>——讓專案在多人多 AI client 協作時不會走樣。</p>
 
   <div class="bim-grid bim-grid-3">
@@ -841,6 +882,37 @@
       </div>
       <div class="domain-meta">
         <span class="domain-trigger">本機更新</span><span class="domain-trigger">local update</span><span class="domain-trigger">環境專屬</span>
+      </div>
+    </div>
+
+    <div id="archicad-adapter-boundary" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">archicad-adapter-boundary.md</div>
+        <div class="domain-desc">Archicad backend 的轉譯邊界：Revit 預設不變、Archicad opt-in 的架構原則，以及因 API／wrapper 能力落差必須降級或改道的功能清單。判斷某個 Revit 側能力在 Archicad 該不該做、走哪條路的中文決策依據；逐指令實測行為的權威正本在 <code>.claude/skills/archicad-skill-adapter/references/</code>。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">archicad</span><span class="domain-trigger">轉譯邊界</span><span class="domain-trigger">capability gap</span>
+        <a href="three-constitutions.html#constitution-2" class="domain-skill">↔ 第二憲法</a>
+      </div>
+    </div>
+
+    <div id="archicad-terminology-map" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">archicad-terminology-map.md</div>
+        <div class="domain-desc">Revit↔Archicad 核心名詞與資料歸屬對照的中文導讀：ElementId↔GUID 禁止直譯、Room↔Zone、Level↔Story、Family／Parameter／Material 無 1:1 對應，以及讀取任何數值做算量前必須先確認單位基準的鐵律。完整對照的權威正本在 <code>.claude/skills/archicad-skill-adapter/references/revit-archicad-terminology.md</code>。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">archicad 名詞對照</span><span class="domain-trigger">GUID</span><span class="domain-trigger">Zone</span><span class="domain-trigger">單位鐵律</span>
+      </div>
+    </div>
+
+    <div id="archicad-portability-matrix" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">archicad-portability-matrix.md</div>
+        <div class="domain-desc">工作流在 Archicad 的 A／B／C 可攜性分級判準與各 Wave 驗證狀態速查：A 可直接共用、B 需要 adapter、C backend-specific。<strong>B 不等於已支援</strong>——分級是路由判斷，不是驗證結果。逐一 Skill 的完整分級表權威正本在 <code>docs/integrations/archicad-skill-portability.md</code>。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">archicad 可攜性</span><span class="domain-trigger">A/B/C 分級</span><span class="domain-trigger">驗證狀態</span>
       </div>
     </div>
 
@@ -1288,7 +1360,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / domain-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-07-09 · 83 個 domain SOP 完整索引，五分類彩色標示，5 個重點 domain 含抽屜摘要。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-07-09 · 90 個 domain SOP 完整索引，五分類彩色標示，5 個重點 domain 含抽屜摘要。</p>
 </footer>
 
 <script src="../shared.js"></script><script>initAll();</script>

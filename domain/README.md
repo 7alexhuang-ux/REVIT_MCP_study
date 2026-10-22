@@ -32,7 +32,7 @@
 | `wall-check.md` | wall-orientation-check | 牆壁方向、內外側 |
 | `dependent-view-crop-workflow.md` | dependent-view-crop | 從屬視圖、分區出圖 |
 
-### 不需要成為 Skill 的 Domain（22 個，含 README）
+### 不需要成為 Skill 的 Domain（27 個，含 README）
 
 | Domain 文件 | 類型 | 不成為 Skill 的原因 |
 |------------|------|-------------------|
@@ -59,6 +59,9 @@
 | `archicad-terminology-map.md` | 名詞對照與單位合約 | Revit↔Archicad 名詞的中文導讀，以及讀取數值前的單位鐵律；權威正本在 `.claude/skills/archicad-skill-adapter/references/revit-archicad-terminology.md` |
 | `archicad-portability-matrix.md` | 可攜性分級與進度 | A/B/C 分級判準與各 Wave 驗證狀態的中文速查；權威正本在 `docs/integrations/archicad-skill-portability.md` |
 | `archicad-structural-dwg-sync.md` | Archicad 結構 DWG/DXF 逐層校準、建模、版次比對、Property 標記與報表 SOP | 尚無 Skill 引用，待接線 |
+| `view-template-comparison.md` | 唯讀審計規範 | 定義多 View Template 差異矩陣的比對演算法與矩陣視圖 UI 規範；嚴格禁止任何覆蓋寫入，屬出圖期 QC 審計方法，尚無專屬 Skill |
+| `revit-batch-family-shared-param-injection-spec.md` | 增益集架構規範 | 門窗族群共用參數批次注入的四段解耦架構（`.rvt` 走 CategoryBinding、`.rfa` 走 `FamilyManager.AddParameter`）；本研習庫未含其實做程式碼，供開發參考，無對應 MCP 工具與 Skill |
+| `material-image-relinking.md` | 工具操作規範 | `relink_material_images` 的資料夾／檔名比對規則與衝突判定表，是單一工具的使用邊界說明，非多步驟工作流程 |
 | `README.md` | 目錄導航 | 本檔案，不是工作流程 |
 
 ---

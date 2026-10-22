@@ -37,8 +37,8 @@ These counts must be derived from source, not copied by memory.
 
 | Item | Current Count | Source of Truth |
 |---|---:|---|
-| Runtime MCP tools | 221 | `registerRevitTools()` from `MCP-Server/src/tools/index.ts` |
-| Domain SOP files | 83 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
+| Runtime MCP tools | 222 | `registerRevitTools()` from `MCP-Server/src/tools/index.ts` |
+| Domain SOP files | 90 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
 | Claude skills | 61 | `.claude/skills/*/SKILL.md` |
 
 When these numbers change, update `CLAUDE.md`, `README.md`, `README.zh-TW.md`, `docs/DOCUMENT_AUDIENCE_INVENTORY.md`, and any public site copy that makes grand-total claims. Then run `scripts/verify-qaqc.ps1 -SkipBuild -SkipDeploy`.
@@ -355,6 +355,13 @@ Read the matching file before applying a workflow or calculation.
 | space centroid, 空間中心點, 代表點, centroid, 批次放置, 逐室放置, 風口放置, air terminal, place_family_instances, get_space_centroid, IsPointInSpace | `domain/space-centroid-placement.md` |
 | 機電教戰手冊, MEP playbook, 教戰手冊, 五種量, 量從哪裡來, 決定的量, 教學假設, 放風口, 系統流量 vs 端點需求, 旗標誠實但問錯問題 | `domain/mep-space-demand-matrix.md`（方法） + `docs/BIM_MCP/reference/mep-playbook.html`（教學導覽） |
 | pyRevit, UI API, 按鈕觸發, 觸發按鈕, PostableCommandId, PostCommand, Reload, ribbon 按鈕, 外掛 UI 命令 | `domain/tool-capability-boundary.md` |
+| view template comparison, 視圖樣板比對, 樣板差異, 僅顯示差異, 樣板稽核, QC audit | `domain/view-template-comparison.md` |
+| archicad adapter, 轉譯邊界, archicad backend, 能力降級 | `domain/archicad-adapter-boundary.md` |
+| archicad 名詞對照, terminology map, GUID, Story, Zone, Layout, Tapir | `domain/archicad-terminology-map.md` |
+| archicad 可攜性, portability matrix, A/B/C 分級, Wave 驗證狀態 | `domain/archicad-portability-matrix.md` |
+| archicad 結構 dwg, archicad 逐層校準, archicad 版次比對, Property 標記 | `domain/archicad-structural-dwg-sync.md` |
+| 批次注入共用參數, 門窗共參, shared parameter injection, FamilyManager.AddParameter, CategoryBinding, 模型檢查器 | `domain/revit-batch-family-shared-param-injection-spec.md` |
+| 材料影像, 貼圖遺失, 重連貼圖, relink material images, Appearance Asset, unifiedbitmap | `domain/material-image-relinking.md` |
 
 Meta and governance domain files:
 
