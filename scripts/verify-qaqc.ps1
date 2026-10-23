@@ -2303,6 +2303,30 @@ Write-Check "Meetup signup link is current or closed, and no static href on data
     $(if ($meetupProblems.Count -gt 0) { "$($meetupProblems.Count) problem(s): " + ($meetupProblems -join " | ") } else { "" })
 if ($meetupProblems.Count -gt 0) { $meetupProblems | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow } }
 
+# 7-18: skills-index <-> gen-skills-index.py (the page is generated; --check must agree byte-for-byte)
+# 7-10 only counts card names, is blind on macOS (literal backslash path), and its reverse regex cannot see GM_* cards.
+# This check is the live guard: the generator refuses on skill-set mismatch (.claude/skills/*/SKILL.md vs
+# scripts/skills-index-map.json), on a domain link with no id in domain-index.html, and --check compares the whole page.
+# Paths use Join-Path (never a literal backslash string) so it also runs on macOS/Linux. Reuses $pyCmd from 7-11.
+Write-Host ""
+Write-Host "  7-18. skills-index.html is what gen-skills-index.py would produce:" -ForegroundColor Cyan
+$skillsGenPath = Join-Path (Join-Path $projectRoot 'scripts') 'gen-skills-index.py'
+$skillsMapPath = Join-Path (Join-Path $projectRoot 'scripts') 'skills-index-map.json'
+if (-not $pyCmd) {
+    Write-Skip "skills-index matches gen-skills-index.py" "no python found"
+}
+elseif (-not (Test-Path -LiteralPath $skillsGenPath) -or -not (Test-Path -LiteralPath $skillsMapPath)) {
+    Write-Check "skills-index matches gen-skills-index.py" $false "generator or map missing"
+}
+else {
+    Push-Location $projectRoot
+    & $pyCmd $skillsGenPath --check *> $null
+    $skillsGenOk = ($LASTEXITCODE -eq 0)
+    Pop-Location
+    Write-Check "skills-index matches gen-skills-index.py" $skillsGenOk `
+        "Regenerate: python3 scripts/gen-skills-index.py (curated copy: scripts/skills-index-map.json); never hand-edit the page"
+}
+
 Write-Host ""
 Write-Host "[Phase 8] Document Audience and Encoding Hygiene" -ForegroundColor Yellow
 Write-Host "─────────────────────────────────────────────" -ForegroundColor DarkGray

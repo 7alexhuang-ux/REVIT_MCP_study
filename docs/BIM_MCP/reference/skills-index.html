@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>try{if(localStorage.getItem("bim-theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 <title>Skills 索引（61 個）· BIM_MCP</title>
 <meta property="og:title" content="RevitMCP Skills 索引：61 個編排層工作流">
 <meta property="og:description" content="61 個 Skill × 描述 × 觸發關鍵字 × 對應 Domain 表。Skill 是編排（何時/順序），Domain 是知識（法規/SOP）。從 CLAUDE.md 抽出。">
@@ -42,7 +43,7 @@
     letter-spacing: 1.5px;
     text-transform: uppercase;
     color: var(--text-faint);
-    background: rgba(255,255,255,0.04);
+    background: var(--tint-1);
     padding: 2px 8px;
     border-radius: var(--radius-sm);
     margin-top: 6px;
@@ -62,8 +63,8 @@
   .trigger-tag {
     font-size: 11px;
     color: var(--warn);
-    background: rgba(251,191,36,0.08);
-    border: 1px dashed rgba(251,191,36,0.3);
+    background: var(--warn-bg);
+    border: 1px dashed var(--warn-border);
     padding: 2px 8px;
     border-radius: var(--radius-sm);
     font-family: var(--font-tech);
@@ -102,7 +103,7 @@
   }
 </style>
 </head>
-<body data-prev="domain-index.html" data-next="tools-index.html">
+<body>
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -112,9 +113,8 @@
     <span class="bim-topnav-sep">/</span>
     <span class="bim-topnav-current">Skills 索引</span>
   </div>
-  <div class="bim-topnav-actions">
+  <div class="bim-topnav-actions" data-route-nav="top">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn bim-topnav-btn-github" title="View source on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
-    <a href="tools-index.html" class="bim-topnav-btn">Tools 索引 →</a>
     <a href="philosophy-22-propositions.html" class="bim-topnav-btn">22 命題</a>
   </div>
 </nav>
@@ -1089,13 +1089,13 @@
       <tr><td><code>/domain-diagram</code></td><td>F 進階</td><td>domain SOP 流程圖像化</td><td>domain-flow-visualization</td></tr>
       <tr><td><code>/dll-to-mcp-tool</code></td><td>F 進階</td><td>把 DLL/.cs 封裝為 MCP 工具</td><td>—</td></tr>
       <tr><td><code>/archicad-skill-adapter</code></td><td>F 進階</td><td>Revit Skill 轉譯為 Archicad MCP workflow</td><td>tool-capability-boundary</td></tr>
-      <tr><td><code>/GM_import</code></td><td>G 綠建材</td><td>解析 Set 對齊請求，產生 Revit 注入計畫</td><td>&#8212;</td></tr>
+      <tr><td><code>/GM_import</code></td><td>G 綠建材</td><td>解析 Set 對齊請求，產生 Revit 注入計畫</td><td>—</td></tr>
       <tr><td><code>/GM_inject</code></td><td>G 綠建材</td><td>把已對齊 Set 實際寫入 Revit（材質/Type/參數）</td><td>GM_parameter-schema / GM_rfa-family-injection</td></tr>
       <tr><td><code>/GM_query</code></td><td>G 綠建材</td><td>查詢模型中已寫入的綠建材認證資訊</td><td>GM_parameter-schema / GM_catalog / GM_rfa-family-injection</td></tr>
-      <tr><td><code>/GM_set</code></td><td>G 綠建材</td><td>比對已存 Set 與最新 TABC 快照，更新過期計畫</td><td>&#8212;</td></tr>
-      <tr><td><code>/GM_update</code></td><td>G 綠建材</td><td>從 TABC 官網更新本機資料庫 + 展示網頁快取</td><td>&#8212;</td></tr>
-      <tr><td><code>/GM_web</code></td><td>G 綠建材</td><td>開啟綠建材檢索平台與 Set Manager 網頁</td><td>&#8212;</td></tr>
-      <tr><td><code>/GM_kanban</code></td><td>G 綠建材</td><td>開啟專案看板</td><td>&#8212;</td></tr>
+      <tr><td><code>/GM_set</code></td><td>G 綠建材</td><td>比對已存 Set 與最新 TABC 快照，更新過期計畫</td><td>—</td></tr>
+      <tr><td><code>/GM_update</code></td><td>G 綠建材</td><td>從 TABC 官網更新本機資料庫 + 展示網頁快取</td><td>—</td></tr>
+      <tr><td><code>/GM_web</code></td><td>G 綠建材</td><td>開啟綠建材檢索平台與 Set Manager 網頁</td><td>—</td></tr>
+      <tr><td><code>/GM_kanban</code></td><td>G 綠建材</td><td>開啟專案看板</td><td>—</td></tr>
     </tbody>
   </table>
 </section>
@@ -1137,9 +1137,7 @@
 </section>
 
 <footer class="bim-footer">
-  <div class="bim-footer-actions">
-    <a href="tools-index.html" class="bim-footer-btn primary">下一篇 →</a>
-    <a href="domain-index.html" class="bim-footer-btn">← 上一篇</a>
+  <div class="bim-footer-actions" data-route-nav="foot">
     <a href="philosophy-22-propositions.html" class="bim-footer-btn">22 命題</a>
     <a href="../index.html" class="bim-footer-btn">回首頁</a>
   </div>
