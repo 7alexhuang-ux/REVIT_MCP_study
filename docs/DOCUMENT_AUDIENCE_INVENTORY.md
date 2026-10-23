@@ -84,6 +84,7 @@ These must remain understandable by both sides.
 | old event logs | Preserve by default |
 | bundled external references | Preserve source snapshot |
 | date-prefixed `docs/MMDD-*.html` (e.g. `0425-presentation.html`, `0523-monthly.html`) | Immutable event snapshots. Must carry a `data-snapshot="YYYY-MM-DD"` banner. Their counts reflect the event date and are intentionally excluded from count sync (QAQC Phase 7). |
+| event pages `docs/BIM_MCP/YYYY-MM/*.html` (e.g. `2026-07/harvest-waves.html`, `2026-10/fork-harvest.html`) | Immutable event snapshots. Must carry the canonical `data-snapshot="YYYY-MM-DD"` banner right after `<body>`, month matching the folder (QAQC 7-8). Excluded from count sync; meta-refresh redirect stubs are banner-exempt but still count-scanned. |
 | `docs/0523-dry-run-retrospective.md` | Event retrospective; preserve as written |
 
 ## Future Writing Rules
