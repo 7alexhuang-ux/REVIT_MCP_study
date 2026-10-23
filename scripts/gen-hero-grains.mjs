@@ -1,5 +1,6 @@
 // Generates the two "grains" hero SVGs (skills / domain) from canonical counts.
-// Self-contained animated SVG (embedded CSS @keyframes) — works as <img>, no runtime lib.
+// Self-contained SVG (embedded CSS @keyframes) — works as <img>, no runtime lib.
+// Static-first: every cell is fully visible at t=0 (print/PDF/preview safe); only the looping glow animates.
 // Re-run whenever counts change so the hero art never goes stale again:
 //   node scripts/gen-hero-grains.mjs
 import { writeFileSync, readFileSync, readdirSync } from 'node:fs';
@@ -32,9 +33,8 @@ const grainsSVG = ({ title, sub, groups, cols }) => {
   const H = legendY + 60;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 ${H}" width="1200" height="${H}" font-family="'Noto Sans TC','Helvetica Neue',Inter,sans-serif">
 <style>
-  .g{transform-box:fill-box;transform-origin:center;opacity:0;
-     animation:pop .6s cubic-bezier(.16,1,.3,1) forwards, glow 4.5s ease-in-out infinite;}
-  @keyframes pop{0%{opacity:0;transform:scale(.35) translateY(14px)}60%{opacity:1;transform:scale(1.12)}100%{opacity:1;transform:scale(1)}}
+  .g{transform-box:fill-box;transform-origin:center;opacity:1;
+     animation:glow 4.5s ease-in-out infinite;}
   @keyframes glow{0%,100%{filter:drop-shadow(0 0 0 rgba(0,0,0,0))}50%{filter:drop-shadow(0 0 7px rgba(255,255,255,.22))}}
   .num{fill:#fff;font-size:128px;font-weight:800;letter-spacing:-3px}
   .t{fill:rgba(255,255,255,.92);font-size:40px;font-weight:700}
