@@ -3,16 +3,62 @@
   function qsa(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
 
   // ============================================================
-  // MEETUP_SIGNUP_URL — 月小聚報名表單，每月更新一次
-  // ⚠ MONTHLY: 換月時只改這一行，所有 [data-meetup-link] 元素自動套用
+  // MEETUP_SIGNUP — 月小聚報名設定（url + eventDate 成對維護）
+  // 開放報名：兩個欄位都填。url = 報名表單網址；eventDate = 活動日期 YYYY-MM-DD（台北時間）。
+  // 自動關閉：活動當天（含）之前按鈕可按；台北時間過了 eventDate 就自動停用，不必記得回來改。
+  // 沒有新連結時：url 與 eventDate 都留空字串，所有 [data-meetup-link] 按鈕會顯示「目前未開放報名」且按不下去。
+  // QA 7-17 會檢查：url 有填但 eventDate 缺漏／格式錯誤／已過期 → FAIL（逼你換下一場的連結＋日期，或清空 url）。
+  // 格式：必須是單一一行 var MEETUP_SIGNUP = { url: "…", eventDate: "…" }; —— url 與 eventDate 都要用單引號或雙引號的純字串寫在這一行（不可用樣板字串、不可串接、值前後不可有空白），兩個鍵順序不拘、可有尾逗號，也不要另外對它重新賦值。
+  // QA 7-17 會實際執行本檔，只信 window.__meetupSignupEffective() 回傳的 url / eventDate（即訪客實際看到的設定），並要求上面那一行原文含有同樣的純字串。
+  // 舊的八月表單連結可從 git 歷史 e805fac 找回，不要再填回來。
   // ============================================================
-  var MEETUP_SIGNUP_URL = "https://forms.gle/TFKZuxLyoWrtykoP6";
+  var MEETUP_SIGNUP = { url: "https://forms.gle/B27MLgRv5EWYdp5s6", eventDate: "2026-10-24" };  // url = 報名表單；eventDate = 活動日期 YYYY-MM-DD（台北時間），活動當天結束後自動停用
+  // 唯讀 getter：執行期與 QA 7-17 都讀這個物件，所以閘門檢查的就是訪客實際看到的設定。
+  window.__meetupSignupEffective = function () { return { url: MEETUP_SIGNUP.url, eventDate: MEETUP_SIGNUP.eventDate }; };
+
+  // 今天的日期（台北時間）YYYY-MM-DD；Intl 不可用時退回本機時間
+  function taipeiToday() {
+    try {
+      var s = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    } catch (e) { /* 落到下面的本機時間 */ }
+    var d = new Date();
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  }
+
+  function isRealDate(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || "");
+    if (!m) return false;
+    var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
+  }
+
+  // 只讀 getter 一次；url 必須是 https:// 開頭且不含空白，日期必須是真實日期且台北時間今天 <= eventDate，否則回傳 null（＝關閉）
+  function meetupConfig() {
+    var c = window.__meetupSignupEffective();
+    if (!(c && typeof c.url === "string" && /^https:\/\/\S+$/.test(c.url) && isRealDate(c.eventDate) && taipeiToday() <= c.eventDate)) return null;
+    return { url: c.url, eventDate: c.eventDate };
+  }
 
   window.initMeetupLinks = function initMeetupLinks() {
+    var c = meetupConfig();
     qsa("[data-meetup-link]").forEach(function (el) {
-      el.href = MEETUP_SIGNUP_URL;
-      if (!el.getAttribute("target")) el.setAttribute("target", "_blank");
-      if (!el.getAttribute("rel")) el.setAttribute("rel", "noopener");
+      if (c) {
+        el.href = c.url;
+        if (!el.getAttribute("target")) el.setAttribute("target", "_blank");
+        if (!el.getAttribute("rel")) el.setAttribute("rel", "noopener");
+        el.removeAttribute("aria-disabled");
+        el.classList.remove("is-disabled");
+      } else {
+        el.removeAttribute("href");
+        el.removeAttribute("target");
+        el.removeAttribute("rel");
+        el.setAttribute("aria-disabled", "true");
+        el.classList.add("is-disabled");
+        el.textContent = "\uD83D\uDCDD 目前未開放報名";
+        el.title = "下一場小聚的報名連結尚未公布";
+      }
     });
   };
 

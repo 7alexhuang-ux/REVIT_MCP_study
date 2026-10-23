@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 # Revit MCP QA/QC Verification Script
-# Usage: .\scripts\verify-qaqc.ps1 [-SkipBuild] [-SkipDeploy] [-Version 2024] [-AddinsRoot <path>]
+# Usage: .\scripts\verify-qaqc.ps1 [-SkipBuild] [-SkipDeploy] [-Version 2024] [-AddinsRoot <path>] [-QaToday YYYY-MM-DD]
 #
 # Phases:
 #   1. File Structure Integrity
@@ -20,7 +20,10 @@ param(
     [string]$Version = "",
     # Phase 5 專用：Addins 根目錄（預設為使用者實際部署位置）。
     # 指向暫存 fixture 即可對 Phase 5 做負向測試，不動真實部署。
-    [string]$AddinsRoot = ""
+    [string]$AddinsRoot = "",
+    # 僅 Phase 7 check 7-17（小聚報名連結時效）使用：以此日期（YYYY-MM-DD，台北時間）取代「今天」，
+    # 讓負向測試結果可重現。預設空字串 = 今天（Asia/Taipei，UTC+8）。
+    [string]$QaToday = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -2025,6 +2028,280 @@ else {
         $(if ($kanbanProblems.Count -gt 0) { "$($kanbanProblems.Count) problem(s). Regenerate with: python3 scripts/gen-kanban-index.py" } else { "" })
     if ($kanbanProblems.Count -gt 0) { $kanbanProblems | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow } }
 }
+
+# 7-17: Meetup signup link freshness (docs/BIM_MCP/shared.js MEETUP_SIGNUP)
+# The signup button is driven by one config object { url, eventDate }. A non-empty url whose
+# eventDate has passed would keep advertising a closed form, so it FAILs here. Fail closed:
+# anything this check cannot establish is a FAIL, never a silent pass.
+# Method: the EFFECTIVE config is authoritative. shared.js is executed by node inside a vm with a stub
+# window/document (the harness is fed over stdin, so no temp file exists) and the url/eventDate that
+# window.__meetupSignupEffective() returns - the very getter the runtime reads - are judged: https://
+# address, real calendar date, not before today (Asia/Taipei, or -QaToday). Values are NOT trimmed.
+# Everything static is deliberately linear-time string scanning (IndexOf / StartsWith, no regex):
+#  - exactly one line starting with 'var MEETUP_SIGNUP', no line where the name follows a quote
+#    character (string decoy), and that definition line must spell the effective url and eventDate as
+#    plain quoted strings (maintainability checks, not a security boundary);
+#  - no living page may carry a static href on a [data-meetup-link] element: one forward quote-aware
+#    pass (HTML comments skipped, a quote opens a value only right after '='), run only on pages that
+#    contain the token, with a 512 KB guard. Frozen event pages (docs\BIM_MCP\YYYY-MM\) and
+#    reference\external are out of scope.
+# Bounded: shared.js over 512 KB is refused, vm timeouts are 1000 ms (load) + 500 ms (getter read,
+# microtaskMode afterEvaluate so promise loops are covered), and the node process is killed after 5 s.
+# Threat model / known limits: the vm is not a security boundary - vm detection, stateful getters,
+# context escapes and mutations deferred into functions that only run later in the browser (e.g. inside
+# initAll) are deliberately hostile and out of scope. The runtime still disables the buttons by date and
+# requires https://, so non-hostile staleness never reaches visitors. This gate protects against a
+# maintainer forgetting to refresh the config.
+# -QaToday overrides "today" for deterministic negative tests.
+$meetupProblems = @()
+$meetupSummary = "config invalid or stale"
+$meetupSharedPath = Join-Path $projectRoot "docs\BIM_MCP\shared.js"
+$meetupSharedJs = Read-FileText $meetupSharedPath
+$meetupToday = $QaToday
+if (-not $meetupToday) { $meetupToday = [DateTime]::UtcNow.AddHours(8).ToString("yyyy-MM-dd", [Globalization.CultureInfo]::InvariantCulture) }
+$meetupInv = [Globalization.CultureInfo]::InvariantCulture
+$meetupParsedToday = [DateTime]::MinValue
+$meetupMaxBytes = 524288
+Write-Host ""
+Write-Host "  7-17. Meetup signup link freshness (effective MEETUP_SIGNUP in shared.js + no static href):" -ForegroundColor Cyan
+if (-not [DateTime]::TryParseExact($meetupToday, "yyyy-MM-dd", $meetupInv, [Globalization.DateTimeStyles]::None, [ref]$meetupParsedToday)) {
+    $meetupProblems += "-QaToday '$meetupToday' is not a valid YYYY-MM-DD date"
+}
+if (-not (Test-Path -LiteralPath $meetupSharedPath -PathType Leaf)) {
+    $meetupProblems += "docs/BIM_MCP/shared.js is missing (fail closed)"
+}
+elseif ($null -eq $meetupSharedJs -or $meetupSharedJs.Trim().Length -eq 0) {
+    $meetupProblems += "docs/BIM_MCP/shared.js exists but is empty or unreadable (fail closed)"
+}
+elseif ($meetupSharedJs.Length -gt $meetupMaxBytes) {
+    $meetupProblems += "docs/BIM_MCP/shared.js is larger than 512 KB; refusing to evaluate (fail closed)"
+}
+else {
+    # ---- (1) linear line rules: single definition line, no string decoy ----
+    $meetupDefCount = 0
+    $meetupDefLine = ""
+    $meetupReassign = 0
+    $meetupDecoys = @()
+    $meetupNameAt = $meetupSharedJs.IndexOf("MEETUP_SIGNUP", [StringComparison]::Ordinal)
+    $meetupQuoteChars = [char[]]@('"', "'", '`')
+    while ($meetupNameAt -ge 0) {
+        $ls = $meetupSharedJs.LastIndexOf("`n", $meetupNameAt) + 1
+        $le = $meetupSharedJs.IndexOf("`n", $meetupNameAt)
+        if ($le -lt 0) { $le = $meetupSharedJs.Length }
+        $lineText = $meetupSharedJs.Substring($ls, $le - $ls).TrimEnd("`r")
+        $trimmed = $lineText.TrimStart(" `t")
+        if ($trimmed.StartsWith("var MEETUP_SIGNUP", [StringComparison]::Ordinal) -and ($trimmed.Length -eq 17 -or $trimmed[17] -eq '=' -or [char]::IsWhiteSpace($trimmed[17]))) {
+            $meetupDefCount++
+            if ($meetupDefCount -eq 1) { $meetupDefLine = $lineText }
+        }
+        else {
+            # a non-comment line that assigns to the name (window.MEETUP_SIGNUP = ..., let X = ...) is not allowed
+            $headTop = $meetupSharedJs.Substring($ls, $meetupNameAt - $ls).TrimStart(" `	")
+            $restTxt = $meetupSharedJs.Substring($meetupNameAt + 13, $le - $meetupNameAt - 13).TrimStart(" `	")
+            if (-not ($headTop.StartsWith("//", [StringComparison]::Ordinal) -or $headTop.StartsWith("/*", [StringComparison]::Ordinal) -or $headTop.StartsWith("*", [StringComparison]::Ordinal)) -and $restTxt.StartsWith("=", [StringComparison]::Ordinal) -and -not $restTxt.StartsWith("==", [StringComparison]::Ordinal)) {
+                $meetupReassign++
+            }
+        }
+        $head = $meetupSharedJs.Substring($ls, $meetupNameAt - $ls).TrimStart(" `t")
+        if (-not ($head.StartsWith("//", [StringComparison]::Ordinal) -or $head.StartsWith("/*", [StringComparison]::Ordinal) -or $head.StartsWith("*", [StringComparison]::Ordinal))) {
+            if ($head.IndexOfAny($meetupQuoteChars) -ge 0) {
+                $pre = $meetupSharedJs.Substring(0, $ls); $lineNo = $pre.Length - $pre.Replace("`n", "").Length + 1
+                $meetupDecoys += $lineNo
+                if ($meetupDecoys.Count -ge 5) { break }
+            }
+        }
+        if ($le -ge $meetupSharedJs.Length) { break }
+        $meetupNameAt = $meetupSharedJs.IndexOf("MEETUP_SIGNUP", $le, [StringComparison]::Ordinal)
+    }
+    if ($meetupDefCount -ne 1) {
+        $meetupProblems += "expected exactly one line starting with 'var MEETUP_SIGNUP' in shared.js (found $meetupDefCount) (fail closed)"
+    }
+    if ($meetupReassign -gt 0) {
+        $meetupProblems += "MEETUP_SIGNUP is assigned on another line ($meetupReassign occurrence(s)); only the single 'var MEETUP_SIGNUP' definition may assign it (fail closed)"
+    }
+    if ($meetupDecoys.Count -gt 0) {
+        $meetupProblems += "MEETUP_SIGNUP appears after a quote character on line(s) $($meetupDecoys -join ', '); a string decoy is not allowed (fail closed)"
+    }
+
+    # ---- (2) effective config: node reads the harness from stdin, shared.js path via environment ----
+    $meetupEff = $null
+    $meetupNode = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $meetupExe = $null
+    if (-not $meetupNode) {
+        $meetupProblems += "node not on PATH, so the effective MEETUP_SIGNUP cannot be evaluated (fail closed)"
+    }
+    else {
+        $meetupExe = $meetupNode.Source
+        if ($meetupExe.EndsWith(".cmd", [StringComparison]::OrdinalIgnoreCase) -or $meetupExe.EndsWith(".bat", [StringComparison]::OrdinalIgnoreCase)) {
+            $sibling = Join-Path (Split-Path -Parent $meetupExe) "node.exe"
+            if (Test-Path -LiteralPath $sibling -PathType Leaf) { $meetupExe = $sibling } else { $meetupExe = $null }
+            if (-not $meetupExe) { $meetupProblems += "node resolves to a .cmd/.bat shim, not an executable (fail closed)" }
+        }
+    }
+    if ($meetupExe) {
+        $meetupHarness = @'
+import fs from 'node:fs'; import vm from 'node:vm';
+const emit = (o) => { fs.writeSync(1, JSON.stringify(o) + '\n'); process.exit(0); };
+let src; try { src = fs.readFileSync(process.env.QA_MEETUP_SHARED, 'utf8'); } catch (e) { emit({ error: 'cannot read shared.js: ' + e.message }); }
+const stub = () => new Proxy(function () {}, { get: (t, k) => k === Symbol.toPrimitive ? () => '' : (k === 'length' ? 0 : stub()), apply: () => stub(), construct: () => stub() });
+const win = { document: stub(), addEventListener() {}, location: { pathname: '/x', hash: '' }, matchMedia: () => ({ matches: false, addEventListener() {} }), setTimeout() {}, Intl, Date, console: { log() {}, warn() {}, error() {} } };
+win.window = win;
+const ctx = vm.createContext(win, { microtaskMode: 'afterEvaluate' });
+try { vm.runInContext(src, ctx, { timeout: 1000 }); } catch (e) { emit({ error: 'shared.js threw or timed out while loading: ' + e.message }); }
+const READ = "(function(){ var g = window.__meetupSignupEffective; if (typeof g !== 'function') return ['err','window.__meetupSignupEffective is not a function'];"
+  + " var v = g(); if (!v) return ['err','getter returned nothing']; var u = v.url, d = v.eventDate;"
+  + " return ['ok', typeof u === 'string' ? u : null, typeof d === 'string' ? d : null]; })()";
+let r; try { r = vm.runInContext(READ, ctx, { timeout: 500 }); } catch (e) { emit({ error: 'getter threw or timed out: ' + e.message }); }
+if (!Array.isArray(r) || r[0] !== 'ok') emit({ error: String(r && r[1]) });
+if (typeof r[1] !== 'string' || typeof r[2] !== 'string') emit({ error: 'effective url/eventDate are not both strings' });
+emit({ url: r[1], eventDate: r[2] });
+'@
+        $meetupProc = $null
+        try {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = $meetupExe
+            $psi.Arguments = '--input-type=module -'
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow = $true
+            $psi.RedirectStandardInput = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $psi.StandardOutputEncoding = [Text.Encoding]::UTF8
+            $psi.EnvironmentVariables['QA_MEETUP_SHARED'] = $meetupSharedPath
+            $meetupProc = [System.Diagnostics.Process]::Start($psi)
+            $meetupProc.StandardInput.Write($meetupHarness)
+            $meetupProc.StandardInput.Close()
+            $outTask = $meetupProc.StandardOutput.ReadToEndAsync()
+            $errTask = $meetupProc.StandardError.ReadToEndAsync()
+            if (-not $meetupProc.WaitForExit(5000)) {
+                try { $meetupProc.Kill($true) } catch { try { $meetupProc.Kill() } catch { } }
+                $meetupProc.WaitForExit()
+                $meetupProblems += "node did not finish within 5 s and was killed (fail closed)"
+            }
+            else {
+                $meetupProc.WaitForExit()
+                $rawOut = $outTask.Result
+                $lastLine = ""
+                foreach ($ol in ($rawOut -split "`n")) { if ($ol.Trim().Length -gt 0) { $lastLine = $ol.Trim() } }
+                if ($meetupProc.ExitCode -ne 0 -or $lastLine.Length -eq 0 -or $lastLine.Length -gt 4096) {
+                    $meetupProblems += "node exited with $($meetupProc.ExitCode) and produced no usable output (fail closed)"
+                }
+                else {
+                    $parsed = $null
+                    try { $parsed = $lastLine | ConvertFrom-Json -ErrorAction Stop } catch { $parsed = $null }
+                    if ($null -eq $parsed) { $meetupProblems += "node output is not valid JSON (fail closed)" }
+                    elseif ($parsed.PSObject.Properties.Name -contains 'error') { $meetupProblems += "cannot evaluate the effective config: $($parsed.error) (fail closed)" }
+                    elseif (($parsed.PSObject.Properties.Name -contains 'url') -and ($parsed.PSObject.Properties.Name -contains 'eventDate')) { $meetupEff = $parsed }
+                    else { $meetupProblems += "node output has no url/eventDate (fail closed)" }
+                }
+            }
+        }
+        catch { $meetupProblems += "could not run node: $($_.Exception.Message) (fail closed)" }
+        finally { if ($meetupProc) { $meetupProc.Dispose() } }
+    }
+
+    # ---- (3) literal echo + freshness rules on the effective values ----
+    if ($meetupEff -and $meetupDefCount -eq 1) {
+        $eu = [string]$meetupEff.url
+        $ed = [string]$meetupEff.eventDate
+        $echoUrl = $meetupDefLine.Contains('"' + $eu + '"') -or $meetupDefLine.Contains("'" + $eu + "'")
+        $echoDate = $meetupDefLine.Contains('"' + $ed + '"') -or $meetupDefLine.Contains("'" + $ed + "'")
+        if (-not ($echoUrl -and $echoDate)) {
+            $meetupProblems += "the 'var MEETUP_SIGNUP' line does not contain the effective url/eventDate as plain quoted strings - something overrides the config at load time, or the literal is not a plain string (fail closed)"
+        }
+        elseif (-not $eu) {
+            $meetupSummary = "registration closed - buttons disabled"
+        }
+        elseif (-not ($eu.StartsWith("https://", [StringComparison]::Ordinal) -and $eu.Length -gt 8 -and $eu.IndexOfAny([char[]]@(' ', "`t", "`r", "`n")) -lt 0)) {
+            $meetupProblems += "url must be an https:// address with no whitespace (got a value that is not)"
+        }
+        else {
+            $meetupParsedDate = [DateTime]::MinValue
+            if (-not $ed) {
+                $meetupProblems += "url is set but eventDate is empty - set eventDate (YYYY-MM-DD, Taipei) or clear url"
+            }
+            elseif (-not [DateTime]::TryParseExact($ed, "yyyy-MM-dd", $meetupInv, [Globalization.DateTimeStyles]::None, [ref]$meetupParsedDate)) {
+                $meetupProblems += "eventDate '$ed' is not a valid YYYY-MM-DD date (no padding allowed)"
+            }
+            elseif ($meetupParsedToday -ne [DateTime]::MinValue -and $meetupParsedDate -lt $meetupParsedToday) {
+                $meetupProblems += "signup link is stale: eventDate $ed is before today ($meetupToday). Set the next meetup's link + eventDate in shared.js, or clear url"
+            }
+            elseif ($meetupParsedToday -ne [DateTime]::MinValue) {
+                $meetupSummary = "registration open until $ed"
+            }
+        }
+    }
+}
+
+# ---- (4) static href scan on living pages: one forward, quote-aware, linear pass per candidate page ----
+$meetupBimRoot = Join-Path $projectRoot "docs\BIM_MCP"
+$meetupHtmlScanned = 0
+$meetupStops = [char[]]@('>', '=', 'd', 'D', 'h', 'H')
+if (Test-Path -LiteralPath $meetupBimRoot) {
+    foreach ($pageFile in (Get-ChildItem -LiteralPath $meetupBimRoot -Recurse -Filter *.html -File -ErrorAction SilentlyContinue)) {
+        $relN = $pageFile.FullName.Substring($meetupBimRoot.Length).TrimStart('\', '/').Replace('\', '/')
+        if ($relN.Length -ge 8 -and [char]::IsDigit($relN[0]) -and [char]::IsDigit($relN[1]) -and [char]::IsDigit($relN[2]) -and [char]::IsDigit($relN[3]) -and $relN[4] -eq '-' -and [char]::IsDigit($relN[5]) -and [char]::IsDigit($relN[6]) -and $relN[7] -eq '/') { continue }
+        if ($relN.StartsWith("reference/external", [StringComparison]::Ordinal)) { continue }
+        $meetupHtmlScanned++
+        $t = Read-FileText $pageFile.FullName
+        if (-not $t) { continue }
+        if ($t.IndexOf("data-meetup-link", [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+        $relName = "docs/BIM_MCP/" + $relN
+        if ($t.Length -gt $meetupMaxBytes) {
+            $meetupProblems += "${relName}: page is larger than 512 KB and carries data-meetup-link; not scanned (fail closed)"
+            continue
+        }
+        $n = $t.Length; $pos = 0; $pageProblems = 0; $ltSeen = 0
+        while ($pos -lt $n -and $pageProblems -lt 5) {
+            $lt = $t.IndexOf('<', $pos)
+            if ($lt -lt 0) { break }
+            $ltSeen++; if ($ltSeen -gt 20000) { $meetupProblems += "${relName}: more than 20000 '<' positions; not scanned further (fail closed)"; break }
+            if ($lt + 4 -le $n -and [string]::CompareOrdinal($t, $lt, '<!--', 0, 4) -eq 0) {
+                $e = $t.IndexOf('-->', $lt + 4, [StringComparison]::Ordinal)
+                if ($e -lt 0) { break }
+                $pos = $e + 3; continue
+            }
+            if ($lt + 1 -ge $n -or -not [char]::IsLetter($t[$lt + 1])) { $pos = $lt + 1; continue }
+            $i = $lt + 1; $hasMeetup = $false; $hasHref = $false; $closed = $false
+            while ($i -lt $n) {
+                $i = $t.IndexOfAny($meetupStops, $i)
+                if ($i -lt 0) { $i = $n; break }
+                $c = $t[$i]
+                if ($c -eq '>') { $closed = $true; $i++; break }
+                if ($c -eq '=') {
+                    $j = $i + 1
+                    while ($j -lt $n -and [char]::IsWhiteSpace($t[$j])) { $j++ }
+                    if ($j -lt $n -and ($t[$j] -eq '"' -or $t[$j] -eq "'")) {
+                        $k = $t.IndexOf($t[$j], $j + 1)
+                        if ($k -lt 0) { $i = $n; break }
+                        $i = $k + 1; continue
+                    }
+                    $i = $j; continue
+                }
+                if ($i + 16 -le $n -and [string]::Compare($t, $i, 'data-meetup-link', 0, 16, [StringComparison]::OrdinalIgnoreCase) -eq 0) { $hasMeetup = $true; $i += 16; continue }
+                if ($i + 4 -le $n -and [string]::Compare($t, $i, 'href', 0, 4, [StringComparison]::OrdinalIgnoreCase) -eq 0) { $hasHref = $true; $i += 4; continue }
+                $i++
+            }
+            if (-not $closed) {
+                if ($hasMeetup) {
+                    $pre = $t.Substring(0, $lt); $lineNo = $pre.Length - $pre.Replace("`n", "").Length + 1
+                    $meetupProblems += "${relName}:${lineNo} - tag carrying data-meetup-link is never closed (fail closed)"
+                }
+                break
+            }
+            if ($hasMeetup -and $hasHref) {
+                $pre = $t.Substring(0, $lt); $lineNo = $pre.Length - $pre.Replace("`n", "").Length + 1
+                $meetupProblems += "${relName}:${lineNo} - [data-meetup-link] element has a static href (must be href-less; shared.js sets it only while registration is open)"
+                $pageProblems++
+            }
+            $pos = $i
+        }
+    }
+}
+
+Write-Check "Meetup signup link is current or closed, and no static href on data-meetup-link ($meetupSummary; $meetupHtmlScanned living pages scanned)" ($meetupProblems.Count -eq 0) `
+    $(if ($meetupProblems.Count -gt 0) { "$($meetupProblems.Count) problem(s): " + ($meetupProblems -join " | ") } else { "" })
+if ($meetupProblems.Count -gt 0) { $meetupProblems | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow } }
 
 Write-Host ""
 Write-Host "[Phase 8] Document Audience and Encoding Hygiene" -ForegroundColor Yellow

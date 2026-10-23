@@ -661,3 +661,16 @@ body:has(> div[data-snapshot]) .bim-section.bim-anchor.no-snap {
 /* ===== Run C P0b：淺色主題覆寫（代幣見 styles.css）===== */
 html[data-theme="light"] .bim-drawer-head { background: var(--bar-bg); }
 html[data-theme="light"] .bim-drawer { box-shadow: -20px 0 60px rgba(0,0,0,0.25); }
+/* ===== 小聚報名按鈕：沒有現行連結時停用（shared.js initMeetupLinks 設 aria-disabled） =====
+   文字色 #8a8a8a 約 5.8:1（對按鈕實際底色，≥ 3:1）；不用 opacity，避免再被稀釋。 */
+[data-meetup-link][aria-disabled="true"].bim-topnav-btn,
+[data-meetup-link][aria-disabled="true"].bim-footer-btn {
+  background: rgba(255,255,255,0.03);
+  border-color: var(--border);
+  border-style: dashed;
+  color: #8a8a8a;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none;
+  box-shadow: none;
+}
