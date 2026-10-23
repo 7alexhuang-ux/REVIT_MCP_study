@@ -309,6 +309,18 @@ namespace RevitMCP.Core
                         result = RenumberRoomsByLevel(parameters);
                         break;
 
+                    case "renumber_parking_spaces":
+                        result = RenumberParkingSpaces(parameters);
+                        break;
+
+                    case "create_sequence_numbers":
+                        result = CreateSequenceNumbers(parameters);
+                        break;
+
+                    case "create_floor_area_formula":
+                        result = CreateFloorAreaFormula(parameters);
+                        break;
+
                     case "get_room_surface_areas":
                         result = GetRoomSurfaceAreas(parameters);
                         break;
@@ -927,6 +939,11 @@ namespace RevitMCP.Core
                         break;
                     case "clear_previous_annotations":
                         result = ClearPreviousAnnotations(parameters);
+                        break;
+
+                    // === 結構構架自動端點對齊/切齊 ===
+                    case "align_structural_framing":
+                        result = AlignStructuralFraming(parameters);
                         break;
 
 #if REVIT2024_OR_GREATER
