@@ -136,6 +136,10 @@ export const OVERRIDE: Record<string, ClassificationHints> = {
     set_link_display_settings: { readOnlyHint: false, destructiveHint: false },
 
     diagnose_curtain_wall_elevation_dimensions: { readOnlyHint: false, destructiveHint: false },
+    // 檢討 / 影像工具會建立「AI檢討_*」3D 視圖，並可選擇放置標記或上色 → 屬寫入型（非破壞性）
+    check_beam_clear_height: { readOnlyHint: false, destructiveHint: false },
+    check_mep_spacing: { readOnlyHint: false, destructiveHint: false },
+    export_view_image: { readOnlyHint: false, destructiveHint: false },
 };
 
 /**

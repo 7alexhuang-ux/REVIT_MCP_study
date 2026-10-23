@@ -998,6 +998,31 @@ namespace RevitMCP.Core
                         result = CreateDuctSystem(parameters);
                         break;
 
+                    case "get_model_snapshot":
+                        result = GetModelSnapshot(parameters);
+                        break;
+                    case "get_model_warnings":
+                        result = GetModelWarnings(parameters);
+                        break;
+                    case "get_recent_changes":
+                        result = GetRecentChanges(parameters);
+                        break;
+                    case "export_view_image":
+                        result = ExportViewImage(parameters);
+                        break;
+                    case "batch_modify_elements":
+                        result = BatchModifyElements(parameters);
+                        break;
+                    case "check_beam_clear_height":
+                        result = CheckBeamClearHeight(parameters);
+                        break;
+                    case "check_mep_spacing":
+                        result = CheckMepSpacing(parameters);
+                        break;
+                    case "clear_review_markers":
+                        result = ClearReviewMarkers(parameters);
+                        break;
+
                     default:
                         throw new NotImplementedException($"未實作的命令: {request.CommandName}");
                 }
