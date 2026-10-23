@@ -42,7 +42,9 @@
   body.wizard .bim-footer{display:none}
   body.wizard.wiz-last .bim-footer{display:block}
   @keyframes wizIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-  .wiz-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:14px 24px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:40}
+  .wiz-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:14px 24px;border-bottom:1px solid var(--border);background:var(--bg)}
+  @media(min-width:901px){.wiz-bar{padding-right:268px}}
+  body:not(.wizard) .wiz-ctrl{display:none}
   .wiz-pill{font-family:var(--font-tech);font-size:11px;letter-spacing:1px;padding:6px 12px;border:1px solid var(--border);border-radius:100px;color:var(--text-muted);cursor:pointer;background:var(--bg-card);user-select:none}
   .wiz-pill.done{color:var(--ok);border-color:rgba(74,222,128,.49)}
   .wiz-pill.active{color:#000;background:var(--accent);border-color:var(--accent);font-weight:700}
@@ -51,6 +53,8 @@
   .wiz-btn:hover{border-color:var(--accent-border);color:var(--accent)}
   .wiz-btn.primary{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700}
   .wiz-btn[disabled]{opacity:.3;cursor:default}
+  .wiz-all{margin-left:auto;font-family:var(--font-tech);font-size:11px;letter-spacing:1px;padding:6px 12px;border:1px solid var(--border);border-radius:100px;color:var(--text-muted);cursor:pointer;background:var(--bg-card)}
+  .wiz-all:hover,.wiz-all[aria-pressed="true"]{border-color:var(--accent-border);color:var(--accent)}
   .wiz-progress{font-family:var(--font-tech);font-size:11px;letter-spacing:2px;color:var(--text-faint)}
 </style>
 </head>
@@ -424,6 +428,10 @@ This document is intentionally abstract. It describes the idea, not a specific i
     <li><strong>之後每次：pull + ingest</strong><p>上游有新東西（月小聚後通常會有），跟 AI 說「pull 一下，ingest 有變動的」就完成更新 —— 同一個 pull 也同時更新了你的 MCP 工具和 schema 範本。發現值得回饋的，請 AI 幫你整理提案。</p></li>
   </ol>
   <h2 class="bim-section-title" style="margin-top:48px">最常見的兩個疑問</h2>
+  <figure class="bim-figure bim-illustration">
+    <img src="../images/wiki__firstrun__repo-and-vault.webp" alt="以整個 repo 作閱讀範圍，公共 Domain 與 vault 個人區透過連結關聯" loading="lazy">
+    <figcaption>概念示意圖（AI 生成），非軟體畫面。文字版見下方 Q1：Obsidian 打開的是整個 REVIT_MCP 資料夾，vault/ 只是其中的個人區。</figcaption>
+  </figure>
   <div class="why-card">
     <h4>Q1：Obsidian 的 vault 跟我們的 vault/ 是同一個東西嗎？</h4>
     <p>不是，這是命名撞車。<strong>Obsidian 說的「vault」= 它打開的那整個資料夾，也就是 REVIT_MCP 根目錄</strong>；我們的 <code>vault/</code> 子資料夾只是個人區的名字，不是給 Obsidian 開的。如果只開 <code>vault/</code>，你的 [[連結]] 連不到 domain 檔（Obsidian 連結出不了它的 vault 範圍），graph view 就只剩自己的筆記、沒有知識族譜了。</p>
@@ -473,12 +481,49 @@ document.getElementById("copyIdea").addEventListener("click", function(){
     var pill = document.createElement("span");
     pill.className = "wiz-pill";
     pill.textContent = (i + 1) + " " + (labels[i] || s.id);
-    pill.addEventListener("click", function(){ go(i); });
+    pill.addEventListener("click", function(){
+      if (document.body.classList.contains("wizard")) { go(i); return; }
+      /* 顯示全部步驟時：只捲動到該段並更新網址，不切換步驟 */
+      s.scrollIntoView({ block: "start" });
+      try { history.replaceState(null, "", "#" + s.id); } catch (e) {}
+    });
     bar.appendChild(pill);
   });
   var nav = document.querySelector(".bim-topnav");
-  nav.parentNode.insertBefore(bar, nav.nextSibling);
+  var ctx = document.querySelector(".bim-context-bar");
+  var anchor = ctx || nav;
+  anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+  /* 固定頂欄與 sticky context bar 會蓋住流程中靠前的內容：
+     以實測把 wiz-bar 推到它們下方（僅在頁首量測，避免捲動後失真） */
+  function syncTop(){
+    if (window.scrollY > 0) return;
+    bar.style.marginTop = "0px";
+    var covered = Math.max(nav ? nav.getBoundingClientRect().bottom : 0, ctx ? ctx.getBoundingClientRect().bottom : 0) - bar.getBoundingClientRect().top;
+    bar.style.marginTop = Math.max(0, Math.ceil(covered)) + "px";
+  }
+  syncTop();
+  window.addEventListener("resize", syncTop);
   var pills = Array.prototype.slice.call(bar.children);
+
+  /* 顯示全部步驟：移除 body.wizard，所有段落同時可見；偏好存 localStorage */
+  var ALLKEY = "pllmwiki-showall";
+  var allBtn = document.createElement("button");
+  allBtn.type = "button";
+  allBtn.className = "wiz-all";
+  allBtn.setAttribute("aria-pressed", "false");
+  allBtn.textContent = "顯示全部步驟";
+  bar.appendChild(allBtn);
+  function setAll(on, persist){
+    document.body.classList.toggle("wizard", !on);
+    allBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    allBtn.textContent = on ? "回到分步模式" : "顯示全部步驟";
+    if (persist) { try { localStorage.setItem(ALLKEY, on ? "1" : "0"); } catch (e) {} }
+  }
+  allBtn.addEventListener("click", function(){
+    var on = document.body.classList.contains("wizard");
+    setAll(on, true);
+    if (!on) go(current);
+  });
 
   steps.forEach(function(s, i){
     var ctrl = document.createElement("div");
@@ -504,7 +549,9 @@ document.getElementById("copyIdea").addEventListener("click", function(){
     s.appendChild(ctrl);
   });
 
-  function go(i){
+  var current = 0;
+  function go(i, keepScroll){
+    current = i;
     steps.forEach(function(s, j){
       s.classList.toggle("wiz-active", j === i);
       pills[j].classList.toggle("active", j === i);
@@ -513,7 +560,29 @@ document.getElementById("copyIdea").addEventListener("click", function(){
     document.body.classList.toggle("wiz-first", i === 0);
     document.body.classList.toggle("wiz-last", i === steps.length - 1);
     try { localStorage.setItem(KEY, String(i)); } catch (e) {}
-    window.scrollTo(0, 0);
+    if (!keepScroll) window.scrollTo(0, 0);
+  }
+
+  /* 依 location.hash 找出所在步驟；找不到回傳 -1 */
+  function hashStep(){
+    var id = "";
+    try { id = decodeURIComponent((location.hash || "").slice(1)); } catch (e) { id = (location.hash || "").slice(1); }
+    if (!id) return -1;
+    var el = document.getElementById(id);
+    if (!el) return -1;
+    for (var i = 0; i < steps.length; i++) {
+      if (steps[i] === el || steps[i].contains(el)) return i;
+    }
+    return -1;
+  }
+  function followHash(){
+    var i = hashStep();
+    if (i < 0) return;
+    var id = "";
+    try { id = decodeURIComponent(location.hash.slice(1)); } catch (e) { id = location.hash.slice(1); }
+    var el = document.getElementById(id);
+    if (document.body.classList.contains("wizard")) go(i, true);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "start" });
   }
 
   /* 站內 # 錨點改成跳到對應步驟（含 topnav 的「複製建置說明」） */
@@ -524,8 +593,7 @@ document.getElementById("copyIdea").addEventListener("click", function(){
     if (!id) return;
     for (var i = 0; i < steps.length; i++) {
       if (steps[i].id === id || steps[i].querySelector("#" + id)) {
-        e.preventDefault();
-        go(i);
+        if (document.body.classList.contains("wizard")) { e.preventDefault(); go(i); }
         return;
       }
     }
@@ -534,7 +602,14 @@ document.getElementById("copyIdea").addEventListener("click", function(){
   var saved = 0;
   try { saved = parseInt(localStorage.getItem(KEY) || "0", 10) || 0; } catch (e) {}
   if (saved < 0 || saved >= steps.length) saved = 0;
-  go(saved);
+  var showAll = false;
+  try { showAll = localStorage.getItem(ALLKEY) === "1"; } catch (e) {}
+  if (hashStep() >= 0) saved = hashStep();
+  go(saved, hashStep() >= 0);
+  if (showAll) setAll(true, false);
+  if (hashStep() >= 0) followHash();
+  /* shared.js 的 revealHash 先註冊先執行（負責 details／抽屜）；此處再切步驟並捲動 */
+  window.addEventListener("hashchange", followHash);
 })();
 </script>
 </body>
