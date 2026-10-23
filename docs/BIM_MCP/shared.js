@@ -141,7 +141,7 @@
   // PAGE_META 內建所有站內頁的標題 + 描述，footer 直接讀
   // ============================================================
   var PAGE_META = {
-    "index": { title: "BIM_MCP Hub", desc: "Reference / archive / latest 三層入口。" },
+    "index": { title: "BIM_MCP Hub", desc: "入口：安裝、第一次查詢、找方法、貢獻。" },
     "reference/philosophy-22-propositions": { title: "22 命題完整宣言", desc: "從「為什麼 MCP」到「會議場景」六群組。" },
     "reference/three-constitutions": { title: "四條憲法", desc: "Passive Ready / Data Honesty / Domain Method / Active Re-Anchoring。" },
     "reference/industry-evidence": { title: "業界證據", desc: "100× / 70% / $15-25K + 三套成熟方法論。" },
@@ -150,33 +150,14 @@
     "reference/mep-playbook": { title: "機電教戰手冊", desc: "domain/mep-space-demand-matrix 的教學版，三章 + 配套模型導覽。" },
     "reference/tools-index": { title: "Tools 索引", desc: "239 個執行層工具，依用途分八類。" },
     "reference/domain-index": { title: "Domain 索引（94）", desc: "知識層：法規 / SOP / lessons。" },
-    "reference/deployment-guide": { title: "部署指南", desc: "Nice3point / Release.R{YY} / setup.ps1。" },
+    "reference/deployment-guide": { title: "部署指南", desc: "安裝到你的 Revit，完成第一次唯讀查詢。" },
     "reference/troubleshooting": { title: "Troubleshooting", desc: "5 經典 + 4 個 5/18 demo 修復。" },
     "reference/contributor-template": { title: "Contributor Template", desc: "新增 Domain / Skill / Tool 的順序。" },
     "reference/personal-llm-wiki": { title: "個人 LLM Wiki", desc: "把 Domain pull 回家，長成個人知識庫。" },
-    "reference/contributors": { title: "貢獻者致謝", desc: "27 位建置協助人：handle + PR／commit（真名經維護者確認）。" },
-    "reference/architecture-v2": { title: "三層架構 V2", desc: "Skill / CLAUDE.md / Domain 分工。" },
-    "philosophy-22-propositions": { title: "22 命題完整宣言", desc: "哲學中軸。" },
-    "three-constitutions": { title: "四條憲法", desc: "被動就緒 / 資料誠實 / Domain method / Active Re-Anchoring。" },
-    "industry-evidence": { title: "業界證據", desc: "100× / 70% / $15-25K。" },
-    "spectrum-decision": { title: "光譜決策", desc: "A/B/C/D 框架。" },
-    "skills-index": { title: "Skills 索引", desc: "61 個編排層 Skill。" },
-    "domain-index": { title: "Domain 索引", desc: "94 個 SOP 知識。" },
-    "deployment-guide": { title: "部署指南", desc: "多版本 build / DLL 部署。" },
-    "troubleshooting": { title: "Troubleshooting", desc: "經典問題 + live fixes。" },
-    "contributor-template": { title: "Contributor Template", desc: "雙寫流程：知識先、編排後。" },
-    "personal-llm-wiki": { title: "個人 LLM Wiki", desc: "Obsidian 個人知識庫 + 回饋上游。" },
-    "contributors": { title: "貢獻者致謝", desc: "27 位建置協助人名單。" },
-    "architecture-v2": { title: "三層架構 V2", desc: "Skill / CLAUDE.md / Domain 分工。" }
-    // "mep-playbook" and "tools-index" intentionally have no bare key here — the metaFor()
-    // fallback below resolves them via "reference/" + key. A bare entry sitting beside an
-    // existing "reference/xxx" entry gives one page two independently-editable descriptions
-    // with nothing enforcing that they agree. That drift is not hypothetical: of the 12
-    // bare/"reference/" pairs above, architecture-v2 had diverged into a contradiction — its
-    // bare key read "Skill / Domain / Tool" while that page's own <h1> and og:description say
-    // "Skill / CLAUDE.md / Domain". The bare key was corrected to match the page; the other
-    // pairs still differ in wording. When adding a new reference/ page, add ONLY the
-    // "reference/xxx" entry.
+    "reference/contributors": { title: "貢獻者致謝", desc: "27 位建置協助人：GitHub handle + PR／commit。" },
+    "reference/architecture-v2": { title: "三層架構 V2", desc: "Skill / Domain / Tool 的分工，以及軟體連線。" }
+    // 新增 reference/ 頁時，只加一筆帶 "reference/" 前綴的項目：metaFor() 會自動退一步補上前綴。
+    // 同一頁若同時有裸鍵與帶前綴鍵，就會有兩份各自漂移的描述（architecture 頁曾因此自相矛盾）。
   };
 
   window.initFooterPreview = function initFooterPreview() {
@@ -196,7 +177,7 @@
     }
 
     function card(dir, href, meta) {
-      var dirLabel = dir === "prev" ? "← Prev" : "Next →";
+      var dirLabel = dir === "prev" ? "← 上一篇" : "下一篇 →";
       return '<a class="bim-footer-preview-card ' + dir + '" href="' + href + '">' +
         '<div class="bim-footer-preview-dir">' + dirLabel + '</div>' +
         '<div class="bim-footer-preview-title">' + meta.title + '</div>' +
@@ -227,11 +208,14 @@
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
       var tag = (event.target && event.target.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (event.target && (event.target.isContentEditable || (event.target.closest && event.target.closest("[contenteditable]")))) return;
       if (event.key === "Escape") {
         var close = qs("[data-drawer-close]");
         if (close) close.click();
         return;
       }
+      // 抽屜開啟時，方向鍵與 g+h 不翻頁（避免閱讀抽屜時被帶離本頁）
+      if (qs(".bim-drawer.open")) return;
       if (event.key === "ArrowLeft" && prev) window.location.href = prev;
       if (event.key === "ArrowRight" && next) window.location.href = next;
       if (event.key.toLowerCase() === "g") {
@@ -280,8 +264,17 @@
     var bodyEl = qs("[data-drawer-body]", drawer);
     var permaEl = qs("[data-drawer-permalink]", drawer);
     var closeBtn = qs("[data-drawer-close]", drawer);
+    var lastOpener = null;
+
+    drawer.setAttribute("role", "dialog");
+    drawer.setAttribute("aria-modal", "true");
+    if (titleEl) {
+      if (!titleEl.id) titleEl.id = "bim-drawer-title";
+      drawer.setAttribute("aria-labelledby", titleEl.id);
+    }
 
     function open(opener) {
+      lastOpener = opener;
       var title = opener.getAttribute("data-title") || opener.textContent.trim();
       var eyebrow = opener.getAttribute("data-eyebrow") || "DETAIL";
       var src = opener.getAttribute("data-source");
@@ -306,6 +299,7 @@
 
       // scroll drawer body to top
       if (bodyEl) bodyEl.scrollTop = 0;
+      if (closeBtn) closeBtn.focus();
     }
 
     function close() {
@@ -313,7 +307,20 @@
       overlay.classList.remove("open");
       drawer.setAttribute("aria-hidden", "true");
       document.body.style.overflow = "";
+      if (lastOpener && document.contains(lastOpener) && lastOpener.focus) lastOpener.focus();
+      lastOpener = null;
     }
+
+    // 抽屜開啟時，Tab 鍵只在抽屜內循環
+    drawer.addEventListener("keydown", function (e) {
+      if (e.key !== "Tab" || !drawer.classList.contains("open")) return;
+      var f = qsa('a[href], button, [tabindex]:not([tabindex="-1"]), input, select, textarea', drawer)
+        .filter(function (n) { return !n.disabled && n.offsetParent !== null; });
+      if (f.length === 0) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
 
     qsa("[data-drawer-open]").forEach(function (op) {
       op.addEventListener("click", function (e) {
@@ -355,7 +362,9 @@
       var triggers = [];
 
       COLLAPSE_RULES.forEach(function (rule) {
-        var nodes = qsa(rule.sel, section);
+        var nodes = qsa(rule.sel, section).filter(function (n) {
+          return !n.closest("[data-keep]") && !n.closest(".bim-callout");
+        });
         if (nodes.length === 0) return;
 
         var templateId = sectionId + "__" + rule.sel.replace(/\W/g, "");
@@ -392,6 +401,157 @@
     });
   };
 
+
+  // ============================================================
+  // initSearch — 目錄頁搜尋 + 篩選（純屬性介面，無 JS 時全部可見）
+  //   root      [data-search-root]
+  //   input     input[type=search][data-search-input]
+  //   items     [data-search-item]  比對 textContent + data-search-keys（不分大小寫，空白分隔的詞全部符合）
+  //   filters   [data-filter-group=G][data-filter-value=V] 切換 aria-pressed；
+  //             項目的 data-G 值落在已按下的值之中即通過（同組 OR、跨組 AND）
+  //   groups    [data-search-group=K] 標題；沒有任何可見的 [data-search-in=K] 項目時隱藏
+  //   status    [data-search-status]  「顯示 X／共 Y 項」（aria-live="polite"）
+  //   clear     [data-search-clear]
+  //   只用 hidden 屬性隱藏，不移除節點、不加 class。
+  // ============================================================
+  window.initSearch = function initSearch() {
+    qsa("[data-search-root]").forEach(function (root) {
+      if (root.__bimSearch) return;
+      var input = qs("input[type=search][data-search-input]", root);
+      var items = qsa("[data-search-item]", root);
+      var groups = qsa("[data-search-group]", root);
+      var status = qs("[data-search-status]", root);
+      var clearBtns = qsa("[data-search-clear]", root);
+      var filterBtns = qsa("[data-filter-group][data-filter-value]", root);
+      var pressed = {};
+
+      if (status && !status.getAttribute("aria-live")) status.setAttribute("aria-live", "polite");
+      filterBtns.forEach(function (b) {
+        if (!b.hasAttribute("aria-pressed")) b.setAttribute("aria-pressed", "false");
+        if (b.getAttribute("aria-pressed") === "true") {
+          var g0 = b.getAttribute("data-filter-group");
+          (pressed[g0] = pressed[g0] || []).push(b.getAttribute("data-filter-value"));
+        }
+      });
+
+      var haystacks = items.map(function (el) {
+        return ((el.textContent || "") + " " + (el.getAttribute("data-search-keys") || "")).toLowerCase();
+      });
+
+      function passesGroups(el) {
+        for (var g in pressed) {
+          if (!pressed.hasOwnProperty(g) || pressed[g].length === 0) continue;
+          var have = (el.getAttribute("data-" + g) || "").split(/\s+/);
+          var ok = pressed[g].some(function (v) { return have.indexOf(v) >= 0; });
+          if (!ok) return false;
+        }
+        return true;
+      }
+
+      function update() {
+        var terms = ((input && input.value) || "").toLowerCase().split(/\s+/).filter(Boolean);
+        var shown = 0;
+        var inGroup = {};
+        items.forEach(function (el, i) {
+          var hay = haystacks[i];
+          var ok = terms.every(function (term) { return hay.indexOf(term) >= 0; }) && passesGroups(el);
+          el.hidden = !ok;
+          if (ok) {
+            shown++;
+            var k = el.getAttribute("data-search-in");
+            if (k) inGroup[k] = true;
+          }
+        });
+        groups.forEach(function (h) {
+          h.hidden = !inGroup[h.getAttribute("data-search-group")];
+        });
+        if (status) status.textContent = "顯示 " + shown + "／共 " + items.length + " 項";
+      }
+
+      if (input) input.addEventListener("input", update);
+      filterBtns.forEach(function (b) {
+        b.addEventListener("click", function () {
+          var g = b.getAttribute("data-filter-group");
+          var v = b.getAttribute("data-filter-value");
+          var on = b.getAttribute("aria-pressed") !== "true";
+          b.setAttribute("aria-pressed", on ? "true" : "false");
+          var list = pressed[g] = pressed[g] || [];
+          var idx = list.indexOf(v);
+          if (on && idx < 0) list.push(v);
+          if (!on && idx >= 0) list.splice(idx, 1);
+          update();
+        });
+      });
+      function clearAll() {
+        if (input) input.value = "";
+        pressed = {};
+        filterBtns.forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+        update();
+      }
+      clearBtns.forEach(function (b) { b.addEventListener("click", clearAll); });
+
+      root.__bimSearch = { clear: clearAll, update: update };
+      update();
+    });
+  };
+
+  // ============================================================
+  // revealHash — 讓深層連結在抽屜 / details / 搜尋篩選之下仍然可到達
+  // ============================================================
+  window.revealHash = function revealHash() {
+    var id = "";
+    try { id = decodeURIComponent((location.hash || "").slice(1)); } catch (e) { id = (location.hash || "").slice(1); }
+    if (!id) return;
+    var el = document.getElementById(id);
+    if (!el) return;
+    var changed = false;
+
+    // 1) 搜尋/篩選把目標藏起來 → 先清除
+    var item = el.closest("[data-search-item]");
+    if (item && item.hidden) {
+      var root = item.closest("[data-search-root]");
+      if (root && root.__bimSearch) { root.__bimSearch.clear(); changed = true; }
+    }
+
+    // 2) 位於關閉的 <details> 內 → 逐層展開
+    var d = el.parentElement;
+    while (d) {
+      if (d.tagName === "DETAILS" && !d.open) { d.open = true; changed = true; }
+      d = d.parentElement;
+    }
+
+    // 3) 位於抽屜樣板內 → 開啟對應抽屜並聚焦其中的副本
+    var tplRoot = qs("#__section_drawer_templates");
+    if (tplRoot && tplRoot.contains(el)) {
+      var tpl = el;
+      while (tpl.parentElement && tpl.parentElement !== tplRoot) tpl = tpl.parentElement;
+      var drawer = qs(".bim-drawer");
+      var bodyEl = drawer && qs("[data-drawer-body]", drawer);
+      var copy = bodyEl && qs('[id="' + id.replace(/"/g, '\\"') + '"]', bodyEl);
+      if (!copy || !drawer.classList.contains("open")) {
+        var opener = qs('[data-drawer-open][data-source="#' + tpl.id + '"]');
+        if (!opener) return;
+        opener.click();
+        copy = bodyEl && qs('[id="' + id.replace(/"/g, '\\"') + '"]', bodyEl);
+      }
+      if (copy) {
+        if (!copy.hasAttribute("tabindex")) copy.setAttribute("tabindex", "-1");
+        copy.focus();
+        if (copy.scrollIntoView) copy.scrollIntoView({ block: "start" });
+      }
+      return;
+    }
+
+    // 4) 一般目標：若剛剛改變過版面，重新捲動並聚焦
+    if (changed) {
+      if (!el.hasAttribute("tabindex") && !/^(A|BUTTON|INPUT|SELECT|TEXTAREA|SUMMARY)$/.test(el.tagName)) el.setAttribute("tabindex", "-1");
+      if (el.scrollIntoView) el.scrollIntoView({ block: "start" });
+      el.focus({ preventScroll: true });
+    }
+  };
+
+  var hashBound = false;
+
   // ============================================================
   // initAll — 一次啟用所有
   // ============================================================
@@ -404,5 +564,11 @@
     window.initDrawer();
     window.initKeyNav(opts);
     window.initMeetupLinks();
+    window.initSearch();
+    window.revealHash();
+    if (!hashBound) {
+      hashBound = true;
+      window.addEventListener("hashchange", window.revealHash);
+    }
   };
 })();

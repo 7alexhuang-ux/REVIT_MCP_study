@@ -6,23 +6,30 @@
 
 /* ===== Scroll Snap（每節一個視窗，像簡報滾動）===== */
 html {
-  scroll-snap-type: y proximity;
   scroll-padding-top: 120px;  /* 避免被 topnav + context bar 遮住 */
+}
+/* 簡報式吸附改為選用：只有帶快照橫幅（body 直屬 div）的活動頁才啟用 */
+html:has(body > div[data-snapshot]) {
+  scroll-snap-type: y proximity;
 }
 .bim-hero,
 .bim-section {
   scroll-snap-align: start;
 }
 .bim-section.bim-anchor {
-  min-height: calc(100vh - 130px);
+  min-height: 0;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
   padding-top: var(--gap-xl);
   padding-bottom: var(--gap-xl);
 }
+body:has(> div[data-snapshot]) .bim-section.bim-anchor {
+  min-height: calc(100vh - 130px);
+}
 /* 不要對 .bim-section.no-snap 強制最小高度（給 frame / 索引這類短 section） */
-.bim-section.bim-anchor.no-snap {
+.bim-section.bim-anchor.no-snap,
+body:has(> div[data-snapshot]) .bim-section.bim-anchor.no-snap {
   min-height: 0;
   scroll-snap-align: none;
 }
@@ -30,8 +37,8 @@ html {
 
 @media (max-width: 700px) {
   /* mobile: 不強制 snap，讓 thumb scroll 自然 */
-  html { scroll-snap-type: none; }
-  .bim-section.bim-anchor { min-height: 0; padding-top: var(--gap-lg); padding-bottom: var(--gap-lg); }
+  html, html:has(body > div[data-snapshot]) { scroll-snap-type: none; }
+  .bim-section.bim-anchor, body:has(> div[data-snapshot]) .bim-section.bim-anchor { min-height: 0; padding-top: var(--gap-lg); padding-bottom: var(--gap-lg); }
 }
 
 /* ===== Floating Progress Rail（右側細長 scroll 進度）===== */
@@ -252,6 +259,8 @@ html {
   flex-direction: column;
 }
 .bim-drawer.open { transform: translateX(0); }
+.bim-drawer[aria-hidden="true"] { visibility: hidden; transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), visibility 0s linear 0.4s; }
+.bim-drawer.open[aria-hidden="false"] { visibility: visible; }
 
 .bim-drawer-head {
   position: sticky;
@@ -547,12 +556,14 @@ html {
 .bim-section[data-cat="ops"] .bim-section-eyebrow { color: #fbbf24; }
 .bim-section[data-cat="mep"] .bim-section-eyebrow { color: #4ade80; }
 .bim-section[data-cat="frame"] .bim-section-eyebrow { color: #a78bfa; }
+.bim-section[data-cat="ref"] .bim-section-eyebrow { color: #a78bfa; }
 
 .bim-section[data-cat="compliance"] .bim-section-title::before,
 .bim-section[data-cat="workflow"] .bim-section-title::before,
 .bim-section[data-cat="ops"] .bim-section-title::before,
 .bim-section[data-cat="mep"] .bim-section-title::before,
-.bim-section[data-cat="frame"] .bim-section-title::before {
+.bim-section[data-cat="frame"] .bim-section-title::before,
+.bim-section[data-cat="ref"] .bim-section-title::before {
   content: '';
   display: inline-block;
   width: 10px;
@@ -566,6 +577,9 @@ html {
 .bim-section[data-cat="ops"] .bim-section-title::before { background: #fbbf24; }
 .bim-section[data-cat="mep"] .bim-section-title::before { background: #4ade80; }
 .bim-section[data-cat="frame"] .bim-section-title::before { background: #a78bfa; }
+.bim-section[data-cat="ref"] .bim-section-title::before { background: #a78bfa; }
+.bim-section[data-cat="ref"] .domain-card { border-left-color: #a78bfa; }
+.bim-section[data-cat="ref"] .contrib-card { border-left-color: #a78bfa; }
 
 /* Domain card 強化 — 加 trigger tag 顯示 */
 .domain-meta {
@@ -597,3 +611,7 @@ html {
   border-bottom: none;
 }
 .domain-skill:hover { background: var(--accent-bg-strong); }
+
+/* ===== 搜尋 / 篩選：以 hidden 屬性隱藏，且不被元件自己的 display 規則蓋掉 ===== */
+[data-search-item][hidden],
+[data-search-group][hidden] { display: none !important; }
