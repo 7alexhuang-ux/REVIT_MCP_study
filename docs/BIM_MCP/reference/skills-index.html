@@ -133,7 +133,7 @@
     </div>
     <div class="bim-card">
       <h4><a href="domain-index.html" style="border-bottom:1px solid var(--accent-border);">Domain（知識）</a></h4>
-      <p style="font-size:13px;">法規條文、SOP、計算公式。90 個。被 Skill 引用。</p>
+      <p style="font-size:13px;">法規條文、SOP、計算公式。94 個。被 Skill 引用。</p>
     </div>
     <div class="bim-card">
       <h4>Tool（執行）</h4>
@@ -515,7 +515,7 @@
     </div>
   </div>
 
-  <div class="cat-header">D · 模型分析（23 個）</div>
+  <div class="cat-header">D · 模型分析（19 個）</div>
 
   <div class="skill-card">
     <div>
@@ -780,61 +780,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
-    <div>
-      <div class="skill-name">/GM_import</div>
-      <div class="skill-cat">D · 模型分析</div>
-    </div>
-    <div>
-      <div class="skill-desc">解析從 green-material-showcase.html「對齊需求與擬訂計畫」複製的 Set 對齊請求，產生 Revit 綠建材注入計畫（規劃／報告用途；純材料 Set 額外做唯讀 Revit 查詢供挑選目標 Type，本身不寫入 Revit）。</div>
-      <div class="skill-meta">
-        <span class="trigger-tag">/GM_import</span><span class="trigger-tag">Set 對齊</span><span class="trigger-tag">注入計畫</span>
-      </div>
-    </div>
-  </div>
-  <div class="skill-card">
-    <div>
-      <div class="skill-name">/GM_inject</div>
-      <div class="skill-cat">D · 模型分析</div>
-    </div>
-    <div>
-      <div class="skill-desc">/GM_inject revit——把已對齊的綠建材 Set 實際寫入目前開啟的 Revit 專案：支援 Wall 單一組合／各別建立／Material 純材料三種 Set，以及門窗 RFA 家族注入與柱樑結構材質指派。</div>
-      <div class="skill-meta">
-        <span class="trigger-tag">/GM_inject revit</span><span class="trigger-tag">綠建材寫入</span><span class="trigger-tag">RFA 注入</span>
-        <a href="domain-index.html#GM_parameter-schema" class="domain-link">→ GM_parameter-schema</a>
-        <a href="domain-index.html#GM_rfa-family-injection" class="domain-link">→ GM_rfa-family-injection</a>
-      </div>
-    </div>
-  </div>
-  <div class="skill-card">
-    <div>
-      <div class="skill-name">/GM_query</div>
-      <div class="skill-cat">D · 模型分析</div>
-    </div>
-    <div>
-      <div class="skill-desc">查詢與檢視 Revit 模型中已寫入的綠建材認證資訊：依品類彙整已寫入的 Type、證書字號與槽位內容（或柱樑結構材質名稱），並可依認證狀態上色標記。</div>
-      <div class="skill-meta">
-        <span class="trigger-tag">查詢綠建材</span><span class="trigger-tag">green material query</span><span class="trigger-tag">GreenMaterial_Mat</span>
-        <a href="domain-index.html#GM_parameter-schema" class="domain-link">→ GM_parameter-schema</a>
-        <a href="domain-index.html#GM_catalog" class="domain-link">→ GM_catalog</a>
-        <a href="domain-index.html#GM_rfa-family-injection" class="domain-link">→ GM_rfa-family-injection</a>
-      </div>
-    </div>
-  </div>
-  <div class="skill-card">
-    <div>
-      <div class="skill-name">/GM_set</div>
-      <div class="skill-cat">D · 模型分析</div>
-    </div>
-    <div>
-      <div class="skill-desc">/GM_set compare——比對 exported_material_sets.json 已存的 Set 與最新 tabc_master_database.json 快照（缺失／過期／改名的材料），為使用者確認過的 Set 更新其注入計畫。不寫入 Revit。</div>
-      <div class="skill-meta">
-        <span class="trigger-tag">/GM_set compare</span><span class="trigger-tag">Set 過期檢查</span><span class="trigger-tag">憑證過期</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="cat-header">E · 開發運維（8 個）</div>
+  <div class="cat-header">E · 開發運維（5 個）</div>
 
   <div class="skill-card">
     <div>
@@ -906,43 +852,6 @@
     </div>
   </div>
 
-  <div class="skill-card">
-    <div>
-      <div class="skill-name">/GM_update</div>
-      <div class="skill-cat">E · 開發運維</div>
-    </div>
-    <div>
-      <div class="skill-desc">從 TABC 官方網站（tabcmgr.hopto.org）更新本機 tabc_master_database.json 並重新同步展示網頁離線快取；也是全新 clone 後的初次啟動指令，兩份本機檔皆不存在時會從零建立。</div>
-      <div class="skill-meta">
-        <span class="trigger-tag">GM_update</span><span class="trigger-tag">更新 TABC 資料庫</span><span class="trigger-tag">第一次抓取</span>
-      </div>
-    </div>
-  </div>
-  <div class="skill-card">
-    <div>
-      <div class="skill-name">/GM_web</div>
-      <div class="skill-cat">E · 開發運維</div>
-    </div>
-    <div>
-      <div class="skill-desc">直接以單一 open 參數開啟綠建材檢索平台與 Set Manager 網頁（assets/green-material-showcase.html，透過 local_server.py 於 http://localhost:8888 提供服務）。僅限 Windows。</div>
-      <div class="skill-meta">
-        <span class="trigger-tag">GM_web open</span><span class="trigger-tag">開啟檢索平台網頁</span><span class="trigger-tag">Set Manager</span>
-      </div>
-    </div>
-  </div>
-  <div class="skill-card">
-    <div>
-      <div class="skill-name">/GM_kanban</div>
-      <div class="skill-cat">E · 開發運維</div>
-    </div>
-    <div>
-      <div class="skill-desc">開啟專案看板（tools/green-material/GM_kanban.html）。Windows 專用，透過 PowerShell Start-Process 開啟。</div>
-      <div class="skill-meta">
-        <span class="trigger-tag">GM_kanban</span><span class="trigger-tag">專案看板</span><span class="trigger-tag">kanban</span>
-      </div>
-    </div>
-  </div>
-
   <div class="cat-header">F · 進階開發 / 文件作者（4 個）</div>
 
   <div class="skill-card">
@@ -996,6 +905,104 @@
       <div class="skill-meta">
         <span class="trigger-tag">Archicad</span><span class="trigger-tag">backend 轉譯</span><span class="trigger-tag">GUID</span><span class="trigger-tag">Zone</span><span class="trigger-tag">Tapir</span>
         <a href="domain-index.html#tool-capability-boundary" class="domain-link">→ tool-capability-boundary（L11）</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="cat-header">G · 綠建材 GM_（7 個）</div>
+
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_import</div>
+      <div class="skill-cat">G · 綠建材 GM_</div>
+    </div>
+    <div>
+      <div class="skill-desc">解析從 green-material-showcase.html「對齊需求與擬訂計畫」複製的 Set 對齊請求，產生 Revit 綠建材注入計畫（規劃／報告用途；純材料 Set 額外做唯讀 Revit 查詢供挑選目標 Type，本身不寫入 Revit）。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">/GM_import</span><span class="trigger-tag">Set 對齊</span><span class="trigger-tag">注入計畫</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_inject</div>
+      <div class="skill-cat">G · 綠建材 GM_</div>
+    </div>
+    <div>
+      <div class="skill-desc">/GM_inject revit——把已對齊的綠建材 Set 實際寫入目前開啟的 Revit 專案：支援 Wall 單一組合／各別建立／Material 純材料三種 Set，以及門窗 RFA 家族注入與柱樑結構材質指派。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">/GM_inject revit</span><span class="trigger-tag">綠建材寫入</span><span class="trigger-tag">RFA 注入</span>
+        <a href="domain-index.html#GM_parameter-schema" class="domain-link">→ GM_parameter-schema</a>
+        <a href="domain-index.html#GM_rfa-family-injection" class="domain-link">→ GM_rfa-family-injection</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_query</div>
+      <div class="skill-cat">G · 綠建材 GM_</div>
+    </div>
+    <div>
+      <div class="skill-desc">查詢與檢視 Revit 模型中已寫入的綠建材認證資訊：依品類彙整已寫入的 Type、證書字號與槽位內容（或柱樑結構材質名稱），並可依認證狀態上色標記。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">查詢綠建材</span><span class="trigger-tag">green material query</span><span class="trigger-tag">GreenMaterial_Mat</span>
+        <a href="domain-index.html#GM_parameter-schema" class="domain-link">→ GM_parameter-schema</a>
+        <a href="domain-index.html#GM_catalog" class="domain-link">→ GM_catalog</a>
+        <a href="domain-index.html#GM_rfa-family-injection" class="domain-link">→ GM_rfa-family-injection</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_set</div>
+      <div class="skill-cat">G · 綠建材 GM_</div>
+    </div>
+    <div>
+      <div class="skill-desc">/GM_set compare——比對 exported_material_sets.json 已存的 Set 與最新 tabc_master_database.json 快照（缺失／過期／改名的材料），為使用者確認過的 Set 更新其注入計畫。不寫入 Revit。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">/GM_set compare</span><span class="trigger-tag">Set 過期檢查</span><span class="trigger-tag">憑證過期</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_update</div>
+      <div class="skill-cat">G · 綠建材 GM_</div>
+    </div>
+    <div>
+      <div class="skill-desc">從 TABC 官方網站（tabcmgr.hopto.org）更新本機 tabc_master_database.json 並重新同步展示網頁離線快取；也是全新 clone 後的初次啟動指令，兩份本機檔皆不存在時會從零建立。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">GM_update</span><span class="trigger-tag">更新 TABC 資料庫</span><span class="trigger-tag">第一次抓取</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_web</div>
+      <div class="skill-cat">G · 綠建材 GM_</div>
+    </div>
+    <div>
+      <div class="skill-desc">直接以單一 open 參數開啟綠建材檢索平台與 Set Manager 網頁（assets/green-material-showcase.html，透過 local_server.py 於 http://localhost:8888 提供服務）。僅限 Windows。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">GM_web open</span><span class="trigger-tag">開啟檢索平台網頁</span><span class="trigger-tag">Set Manager</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="skill-card">
+    <div>
+      <div class="skill-name">/GM_kanban</div>
+      <div class="skill-cat">G · 綠建材 GM_</div>
+    </div>
+    <div>
+      <div class="skill-desc">開啟專案看板（tools/green-material/GM_kanban.html）。Windows 專用，透過 PowerShell Start-Process 開啟。</div>
+      <div class="skill-meta">
+        <span class="trigger-tag">GM_kanban</span><span class="trigger-tag">專案看板</span><span class="trigger-tag">kanban</span>
       </div>
     </div>
   </div>
@@ -1063,22 +1070,22 @@
       <tr><td><code>/room-numbering</code></td><td>D 分析</td><td>房間重新排序 / 自動編號</td><td>room-numbering-workflow</td></tr>
       <tr><td><code>/ifc-structural-sync</code></td><td>D 分析</td><td>IFC 同步原生梁柱</td><td>ifc-structural-native-sync</td></tr>
       <tr><td><code>/finish-schedule-governance</code></td><td>D 分析</td><td>粉刷明細表材料代碼治理</td><td>finish-schedule-governance</td></tr>
-      <tr><td><code>/GM_import</code></td><td>D 分析</td><td>解析 Set 對齊請求，產生 Revit 注入計畫</td><td>&#8212;</td></tr>
-      <tr><td><code>/GM_inject</code></td><td>D 分析</td><td>把已對齊 Set 實際寫入 Revit（材質/Type/參數）</td><td>GM_parameter-schema / GM_rfa-family-injection</td></tr>
-      <tr><td><code>/GM_query</code></td><td>D 分析</td><td>查詢模型中已寫入的綠建材認證資訊</td><td>GM_parameter-schema / GM_catalog / GM_rfa-family-injection</td></tr>
-      <tr><td><code>/GM_set</code></td><td>D 分析</td><td>比對已存 Set 與最新 TABC 快照，更新過期計畫</td><td>&#8212;</td></tr>
       <tr><td><code>/build-revit</code></td><td>E 運維</td><td>多版本 build</td><td>(deployment-guide)</td></tr>
       <tr><td><code>/deploy-addon</code></td><td>E 運維</td><td>DLL 部署</td><td>(deployment-guide)</td></tr>
       <tr><td><code>/claude-md-sync</code></td><td>E 運維</td><td>CLAUDE.md 雙向同步</td><td>path-maintenance-qa</td></tr>
       <tr><td><code>/loop-up</code></td><td>E 運維</td><td>多模型分工自動迴圈修正</td><td>qa-checklist</td></tr>
       <tr><td><code>/hj-pr-proposal</code></td><td>E 運維</td><td>domain/skill 轉譯為 HJ PR 草案</td><td>skill-authoring-standard</td></tr>
-      <tr><td><code>/GM_update</code></td><td>E 運維</td><td>從 TABC 官網更新本機資料庫 + 展示網頁快取</td><td>&#8212;</td></tr>
-      <tr><td><code>/GM_web</code></td><td>E 運維</td><td>開啟綠建材檢索平台與 Set Manager 網頁</td><td>&#8212;</td></tr>
-      <tr><td><code>/GM_kanban</code></td><td>E 運維</td><td>開啟專案看板</td><td>&#8212;</td></tr>
       <tr><td><code>/core-reload-dev</code></td><td>F 進階</td><td>opt-in 熱重載開發迭代</td><td>core-reload-boundary</td></tr>
       <tr><td><code>/domain-diagram</code></td><td>F 進階</td><td>domain SOP 流程圖像化</td><td>domain-flow-visualization</td></tr>
       <tr><td><code>/dll-to-mcp-tool</code></td><td>F 進階</td><td>把 DLL/.cs 封裝為 MCP 工具</td><td>—</td></tr>
       <tr><td><code>/archicad-skill-adapter</code></td><td>F 進階</td><td>Revit Skill 轉譯為 Archicad MCP workflow</td><td>tool-capability-boundary</td></tr>
+      <tr><td><code>/GM_import</code></td><td>G 綠建材</td><td>解析 Set 對齊請求，產生 Revit 注入計畫</td><td>&#8212;</td></tr>
+      <tr><td><code>/GM_inject</code></td><td>G 綠建材</td><td>把已對齊 Set 實際寫入 Revit（材質/Type/參數）</td><td>GM_parameter-schema / GM_rfa-family-injection</td></tr>
+      <tr><td><code>/GM_query</code></td><td>G 綠建材</td><td>查詢模型中已寫入的綠建材認證資訊</td><td>GM_parameter-schema / GM_catalog / GM_rfa-family-injection</td></tr>
+      <tr><td><code>/GM_set</code></td><td>G 綠建材</td><td>比對已存 Set 與最新 TABC 快照，更新過期計畫</td><td>&#8212;</td></tr>
+      <tr><td><code>/GM_update</code></td><td>G 綠建材</td><td>從 TABC 官網更新本機資料庫 + 展示網頁快取</td><td>&#8212;</td></tr>
+      <tr><td><code>/GM_web</code></td><td>G 綠建材</td><td>開啟綠建材檢索平台與 Set Manager 網頁</td><td>&#8212;</td></tr>
+      <tr><td><code>/GM_kanban</code></td><td>G 綠建材</td><td>開啟專案看板</td><td>&#8212;</td></tr>
     </tbody>
   </table>
 </section>
@@ -1126,7 +1133,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / skills-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-07-09 · 從 CLAUDE.md 抽取 61 個 Skill 與其觸發關鍵字、Domain 對應。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-10-23 · 從 CLAUDE.md 抽取 61 個 Skill 與其觸發關鍵字、Domain 對應。</p>
 </footer>
 
 <script src="../shared.js"></script>

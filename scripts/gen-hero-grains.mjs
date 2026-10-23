@@ -2,7 +2,7 @@
 // Self-contained animated SVG (embedded CSS @keyframes) — works as <img>, no runtime lib.
 // Re-run whenever counts change so the hero art never goes stale again:
 //   node scripts/gen-hero-grains.mjs
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, readdirSync } from 'node:fs';
 
 const OUT = new URL('../docs/BIM_MCP/images/', import.meta.url);
 
@@ -51,11 +51,13 @@ ${legend}
 `;
 };
 
-// Skills categories (docs/BIM_MCP/reference/skills-index.html, A-F) re-bucketed
+// Skills categories (docs/BIM_MCP/reference/skills-index.html, A-G) re-bucketed
 // into the same 5 colour-coded semantics used by the domain chart:
 //   A 法規檢核(6) -> 法規/compliance
-//   B 設計協作(4) + C 文件生產(16) + D 模型分析 non-MEP(16) -> 流程/workflow
-//   E 開發運維 non-external(4) + F 進階開發/文件作者 non-external(3) -> 維運/ops
+//   B 設計協作(4) + C 文件生產(16) + D 模型分析 non-MEP(16)
+//     + G 綠建材 modelling skills GM_import/GM_inject/GM_query/GM_set(4) -> 流程/workflow (40)
+//   E 開發運維 non-external(4) + F 進階開發/文件作者 non-external(3)
+//     + G 綠建材 tooling skills GM_update/GM_web/GM_kanban(3) -> 維運/ops (10)
 //   D 模型分析 MEP subset: detect-clashes, mep-settings-curation, set-project-units(3) -> MEP
 //   E/F external-bridge skills: hj-pr-proposal, archicad-skill-adapter(2) -> 外部/references
 const skills = grainsSVG({
@@ -71,20 +73,37 @@ const skills = grainsSVG({
   ],
 });
 
-// Domain categories from docs/BIM_MCP/reference/domain-index.html cat-summary.
+// Domain categories: derived from docs/BIM_MCP/reference/domain-index.html by counting
+// `bim-card domain-card` inside each <section id=...>, so the art cannot drift from the index.
+const domainHtml = readFileSync(new URL('../docs/BIM_MCP/reference/domain-index.html', import.meta.url), 'utf8');
+const domainCount = id => {
+  const start = domainHtml.search(new RegExp(`<section[^>]*id="${id}"`));
+  if (start < 0) throw new Error(`domain-index.html: section #${id} not found`);
+  const rest = domainHtml.slice(start + 1);
+  const next = rest.search(/<section[\s>]/);
+  const body = next < 0 ? rest : rest.slice(0, next);
+  return (body.match(/class="[^"]*\bdomain-card\b/g) || []).length;
+};
+const domainGroups = [
+  { id: 'compliance', label: '法規', color: '#ef4444' },
+  { id: 'workflow', label: '流程', color: '#60a5fa' },
+  { id: 'ops', label: '維運', color: '#fbbf24' },
+  { id: 'mep', label: 'MEP', color: '#4ade80' },
+  { id: 'references', label: '外部', color: '#a78bfa' },
+].map(g => ({ label: g.label, count: domainCount(g.id), color: g.color }));
+const domainTotal = domainGroups.reduce((a, g) => a + g.count, 0);
+const mdCount = dir => readdirSync(new URL(dir, import.meta.url)).filter(f => f.endsWith('.md') && f !== 'README.md').length;
+const domainFiles = mdCount('../domain/') + mdCount('../domain/references/');
+if (domainTotal !== domainFiles) {
+  throw new Error(`domain-index.html has ${domainTotal} cards but domain/ has ${domainFiles} .md files`);
+}
 const domain = grainsSVG({
   title: 'Domain · 知識層',
   sub: 'SHARED BIM SOP · 5 CATEGORIES',
   cols: 10,
-  groups: [
-    { label: '法規', count: 11, color: '#ef4444' },
-    { label: '流程', count: 42, color: '#60a5fa' },
-    { label: '維運', count: 11, color: '#fbbf24' },
-    { label: 'MEP', count: 18, color: '#4ade80' },
-    { label: '外部', count: 1, color: '#a78bfa' },
-  ],
+  groups: domainGroups,
 });
 
 writeFileSync(new URL('skills__hero__grains.svg', OUT), skills);
 writeFileSync(new URL('domain__hero__grains.svg', OUT), domain);
-console.log('generated: skills__hero__grains.svg (61), domain__hero__grains.svg (83)');
+console.log(`generated: skills__hero__grains.svg (61), domain__hero__grains.svg (${domainTotal})`);
