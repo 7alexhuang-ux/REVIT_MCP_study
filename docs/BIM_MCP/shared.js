@@ -160,6 +160,90 @@
     // 同一頁若同時有裸鍵與帶前綴鍵，就會有兩份各自漂移的描述（architecture 頁曾因此自相矛盾）。
   };
 
+  // ============================================================
+  // BIM_ROUTES — 站內閱讀順序（單一來源）。鍵 = "index" 或 "reference/<頁名>"（不含 .html）
+  // initRoutes() 依此補 body 的 data-prev/data-next，並填入 [data-route-nav] 容器
+  // ============================================================
+  window.BIM_ROUTES = {
+    "index":                                { next: "reference/deployment-guide" },
+    "reference/deployment-guide":           { prev: "index", next: "reference/domain-index" },
+    "reference/troubleshooting":            { prev: "reference/deployment-guide", next: "reference/domain-index" },
+    "reference/domain-index":               { prev: "reference/deployment-guide", next: "reference/skills-index" },
+    "reference/mep-playbook":               { prev: "reference/domain-index", next: "reference/skills-index" },
+    "reference/skills-index":               { prev: "reference/domain-index", next: "reference/tools-index" },
+    "reference/tools-index":                { prev: "reference/skills-index", next: "reference/contributor-template" },
+    "reference/contributor-template":       { prev: "reference/tools-index", next: "reference/contributors" },
+    "reference/contributors":               { prev: "reference/contributor-template", next: "index" },
+    "reference/kanban-index":               { prev: "reference/contributors", next: "reference/personal-llm-wiki" },
+    "reference/personal-llm-wiki":          { prev: "reference/kanban-index", next: "index" },
+    "reference/architecture-v2":            { prev: "index", next: "reference/industry-evidence" },
+    "reference/industry-evidence":          { prev: "reference/architecture-v2", next: "reference/philosophy-22-propositions" },
+    "reference/philosophy-22-propositions": { prev: "reference/industry-evidence", next: "reference/three-constitutions" },
+    "reference/three-constitutions":        { prev: "reference/philosophy-22-propositions", next: "reference/spectrum-decision" },
+    "reference/spectrum-decision":          { prev: "reference/three-constitutions", next: "reference/domain-index" }
+  };
+
+  // 由 location.pathname 推出路由鍵；凍結頁（YYYY-MM/…）與未登錄頁回傳 ""
+  function routeKey() {
+    var path = (window.location && window.location.pathname) || "";
+    var segs = path.split("/").filter(function (x) { return x; });
+    var raw = segs.length ? segs[segs.length - 1] : "";
+    var parent, last;
+    if (raw.indexOf(".") === -1) {
+      // 目錄 URL（…/BIM_MCP/）視為該目錄的 index
+      parent = raw; last = "index";
+    } else {
+      parent = segs.length > 1 ? segs[segs.length - 2] : "";
+      last = raw.replace(/\.html$/, "");
+    }
+    if (/^\d{4}-\d{2}$/.test(parent)) return "";
+    var key = last === "index" ? "index" : parent + "/" + last;
+    return Object.prototype.hasOwnProperty.call(window.BIM_ROUTES, key) ? key : "";
+  }
+
+  // 從 fromKey 頁面指向 toKey 頁面的相對 href
+  function routeHref(fromKey, toKey) {
+    var fromHub = fromKey === "index";
+    if (toKey === "index") return fromHub ? "index.html" : "../index.html";
+    var name = toKey.replace(/^reference\//, "") + ".html";
+    return fromHub ? "reference/" + name : name;
+  }
+
+  window.initRoutes = function initRoutes() {
+    var key = routeKey();
+    if (!key) return;
+    var route = window.BIM_ROUTES[key];
+    var body = document.body;
+    var prevHref = route.prev ? routeHref(key, route.prev) : "";
+    var nextHref = route.next ? routeHref(key, route.next) : "";
+    // 舊頁仍帶 body 屬性時不覆寫
+    if (!body.getAttribute("data-prev") && !body.getAttribute("data-next")) {
+      if (prevHref) body.setAttribute("data-prev", prevHref);
+      if (nextHref) body.setAttribute("data-next", nextHref);
+    }
+    function link(cls, href, text) {
+      var a = document.createElement("a");
+      a.className = cls;
+      a.setAttribute("href", href);
+      a.textContent = text;
+      return a;
+    }
+    var nextMeta = route.next ? (PAGE_META[route.next] || PAGE_META["reference/" + route.next] || { title: route.next }) : null;
+    qsa('[data-route-nav="top"]').forEach(function (box) {
+      if (box.getAttribute("data-route-filled")) return;
+      box.setAttribute("data-route-filled", "1");
+      if (prevHref) box.insertBefore(link("bim-topnav-btn", prevHref, "← 上一篇"), box.firstChild);
+      if (nextHref) box.appendChild(link("bim-topnav-btn", nextHref, "下一篇 →"));
+    });
+    qsa('[data-route-nav="foot"]').forEach(function (box) {
+      if (box.getAttribute("data-route-filled")) return;
+      box.setAttribute("data-route-filled", "1");
+      var first = box.firstChild;
+      if (prevHref) box.insertBefore(link("bim-footer-btn", prevHref, "← 上一篇"), first);
+      if (nextHref) box.insertBefore(link("bim-footer-btn primary", nextHref, "下一篇 → " + nextMeta.title), first);
+    });
+  };
+
   window.initFooterPreview = function initFooterPreview() {
     var body = document.body;
     var prev = body.getAttribute("data-prev");
@@ -580,6 +664,7 @@
   // initAll — 一次啟用所有
   // ============================================================
   window.initAll = function initAll(opts) {
+    window.initRoutes();
     window.initProgress();
     window.initSectionDrawers();   // 必須在 initDrawer 之前（產生 trigger）
     window.initTOC();
