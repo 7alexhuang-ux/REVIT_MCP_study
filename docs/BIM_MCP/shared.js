@@ -154,7 +154,7 @@
     "reference/troubleshooting": { title: "Troubleshooting", desc: "5 經典 + 4 個 5/18 demo 修復。" },
     "reference/contributor-template": { title: "Contributor Template", desc: "新增 Domain / Skill / Tool 的順序。" },
     "reference/personal-llm-wiki": { title: "個人 LLM Wiki", desc: "把 Domain pull 回家，長成個人知識庫。" },
-    "reference/contributors": { title: "貢獻者致謝", desc: "17 位建置協助人：真名 + handle + PR。" },
+    "reference/contributors": { title: "貢獻者致謝", desc: "27 位建置協助人：handle + PR／commit（真名經維護者確認）。" },
     "reference/architecture-v2": { title: "三層架構 V2", desc: "Skill / CLAUDE.md / Domain 分工。" },
     "philosophy-22-propositions": { title: "22 命題完整宣言", desc: "哲學中軸。" },
     "three-constitutions": { title: "四條憲法", desc: "被動就緒 / 資料誠實 / Domain method / Active Re-Anchoring。" },
@@ -166,7 +166,7 @@
     "troubleshooting": { title: "Troubleshooting", desc: "經典問題 + live fixes。" },
     "contributor-template": { title: "Contributor Template", desc: "雙寫流程：知識先、編排後。" },
     "personal-llm-wiki": { title: "個人 LLM Wiki", desc: "Obsidian 個人知識庫 + 回饋上游。" },
-    "contributors": { title: "貢獻者致謝", desc: "17 位建置協助人名單。" },
+    "contributors": { title: "貢獻者致謝", desc: "27 位建置協助人名單。" },
     "architecture-v2": { title: "三層架構 V2", desc: "Skill / CLAUDE.md / Domain 分工。" }
     // "mep-playbook" and "tools-index" intentionally have no bare key here — the metaFor()
     // fallback below resolves them via "reference/" + key. A bare entry sitting beside an
