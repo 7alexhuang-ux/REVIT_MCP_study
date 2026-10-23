@@ -199,7 +199,7 @@ def build():
   .kb-none{{color:var(--text-faint)}}
   .kb-risk{{font-family:var(--font-tech);font-size:11px;padding:2px 8px;border-radius:3px;white-space:nowrap}}
   .kb-risk-high{{background:var(--bad-bg-strong);color:var(--bad)}}
-  .kb-risk-medium{{background:var(--warn-bg-soft);color:var(--warn)}}
+  .kb-risk-medium{{background:var(--warn-bg-strong);color:var(--warn)}}
   .kb-risk-low{{background:var(--ok-bg-strong);color:var(--ok)}}
   .kb-warn{{border-left:3px solid var(--warn);background:var(--warn-bg);padding:14px 18px;border-radius:var(--radius-md);margin:var(--gap-md) 0}}
   .kb-flow{{font-family:var(--font-tech);font-size:12px;line-height:2.1;color:var(--text-secondary);background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);padding:14px 18px;overflow-x:auto}}

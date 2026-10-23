@@ -197,11 +197,12 @@
     "reference/tools-index": { title: "Tools 索引", desc: "239 個執行層工具，依用途分八類。" },
     "reference/domain-index": { title: "Domain 索引（94）", desc: "知識層：法規 / SOP / lessons。" },
     "reference/deployment-guide": { title: "部署指南", desc: "安裝到你的 Revit，完成第一次唯讀查詢。" },
-    "reference/troubleshooting": { title: "Troubleshooting", desc: "5 經典 + 4 個 5/18 demo 修復。" },
-    "reference/contributor-template": { title: "Contributor Template", desc: "新增 Domain / Skill / Tool 的順序。" },
+    "reference/troubleshooting": { title: "排錯指南", desc: "三種症狀分流：看不到外掛、無法連線、結果不符預期。" },
+    "reference/contributor-template": { title: "貢獻範本", desc: "新增 Domain / Skill / Tool 的順序。" },
     "reference/personal-llm-wiki": { title: "個人 LLM Wiki", desc: "把 Domain pull 回家，長成個人知識庫。" },
     "reference/contributors": { title: "貢獻者致謝", desc: "27 位建置協助人：GitHub handle + PR／commit。" },
-    "reference/architecture-v2": { title: "三層架構 V2", desc: "Skill / Domain / Tool 的分工，以及軟體連線。" }
+    "reference/architecture-v2": { title: "三層架構 V2", desc: "Skill / Domain / Tool 的分工，以及軟體連線。" },
+    "reference/kanban-index": { title: "看板卡索引", desc: "Monstrare 看板卡的歷史紀錄，不是現行方法。" }
     // 新增 reference/ 頁時，只加一筆帶 "reference/" 前綴的項目：metaFor() 會自動退一步補上前綴。
     // 同一頁若同時有裸鍵與帶前綴鍵，就會有兩份各自漂移的描述（architecture 頁曾因此自相矛盾）。
   };
@@ -286,7 +287,9 @@
       box.setAttribute("data-route-filled", "1");
       var first = box.firstChild;
       if (prevHref) box.insertBefore(link("bim-footer-btn", prevHref, "← 上一篇"), first);
-      if (nextHref) box.insertBefore(link("bim-footer-btn primary", nextHref, "下一篇 → " + nextMeta.title), first);
+      // 頁面自己已有主要動作（如「複製建置說明」「開啟看板 ↗」）時，下一篇改用一般按鈕，避免一列兩顆主按鈕
+      var hasPrimary = !!box.querySelector(".bim-footer-btn.primary");
+      if (nextHref) box.insertBefore(link(hasPrimary ? "bim-footer-btn" : "bim-footer-btn primary", nextHref, "下一篇 → " + nextMeta.title), first);
     });
   };
 
@@ -567,7 +570,10 @@
       });
 
       var haystacks = items.map(function (el) {
-        return ((el.textContent || "") + " " + (el.getAttribute("data-search-keys") || "")).toLowerCase();
+        // [data-search-ignore] 是每張卡都有的介面字（「方法原文 ↗」「展開摘要」），不列入比對
+        var clone = el.cloneNode(true);
+        Array.prototype.forEach.call(clone.querySelectorAll("[data-search-ignore]"), function (n) { n.parentNode.removeChild(n); });
+        return ((clone.textContent || "") + " " + (el.getAttribute("data-search-keys") || "")).toLowerCase();
       });
 
       function passesGroups(el) {
