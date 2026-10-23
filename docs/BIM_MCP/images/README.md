@@ -33,6 +33,10 @@ The visual direction is deliberately minimal: black background, white geometric 
 | `contributor__hero__dual-write.svg` | `reference/contributor-template.html` hero |
 | `contributor__s04__6-step.svg` | `reference/contributor-template.html` example workflow |
 
+## 2026-10 靜態優先規則
+
+手繪 SVG 內的元素在 t=0 即可見；只允許每一幀都可見的循環動畫（例如 `.pulse`、`.flow`），不得以 `opacity:0` 或 `stroke-dashoffset` 當作進場前的起始狀態。原因：SVG 以 `<img>` 載入時，頁面的 CSS 與虛擬時鐘管不到圖內動畫，列印、另存 PDF、連結預覽與「減少動態」偏好看到的都是 t≈0 的畫面，進場動畫會讓圖變成一片黑。`skills__hero__grains.svg` 與 `domain__hero__grains.svg` 由 `scripts/gen-hero-grains.mjs` 產生，同樣的規則在產生器內處理。
+
 ## AI 生成概念插圖（2026-10）
 
 2026-10 退役：index__hero__three-layer.svg、index__section01__site-map.svg、three-const__hero__pyramid.svg（頁面已改用上表 webp 或移除該區塊）。
