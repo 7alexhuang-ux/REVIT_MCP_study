@@ -58,6 +58,7 @@ These must remain understandable by both sides.
 | `CONTRIBUTING.md` | contributors | Contribution process |
 | `CHANGELOG.md` | users and maintainers | Release history |
 | `scripts/README.md` | installers and maintainers | Script usage |
+| `scripts/skills-index-map.json` | maintainers (shared) | Curated Traditional-Chinese input for the generated skills index (groups, descriptions, trigger tags, Domain links); no counts — counts are derived by `scripts/gen-skills-index.py` |
 | `pyRevit_Tools/README.md` | pyRevit users | pyRevit-specific notes |
 | `docs/BIM_MCP/**` | public knowledge site | Teaching and visual explanations |
 | `docs/troubleshoot-first-install.md` | users | First-install troubleshooting |
