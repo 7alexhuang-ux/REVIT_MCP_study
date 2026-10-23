@@ -68,6 +68,19 @@ export const baseTools: Tool[] = [
         },
     },
     {
+        name: "get_door_window_coordinates",
+        description: "一次撈全部門窗的座標清單：插入點 (LocationPoint) 與 boundingbox（含中心點），座標為 mm。可依門/窗/全部與樓層篩選，並可選擇一併掃描連結模型（自動套用 Transform 轉專案座標）。回傳每筆含 ElementId、族群、類型、標記、樓層、宿主牆ID、朝向。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                category: { type: "string", description: "門 / 窗 / 全部（預設全部）。也接受 Doors / Windows。" },
+                level: { type: "string", description: "只回傳指定樓層名稱的門窗（選填）" },
+                includeLinks: { type: "boolean", description: "是否一併掃描連結模型的門窗（預設 false）" },
+                maxCount: { type: "number", description: "最大回傳數量（預設 1000）" },
+            },
+        },
+    },
+    {
         name: "delete_element",
         description: "依 Element ID 刪除 Revit 元素。",
         inputSchema: {

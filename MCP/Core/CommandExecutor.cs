@@ -175,6 +175,14 @@ namespace RevitMCP.Core
                     case "get_element_info":
                         result = GetElementInfo(parameters);
                         break;
+
+                    case "get_door_window_coordinates":
+                        result = GetDoorWindowCoordinates(parameters);
+                        break;
+
+                    case "get_all_tags":
+                        result = GetAllTags(parameters);
+                        break;
                     
                     case "delete_element":
                         result = DeleteElement(parameters);
@@ -255,6 +263,18 @@ namespace RevitMCP.Core
                     
                     case "get_all_grids":
                         result = GetAllGrids();
+                        break;
+
+                    case "create_grids":
+                        result = CreateGrids(parameters);
+                        break;
+
+                    case "preview_dwg_grids":
+                        result = PreviewDwgGrids(parameters);
+                        break;
+
+                    case "create_grids_from_dwg":
+                        result = CreateGridsFromDwg(parameters);
                         break;
                     
                     case "get_column_types":
@@ -484,6 +504,10 @@ namespace RevitMCP.Core
 
                     case "join_wall_tops":
                         result = JoinWallTops(parameters);
+                        break;
+
+                    case "create_wall_sweeps":
+                        result = CreateWallSweeps(parameters);
                         break;
 
                     // === 解除幾何接合（劉可 PR#30 bundle②）===
@@ -719,6 +743,10 @@ namespace RevitMCP.Core
                         break;
                     case "list_family_symbols":
                         result = ListFamilySymbols(parameters);
+                        break;
+
+                    case "create_opening_types":
+                        result = CreateOpeningTypes(parameters);
                         break;
 
                     // === 詳圖項目複製 / 去重（劉可 PR#30 bundle②）===
