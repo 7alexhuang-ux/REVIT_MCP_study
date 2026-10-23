@@ -90,6 +90,8 @@
     padding: var(--gap-md) 0 var(--gap-xs) 0;
     border-bottom: 1px solid var(--border);
     margin-top: var(--gap-md);
+    margin-bottom: 0;
+    font-weight: 400;
   }
 
   @media (max-width: 900px) {
@@ -100,7 +102,7 @@
   }
 </style>
 </head>
-<body data-prev="spectrum-decision.html" data-next="domain-index.html">
+<body data-prev="domain-index.html" data-next="tools-index.html">
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -112,7 +114,7 @@
   </div>
   <div class="bim-topnav-actions">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn bim-topnav-btn-github" title="View source on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
-    <a href="domain-index.html" class="bim-topnav-btn">Domain 索引 →</a>
+    <a href="tools-index.html" class="bim-topnav-btn">Tools 索引 →</a>
     <a href="philosophy-22-propositions.html" class="bim-topnav-btn">22 命題</a>
   </div>
 </nav>
@@ -147,13 +149,19 @@
 <!-- ============================================ -->
 <!-- 61 個 Skill 列表 -->
 <!-- ============================================ -->
-<section data-collapse class="bim-section bim-anchor" id="skills">
+<section data-collapse class="bim-section bim-anchor" id="skills" data-search-root>
   <div class="bim-section-eyebrow">CATALOG · 61 個 Skill</div>
   <h2 class="bim-section-title">61 個 Skill · 依用途分組</h2>
 
-  <div class="cat-header">A · 法規檢核（6 個）</div>
+  <div class="bim-search">
+    <input type="search" data-search-input placeholder="搜尋 Skill：名稱、觸發關鍵字、用途、Domain" aria-label="搜尋 Skill">
+    <div class="bim-search-status" data-search-status aria-live="polite"></div>
+    <button type="button" class="bim-footer-btn" data-search-clear>清除</button>
+  </div>
 
-  <div class="skill-card">
+  <h3 class="cat-header" data-search-group="A">A · 法規檢核（6 個）</h3>
+
+  <div class="skill-card" id="skill-fire-safety-check" data-search-item data-search-in="A" data-search-keys="A 法規檢核">
     <div>
       <div class="skill-name">/fire-safety-check</div>
       <div class="skill-cat">A · 法規檢核</div>
@@ -169,7 +177,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-smoke-exhaust" data-search-item data-search-in="A" data-search-keys="A 法規檢核">
     <div>
       <div class="skill-name">/smoke-exhaust</div>
       <div class="skill-cat">A · 法規檢核</div>
@@ -183,7 +191,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-building-compliance" data-search-item data-search-in="A" data-search-keys="A 法規檢核">
     <div>
       <div class="skill-name">/building-compliance</div>
       <div class="skill-cat">A · 法規檢核</div>
@@ -198,7 +206,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-parking-check" data-search-item data-search-in="A" data-search-keys="A 法規檢核">
     <div>
       <div class="skill-name">/parking-check</div>
       <div class="skill-cat">A · 法規檢核</div>
@@ -213,7 +221,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-wall-orientation-check" data-search-item data-search-in="A" data-search-keys="A 法規檢核">
     <div>
       <div class="skill-name">/wall-orientation-check</div>
       <div class="skill-cat">A · 法規檢核</div>
@@ -227,7 +235,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-smoke-detector-check" data-search-item data-search-in="A" data-search-keys="A 法規檢核">
     <div>
       <div class="skill-name">/smoke-detector-check</div>
       <div class="skill-cat">A · 法規檢核</div>
@@ -241,9 +249,9 @@
     </div>
   </div>
 
-  <div class="cat-header">B · 設計協作（4 個）</div>
+  <h3 class="cat-header" data-search-group="B">B · 設計協作（4 個）</h3>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-curtain-wall" data-search-item data-search-in="B" data-search-keys="B 設計協作">
     <div>
       <div class="skill-name">/curtain-wall</div>
       <div class="skill-cat">B · 設計協作</div>
@@ -257,7 +265,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-facade-generation" data-search-item data-search-in="B" data-search-keys="B 設計協作">
     <div>
       <div class="skill-name">/facade-generation</div>
       <div class="skill-cat">B · 設計協作</div>
@@ -271,7 +279,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-element-coloring" data-search-item data-search-in="B" data-search-keys="B 設計協作">
     <div>
       <div class="skill-name">/element-coloring</div>
       <div class="skill-cat">B · 設計協作</div>
@@ -285,7 +293,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-element-query" data-search-item data-search-in="B" data-search-keys="B 設計協作">
     <div>
       <div class="skill-name">/element-query</div>
       <div class="skill-cat">B · 設計協作</div>
@@ -299,9 +307,9 @@
     </div>
   </div>
 
-  <div class="cat-header">C · 文件生產（16 個）</div>
+  <h3 class="cat-header" data-search-group="C">C · 文件生產（16 個）</h3>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-auto-dimension" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/auto-dimension</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -315,7 +323,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-detail-component-sync" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/detail-component-sync</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -329,7 +337,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-dependent-view-crop" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/dependent-view-crop</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -343,7 +351,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-sheet-management" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/sheet-management</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -357,7 +365,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-stair-hidden-line" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/stair-hidden-line</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -371,7 +379,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-wall-section-batch" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/wall-section-batch</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -384,7 +392,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-copy-detail-items" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/copy-detail-items</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -397,7 +405,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-dedup-detail-elements" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/dedup-detail-elements</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -411,7 +419,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-text-note-batch" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/text-note-batch</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -424,7 +432,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-align-views-on-sheets" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/align-views-on-sheets</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -437,7 +445,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-batch-apply-view-template" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/batch-apply-view-template</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -450,7 +458,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-viewport-arrangement" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/viewport-arrangement</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -463,7 +471,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-scale-drafting-width" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/scale-drafting-width</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -476,7 +484,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-floor-plan-from-template" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/floor-plan-from-template</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -489,7 +497,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-copy-sheets-cross-project" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/copy-sheets-cross-project</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -502,7 +510,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-excel-to-legend" data-search-item data-search-in="C" data-search-keys="C 文件生產">
     <div>
       <div class="skill-name">/excel-to-legend</div>
       <div class="skill-cat">C · 文件生產</div>
@@ -515,9 +523,9 @@
     </div>
   </div>
 
-  <div class="cat-header">D · 模型分析（19 個）</div>
+  <h3 class="cat-header" data-search-group="D">D · 模型分析（19 個）</h3>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-detect-clashes" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/detect-clashes</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -531,7 +539,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-qa-review" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/qa-review</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -545,7 +553,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-dwg-beam-import" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/dwg-beam-import</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -559,7 +567,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-dwg-column-import" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/dwg-column-import</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -573,7 +581,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-family-inventory-cleanup" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/family-inventory-cleanup</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -587,7 +595,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-unjoin-geometry" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/unjoin-geometry</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -601,7 +609,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-batch-room-height" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/batch-room-height</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -615,7 +623,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-view-category-visibility" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/view-category-visibility</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -628,7 +636,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-batch-material" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/batch-material</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -641,7 +649,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-partition-takeoff" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/partition-takeoff</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -655,7 +663,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-quantity-takeoff-excel" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/quantity-takeoff-excel</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -669,7 +677,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-scaffold-takeoff" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/scaffold-takeoff</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -683,7 +691,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-tall-partition-index" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/tall-partition-index</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -697,7 +705,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-threshold-opening-takeoff" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/threshold-opening-takeoff</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -711,7 +719,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-room-numbering" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/room-numbering</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -725,7 +733,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-ifc-structural-sync" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/ifc-structural-sync</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -739,7 +747,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-finish-schedule-governance" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/finish-schedule-governance</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -753,7 +761,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-set-project-units" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/set-project-units</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -766,7 +774,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-mep-settings-curation" data-search-item data-search-in="D" data-search-keys="D 模型分析">
     <div>
       <div class="skill-name">/mep-settings-curation</div>
       <div class="skill-cat">D · 模型分析</div>
@@ -780,9 +788,9 @@
     </div>
   </div>
 
-  <div class="cat-header">E · 開發運維（5 個）</div>
+  <h3 class="cat-header" data-search-group="E">E · 開發運維（5 個）</h3>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-build-revit" data-search-item data-search-in="E" data-search-keys="E 開發運維">
     <div>
       <div class="skill-name">/build-revit</div>
       <div class="skill-cat">E · 開發運維</div>
@@ -796,7 +804,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-deploy-addon" data-search-item data-search-in="E" data-search-keys="E 開發運維">
     <div>
       <div class="skill-name">/deploy-addon</div>
       <div class="skill-cat">E · 開發運維</div>
@@ -810,7 +818,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-loop-up" data-search-item data-search-in="E" data-search-keys="E 開發運維">
     <div>
       <div class="skill-name">/loop-up</div>
       <div class="skill-cat">E · 開發運維</div>
@@ -824,7 +832,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-claude-md-sync" data-search-item data-search-in="E" data-search-keys="E 開發運維">
     <div>
       <div class="skill-name">/claude-md-sync</div>
       <div class="skill-cat">E · 開發運維</div>
@@ -838,7 +846,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-hj-pr-proposal" data-search-item data-search-in="E" data-search-keys="E 開發運維">
     <div>
       <div class="skill-name">/hj-pr-proposal</div>
       <div class="skill-cat">E · 開發運維</div>
@@ -852,9 +860,9 @@
     </div>
   </div>
 
-  <div class="cat-header">F · 進階開發 / 文件作者（4 個）</div>
+  <h3 class="cat-header" data-search-group="F">F · 進階開發 / 文件作者（4 個）</h3>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-core-reload-dev" data-search-item data-search-in="F" data-search-keys="F 進階開發 / 文件作者">
     <div>
       <div class="skill-name">/core-reload-dev</div>
       <div class="skill-cat">F · 進階開發 / 文件作者</div>
@@ -868,7 +876,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-domain-diagram" data-search-item data-search-in="F" data-search-keys="F 進階開發 / 文件作者">
     <div>
       <div class="skill-name">/domain-diagram</div>
       <div class="skill-cat">F · 進階開發 / 文件作者</div>
@@ -882,7 +890,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-dll-to-mcp-tool" data-search-item data-search-in="F" data-search-keys="F 進階開發 / 文件作者">
     <div>
       <div class="skill-name">/dll-to-mcp-tool</div>
       <div class="skill-cat">F · 進階開發 / 文件作者</div>
@@ -895,7 +903,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-archicad-skill-adapter" data-search-item data-search-in="F" data-search-keys="F 進階開發 / 文件作者">
     <div>
       <div class="skill-name">/archicad-skill-adapter</div>
       <div class="skill-cat">F · 進階開發 / 文件作者</div>
@@ -909,9 +917,9 @@
     </div>
   </div>
 
-  <div class="cat-header">G · 綠建材 GM_（7 個）</div>
+  <h3 class="cat-header" data-search-group="G">G · 綠建材 GM_（7 個）</h3>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-GM_import" data-search-item data-search-in="G" data-search-keys="G 綠建材 GM_">
     <div>
       <div class="skill-name">/GM_import</div>
       <div class="skill-cat">G · 綠建材 GM_</div>
@@ -924,7 +932,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-GM_inject" data-search-item data-search-in="G" data-search-keys="G 綠建材 GM_">
     <div>
       <div class="skill-name">/GM_inject</div>
       <div class="skill-cat">G · 綠建材 GM_</div>
@@ -939,7 +947,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-GM_query" data-search-item data-search-in="G" data-search-keys="G 綠建材 GM_">
     <div>
       <div class="skill-name">/GM_query</div>
       <div class="skill-cat">G · 綠建材 GM_</div>
@@ -955,7 +963,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-GM_set" data-search-item data-search-in="G" data-search-keys="G 綠建材 GM_">
     <div>
       <div class="skill-name">/GM_set</div>
       <div class="skill-cat">G · 綠建材 GM_</div>
@@ -968,7 +976,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-GM_update" data-search-item data-search-in="G" data-search-keys="G 綠建材 GM_">
     <div>
       <div class="skill-name">/GM_update</div>
       <div class="skill-cat">G · 綠建材 GM_</div>
@@ -981,7 +989,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-GM_web" data-search-item data-search-in="G" data-search-keys="G 綠建材 GM_">
     <div>
       <div class="skill-name">/GM_web</div>
       <div class="skill-cat">G · 綠建材 GM_</div>
@@ -994,7 +1002,7 @@
     </div>
   </div>
 
-  <div class="skill-card">
+  <div class="skill-card" id="skill-GM_kanban" data-search-item data-search-in="G" data-search-keys="G 綠建材 GM_">
     <div>
       <div class="skill-name">/GM_kanban</div>
       <div class="skill-cat">G · 綠建材 GM_</div>
@@ -1017,8 +1025,10 @@
   <p class="bim-section-desc">複製給合作對象 / 列印貼牆。</p>
 
   <figure class="bim-figure">
-    <img src="../images/skills__hero__grains.svg" alt="Sixty-one skills arranged as category-coded squares" width="1200" height="966" loading="lazy">
+    <img src="../images/skills__hero__grains.svg" alt="61 個 Skill 依法規、流程、維運、MEP、外部五色排成方塊陣列" width="1200" height="966" loading="lazy">
+  <figcaption>61 個方塊各代表一個 Skill，依五色分類。</figcaption>
   </figure>
+  <p class="bim-section-desc">圖中五色是跨層分類（法規／流程／維運／MEP／外部），與本頁 A–G 用途群組不是一對一；對應：A→法規；B、C、D（非 MEP）、GM_import/inject/query/set→流程；E（非外部）、F（非外部）、GM_update/web/kanban→維運；detect-clashes、mep-settings-curation、set-project-units→MEP；hj-pr-proposal、archicad-skill-adapter→外部。</p>
 
   <table>
     <thead>
@@ -1128,9 +1138,10 @@
 
 <footer class="bim-footer">
   <div class="bim-footer-actions">
-    <a href="domain-index.html" class="bim-footer-btn primary">Domain 索引 →</a>
+    <a href="tools-index.html" class="bim-footer-btn primary">下一篇 →</a>
+    <a href="domain-index.html" class="bim-footer-btn">← 上一篇</a>
     <a href="philosophy-22-propositions.html" class="bim-footer-btn">22 命題</a>
-    <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
+    <a href="../index.html" class="bim-footer-btn">回首頁</a>
   </div>
   <p>BIM_MCP · reference / skills-index</p>
   <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-10-23 · 從 CLAUDE.md 抽取 61 個 Skill 與其觸發關鍵字、Domain 對應。</p>
