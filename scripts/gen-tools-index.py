@@ -151,14 +151,18 @@ def render(tools):
     n_mod = len(mod_to_cat)
 
     rows = "\n".join(
-        f'        <tr><td><strong>{L}</strong></td><td>{esc(name)}</td>'
+        f'        <tr><td><strong><a href="#cat-{L}">{L}</a></strong></td><td>{esc(name)}</td>'
         f'<td class="num">{len(by_cat[L])}</td><td>{esc(cover)}</td></tr>'
         for L, name, cover, _, _ in CATEGORIES)
 
     sections = []
     for L, name, _, blurb, _ in CATEGORIES:
-        out = [f'    <div class="cat-header">{L} · {esc(name)}（{len(by_cat[L])} 個）</div>',
-               f'    <p class="cat-blurb">{esc(blurb)}</p>']
+        # data-search-group 放在外層 div：7-14 的 regex 要求 class="cat-header" 緊接 > 才認得標題，
+        # 屬性不能放在 class 後面（scripts/verify-qaqc.ps1 7-14 的 cat-header regex）；標題與說明一起隱藏也比較自然。
+        out = [f'    <div data-search-group="{L}">',
+               f'    <h3 id="cat-{L}" class="cat-header">{L} · {esc(name)}（{len(by_cat[L])} 個）</h3>',
+               f'    <p class="cat-blurb">{esc(blurb)}</p>',
+               f'    </div>']
         for t in sorted(by_cat[L], key=lambda t: t["name"]):
             if t["destructive"]:
                 badge = '<span class="tool-badge destructive">破壞性</span>'
@@ -167,8 +171,9 @@ def render(tools):
             else:
                 badge = '<span class="tool-badge write">會寫入</span>'
             n = esc(t["name"])
+            effect = "destructive" if t["destructive"] else ("readonly" if t["readOnly"] else "write")
             out.append(
-                f'    <div class="tool-card" id="{n}" data-tool="{n}">\n'
+                f'    <div class="tool-card" id="{n}" data-tool="{n}" data-search-item data-effect="{effect}" data-search-in="{L}">\n'
                 f'      <div>\n'
                 f'        <div class="tool-name">{n}</div>\n'
                 f'        <div class="tool-flags">{badge}</div>\n'
@@ -265,7 +270,7 @@ HEAD = """<!DOCTYPE html>
   }
 </style>
 </head>
-<body data-prev="mep-playbook.html" data-next="deployment-guide.html">
+<body data-prev="skills-index.html" data-next="contributor-template.html">
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -277,8 +282,8 @@ HEAD = """<!DOCTYPE html>
   </div>
   <div class="bim-topnav-actions">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn bim-topnav-btn-github" title="View source on GitHub">GitHub</a>
-    <a href="mep-playbook.html" class="bim-topnav-btn">← 機電教戰手冊</a>
-    <a href="deployment-guide.html" class="bim-topnav-btn">部署指南 →</a>
+    <a href="skills-index.html" class="bim-topnav-btn">← Skill 索引</a>
+    <a href="contributor-template.html" class="bim-topnav-btn">貢獻範本 →</a>
   </div>
 </nav>
 
@@ -290,9 +295,9 @@ HEAD = """<!DOCTYPE html>
 
 <section class="bim-section">
   <h2 class="bim-section-title">先看懂三個標記</h2>
-  <p>每張卡右上角的標記來自工具自己宣告的 <code>annotations</code>，不是這一頁另外標的——閘門 <code>9-1</code> 會驗證它們與程式碼一致。</p>
+  <p>每張卡右上角的標記來自 <code>annotations.ts</code> 集中產生的 <code>annotations</code>，不是這一頁另外標的。</p>
   <ul>
-    <li><strong>唯讀</strong>（{N_RO} 個）——只讀不寫。跑錯了不會留下痕跡，可以放心探索。</li>
+    <li><strong>唯讀</strong>（{N_RO} 個）——設計上不寫入 Revit 模型（<code>export_*</code> 與 <code>capture_view_image</code> 會另外寫出外部或暫存檔案）。</li>
     <li><strong>會寫入</strong>（{N_WR} 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
     <li><strong>破壞性</strong>（{N_DE} 個）——刪除或不可逆地取代既有內容：<code>{DESTRUCTIVE}</code>。這份名單是白名單，程式碼裡多一個就會被閘門擋下。</li>
   </ul>
@@ -312,23 +317,39 @@ HEAD = """<!DOCTYPE html>
   <p style="color:var(--text-muted);font-size:13px;">分類是 {N_MOD} 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 {TOTAL}。這一頁由 <code>scripts/gen-tools-index.py</code> 從 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
 </section>
 
-<section class="bim-section">
+<section class="bim-section" data-search-root>
   <h2 class="bim-section-title">{TOTAL} 個工具 · 依用途分組</h2>
+  <div class="bim-search">
+    <label for="tool-search">搜尋工具名稱或描述</label>
+    <input type="search" id="tool-search" data-search-input placeholder="例如：採光、牆、sheet">
+    <div class="bim-search-chips">
+      <button type="button" aria-pressed="false" data-filter-group="effect" data-filter-value="readonly">唯讀</button>
+      <button type="button" aria-pressed="false" data-filter-group="effect" data-filter-value="write">會寫入</button>
+      <button type="button" aria-pressed="false" data-filter-group="effect" data-filter-value="destructive">破壞性</button>
+      <button type="button" data-search-clear>清除</button>
+    </div>
+    <div class="bim-search-status" data-search-status aria-live="polite"></div>
+  </div>
 
 """
 
 FOOT = """
 </section>
 
+<section class="bim-section">
+  <h2 class="bim-section-title">標記如何維護</h2>
+  <p>卡片上的標記由 <code>MCP-Server/src/tools/annotations.ts</code> 依覆寫表、破壞性名單與名稱前綴集中產生（其餘預設為寫入），不是這一頁手動標的。品質閘門 <code>9-1</code> 檢查每支工具都有標題、<code>readOnlyHint</code> 是布林值、破壞性標記只出現在白名單；<code>9-3</code> 反查 C# handler：宣告唯讀的工具不得 commit Transaction 或刪除元素。</p>
+</section>
+
 <footer class="bim-footer">
   <div class="bim-footer-actions">
-    <a href="deployment-guide.html" class="bim-footer-btn primary">部署指南 →</a>
+    <a href="contributor-template.html" class="bim-footer-btn primary">下一篇 → 貢獻範本</a>
+    <a href="skills-index.html" class="bim-footer-btn">← 上一篇</a>
     <a href="domain-index.html" class="bim-footer-btn">Domain 索引</a>
-    <a href="skills-index.html" class="bim-footer-btn">Skill 索引</a>
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / tools-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">{TOTAL} 個 MCP 工具完整索引，由 scripts/gen-tools-index.py 從 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">{TOTAL} 個 MCP 工具完整索引，由 scripts/gen-tools-index.py 從 registerRevitTools() 產生；唯讀/寫入標註由 annotations.ts 集中產生。</p>
 </footer>
 
 <script src="../shared.js"></script>
