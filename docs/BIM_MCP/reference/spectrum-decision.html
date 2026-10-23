@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>try{if(localStorage.getItem("bim-theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 <title>光譜決策框架 A/B/C/D · BIM_MCP</title>
 <meta property="og:title" content="MCP FAIL 之後：A/B/C/D 光譜決策框架">
 <meta property="og:description" content="MCP 給的是 0/1，設計師走的是光譜。FAIL 不是死刑，是 A/B/C/D 四條路線的決策起點。含採光、排煙、日本 sample 三組實務案例。">
@@ -162,7 +163,7 @@
   }
 </style>
 </head>
-<body data-prev="three-constitutions.html" data-next="domain-index.html">
+<body>
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -172,11 +173,9 @@
     <span class="bim-topnav-sep">/</span>
     <span class="bim-topnav-current">光譜決策框架</span>
   </div>
-  <div class="bim-topnav-actions">
+  <div class="bim-topnav-actions" data-route-nav="top">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn bim-topnav-btn-github" title="View source on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
-    <a href="three-constitutions.html" class="bim-topnav-btn">← 四憲法</a>
     <a href="philosophy-22-propositions.html" class="bim-topnav-btn">22 命題</a>
-    <a href="domain-index.html" class="bim-topnav-btn">Domain 索引 →</a>
   </div>
 </nav>
 
@@ -185,7 +184,7 @@
   <h1 class="bim-hero-title">MCP 給 0/1<br>設計師走<span class="accent">光譜</span></h1>
   <p class="bim-hero-sub">MCP 回 PASS / FAIL 就好。FAIL <strong>不是死刑</strong>——它是<strong>四條路線的決策起點</strong>。本頁定義 A/B/C/D 框架，套到採光 / 排煙兩個典型 FAIL 場景，並從本場日本 sample 模型 demo 跑出的實際 FAIL 案例庫出發。</p>
 </header>
-<figure style="max-width:1100px;margin:32px auto 0;border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;background:#000;">
+<figure style="max-width:1100px;margin:32px auto 0;border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;background:var(--figure-bg);">
   <img src="../images/spectrum__hero__01-vs-spectrum.svg" alt="Binary decision versus spectrum decision" width="1600" height="900" style="display:block;width:100%;height:auto;">
 </figure>
 
@@ -458,9 +457,7 @@
 </section>
 
 <footer class="bim-footer">
-  <div class="bim-footer-actions">
-    <a href="three-constitutions.html" class="bim-footer-btn">← 上一篇：四憲法</a>
-    <a href="domain-index.html" class="bim-footer-btn primary">下一篇：Domain 索引 →</a>
+  <div class="bim-footer-actions" data-route-nav="foot">
     <a href="philosophy-22-propositions.html" class="bim-footer-btn">22 命題</a>
     <a href="../index.html" class="bim-footer-btn">回首頁</a>
   </div>

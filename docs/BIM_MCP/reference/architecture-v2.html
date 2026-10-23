@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>try{if(localStorage.getItem("bim-theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 <title>工作流程、方法與工具如何分工 · BIM_MCP</title>
 <meta property="og:title" content="工作流程、方法與工具如何分工：Skill / Domain / Tool — MCP ≠ Skill 官方澄清">
 <meta property="og:description" content="REVIT_MCP 的責任分工：Skill（流程）、Domain（方法）、Tool（操作）。含 MCP vs Skill 官方定義對比與技術通訊路徑。">
@@ -12,7 +13,7 @@
 <link rel="stylesheet" href="../styles.css">
 <link rel="stylesheet" href="../nav.css">
 </head>
-<body data-prev="../index.html" data-next="industry-evidence.html">
+<body>
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -20,7 +21,7 @@
     <span class="bim-topnav-sep">/</span>
     <span class="bim-topnav-current">工作流程、方法與工具如何分工</span>
   </div>
-  <div class="bim-topnav-actions">
+  <div class="bim-topnav-actions" data-route-nav="top">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn bim-topnav-btn-github" title="View source on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
     <a href="skills-index.html" class="bim-topnav-btn">Skill 索引</a>
     <a href="domain-index.html" class="bim-topnav-btn">Domain 索引</a>
@@ -160,13 +161,13 @@
       <p style="font-size:13px;color:var(--text-muted);">本專案目前 <strong>61 個 Skill</strong>。</p>
     </div>
     <div class="bim-card bim-card-warn">
-      <div class="prop-badge" style="background:rgba(251,191,36,0.15);color:var(--warn);border-color:rgba(251,191,36,0.35);">方法</div>
+      <div class="prop-badge" style="background:var(--warn-bg-soft);color:var(--warn);border-color:var(--warn-border-mid);">方法</div>
       <h3 style="margin-top:8px;">Domain（方法・<code style="font-size:.62em;">domain/</code>）</h3>
       <p>放在 <code>domain/*.md</code>。BIM SOP、法規邏輯、計算方法；人類與 AI 共用的知識層，不能全英文化。<strong>不可協商的限制</strong>——法規、SOP、計算公式、邊界案例，被多個 Skill 引用（複用）。</p>
       <p style="font-size:13px;color:var(--text-muted);">本專案目前 <strong>94 個 Domain</strong>。</p>
     </div>
     <div class="bim-card bim-card-ok">
-      <div class="prop-badge" style="background:rgba(74,222,128,0.15);color:var(--ok);border-color:rgba(74,222,128,0.35);">操作</div>
+      <div class="prop-badge" style="background:var(--ok-bg-strong);color:var(--ok);border-color:var(--ok-border-mid);">操作</div>
       <h3 style="margin-top:8px;">Tool（操作・<code style="font-size:.62em;">MCP-Server/src/tools</code>、<code style="font-size:.62em;">MCP/Core/Commands</code>）</h3>
       <p><code>MCP-Server/src/tools/*.ts</code> 定義 MCP 工具與輸入 schema；<code>MCP/Core/Commands/*.cs</code> 是真正呼叫 Revit API 的實作。</p>
       <p style="font-size:13px;color:var(--text-muted);">本專案目前共 <strong>239 個 Tool</strong>。</p>
@@ -392,9 +393,7 @@ CommandExecutor → Revit API</code></pre>
 </section>
 
 <footer class="bim-footer">
-  <div class="bim-footer-actions">
-    <a href="../index.html" class="bim-footer-btn">← 上一篇</a>
-    <a href="industry-evidence.html" class="bim-footer-btn primary">下一篇 →</a>
+  <div class="bim-footer-actions" data-route-nav="foot">
     <a href="../index.html" class="bim-footer-btn">回首頁</a>
     <a href="skills-index.html" class="bim-footer-btn">Skill 索引</a>
     <a href="domain-index.html" class="bim-footer-btn">Domain 索引</a>
