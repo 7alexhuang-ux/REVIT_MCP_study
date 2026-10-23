@@ -1617,7 +1617,7 @@ else {
     }
 
     Write-Check "Every one of $($toolNames.Count) tools has exactly one tools-index card, and the page's own tallies agree" ($cardProblems.Count -eq 0) `
-        $(if ($cardProblems.Count -gt 0) { "$($cardProblems.Count) problem(s). Regenerate the page from registerRevitTools() rather than hand-editing." } else { "" })
+        $(if ($cardProblems.Count -gt 0) { "$($cardProblems.Count) problem(s). Regenerate the page from registerRevitTools() rather than hand-editing: python3 scripts/gen-tools-index.py" } else { "" })
     if ($cardProblems.Count -gt 0) { $cardProblems | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow } }
 
     # --- card description <-> runtime description ------------------------------------------------
@@ -1683,7 +1683,7 @@ else {
             }
         }
         Write-Check "All $($toolNames.Count) tools-index card descriptions match the runtime description" ($descProblems.Count -eq 0) `
-            $(if ($descProblems.Count -gt 0) { "$($descProblems.Count) card description(s) drifted from registerRevitTools(). Regenerate the page from the registry rather than rewriting the prose by hand." } else { "" })
+            $(if ($descProblems.Count -gt 0) { "$($descProblems.Count) card description(s) drifted from registerRevitTools(). Regenerate the page from the registry rather than rewriting the prose by hand: python3 scripts/gen-tools-index.py" } else { "" })
         if ($descProblems.Count -gt 0) { $descProblems | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow } }
     }
 }
