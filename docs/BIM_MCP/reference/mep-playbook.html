@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>try{if(localStorage.getItem("bim-theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 <title>機電設計教戰手冊 · BIM_MCP</title>
 <meta property="og:title" content="機電設計教戰手冊：把一份方法論走成可依循的三章">
 <meta property="og:description" content="從 domain/mep-space-demand-matrix.md 長出來的教學版。量從哪裡來、怎麼進模型、怎麼組成系統並自己檢核自己。演練標的是 Autodesk 認證課程模型，非任何客戶案件。">
@@ -68,7 +69,7 @@
   }
 </style>
 </head>
-<body data-prev="domain-index.html" data-next="skills-index.html">
+<body>
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -78,10 +79,8 @@
     <span class="bim-topnav-sep">/</span>
     <span class="bim-topnav-current">機電教戰手冊</span>
   </div>
-  <div class="bim-topnav-actions">
+  <div class="bim-topnav-actions" data-route-nav="top">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn bim-topnav-btn-github" title="View source on GitHub">GitHub</a>
-    <a href="domain-index.html" class="bim-topnav-btn">← Domain 索引</a>
-    <a href="skills-index.html" class="bim-topnav-btn">Skills 索引 →</a>
   </div>
 </nav>
 
@@ -241,9 +240,7 @@
 </section>
 
 <footer class="bim-footer">
-  <div class="bim-footer-actions">
-    <a href="domain-index.html" class="bim-footer-btn">← 上一篇：Domain 索引</a>
-    <a href="skills-index.html" class="bim-footer-btn primary">下一篇：Skills 索引 →</a>
+  <div class="bim-footer-actions" data-route-nav="foot">
     <a href="https://github.com/shuotao/REVIT_MCP_study/blob/main/domain/mep-space-demand-matrix.md" target="_blank" rel="noopener" class="bim-footer-btn">方法原文 ↗</a>
     <a href="../index.html" class="bim-footer-btn">回首頁</a>
   </div>

@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>try{if(localStorage.getItem("bim-theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 <title>個人 LLM Wiki · BIM_MCP</title>
 <meta property="og:title" content="BIM_MCP 個人 LLM Wiki · 把公共智慧 pull 回家，長成自己的知識庫">
 <meta property="og:description" content="用 Karpathy 的 LLM Wiki 模式 + Obsidian，把 REVIT_MCP 的 Domain/Skill 公共智慧 ingest 成個人 wiki，再把個人深化的成果回饋上游。含可直接複製給 AI Agent 的建置說明。">
@@ -29,7 +30,7 @@
   .why-card p{margin:0;font-size:13px;color:var(--text-secondary)}
   .bim-steps{counter-reset:step;list-style:none;padding:0}
   .bim-steps li{counter-increment:step;margin:0 0 14px;padding:18px 22px 18px 64px;border:1px solid var(--border);border-radius:var(--radius-md);position:relative;background:var(--bg-card)}
-  .bim-steps li:before{content:counter(step);position:absolute;left:20px;top:18px;width:28px;height:28px;display:grid;place-items:center;background:var(--accent);color:#000;border-radius:50%;font-family:var(--font-tech);font-weight:700}
+  .bim-steps li:before{content:counter(step);position:absolute;left:20px;top:18px;width:28px;height:28px;display:grid;place-items:center;background:var(--accent);color:var(--on-accent);border-radius:50%;font-family:var(--font-tech);font-weight:700}
   .bim-steps li > strong{display:block;margin-bottom:8px;color:var(--text-primary);font-size:15px}
   .bim-steps li > p{font-size:13px;margin:4px 0 0 0;color:var(--text-secondary)}
   .bim-steps li pre{margin:8px 0 0 0;font-size:11px}
@@ -46,26 +47,26 @@
   @media(min-width:901px){.wiz-bar{padding-right:268px}}
   body:not(.wizard) .wiz-ctrl{display:none}
   .wiz-pill{font-family:var(--font-tech);font-size:11px;letter-spacing:1px;padding:6px 12px;border:1px solid var(--border);border-radius:100px;color:var(--text-muted);cursor:pointer;background:var(--bg-card);user-select:none}
-  .wiz-pill.done{color:var(--ok);border-color:rgba(74,222,128,.49)}
-  .wiz-pill.active{color:#000;background:var(--accent);border-color:var(--accent);font-weight:700}
+  .wiz-pill.done{color:var(--ok);border-color:var(--ok-border-strong)}
+  .wiz-pill.active{color:var(--on-accent);background:var(--accent);border-color:var(--accent);font-weight:700}
   .wiz-ctrl{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:38px 0 6px;border-top:1px solid var(--border);padding-top:22px}
   .wiz-btn{font-family:var(--font-tech);font-size:13px;letter-spacing:1px;padding:12px 26px;border-radius:100px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-muted);cursor:pointer;transition:all .2s}
   .wiz-btn:hover{border-color:var(--accent-border);color:var(--accent)}
-  .wiz-btn.primary{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700}
+  .wiz-btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:700}
   .wiz-btn[disabled]{opacity:.3;cursor:default}
   .wiz-all{margin-left:auto;font-family:var(--font-tech);font-size:11px;letter-spacing:1px;padding:6px 12px;border:1px solid var(--border);border-radius:100px;color:var(--text-muted);cursor:pointer;background:var(--bg-card)}
   .wiz-all:hover,.wiz-all[aria-pressed="true"]{border-color:var(--accent-border);color:var(--accent)}
   .wiz-progress{font-family:var(--font-tech);font-size:11px;letter-spacing:2px;color:var(--text-faint)}
 </style>
 </head>
-<body data-prev="kanban-index.html" data-next="../index.html">
+<body>
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
     <a href="../index.html" class="bim-topnav-home">BIM_MCP</a>
     <span class="bim-topnav-sep">/</span>
     <span class="bim-topnav-current">personal llm wiki</span>
   </div>
-  <div class="bim-topnav-actions">
+  <div class="bim-topnav-actions" data-route-nav="top">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn">GitHub</a>
     <a href="domain-index.html" class="bim-topnav-btn">Domain</a>
     <a href="contributor-template.html" class="bim-topnav-btn">Contribute</a>
@@ -447,7 +448,7 @@ This document is intentionally abstract. It describes the idea, not a specific i
 </section>
 
 <footer class="bim-footer">
-  <div class="bim-footer-actions">
+  <div class="bim-footer-actions" data-route-nav="foot">
     <a class="bim-footer-btn primary" href="#copy">複製建置說明</a>
     <a class="bim-footer-btn" href="domain-index.html">Domain 索引</a>
     <a class="bim-footer-btn" href="contributor-template.html">回饋上游</a>
