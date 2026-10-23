@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>try{if(localStorage.getItem("bim-theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 <title>Troubleshooting · BIM_MCP</title>
 <meta property="og:title" content="BIM_MCP Troubleshooting · 依症狀找排錯入口">
 <meta property="og:description" content="依「看不到外掛」「無法連線」「有結果但不符合預期」三種症狀分流，附正式程序、要收集的資訊與回報模板；維護者診斷與歷史案例在後。">
@@ -54,15 +55,15 @@
     letter-spacing: 2px;
     padding: 3px 10px;
     border-radius: var(--radius-sm);
-    background: rgba(239,68,68,0.1);
+    background: var(--bad-bg);
     color: var(--bad);
-    border: 1px solid rgba(239,68,68,0.3);
+    border: 1px solid var(--bad-border);
     margin-bottom: 10px;
   }
   .fix-card.resolved .fix-tag {
-    background: rgba(74,222,128,0.1);
+    background: var(--ok-bg);
     color: var(--ok);
-    border-color: rgba(74,222,128,0.3);
+    border-color: var(--ok-border);
   }
   .fix-card h3 { margin: 4px 0 12px 0; font-size: 18px; }
   .fix-grid {
@@ -104,7 +105,7 @@
   }
 </style>
 </head>
-<body data-prev="deployment-guide.html" data-next="domain-index.html">
+<body>
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -114,10 +115,8 @@
     <span class="bim-topnav-sep">/</span>
     <span class="bim-topnav-current">Troubleshooting</span>
   </div>
-  <div class="bim-topnav-actions">
+  <div class="bim-topnav-actions" data-route-nav="top">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn bim-topnav-btn-github" title="View source on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
-    <a href="deployment-guide.html" class="bim-topnav-btn">← Deployment</a>
-    <a href="domain-index.html" class="bim-topnav-btn">Domain 索引 →</a>
   </div>
 </nav>
 
@@ -126,7 +125,6 @@
   <div class="bim-hero-eyebrow">TROUBLESHOOTING <span class="accent">3 種症狀 · 先使用者檢查，再維護者診斷</span></div>
   <h1 class="bim-hero-title">出問題了？先看<span class="accent">症狀</span>，再選入口</h1>
   <p class="bim-hero-sub">先判斷你遇到的是「看不到外掛」「無法連線」還是「有結果但不符合預期」，每種症狀都有固定四段：你可以先檢查、正式程序、要收集什麼、怎麼回報。維護者用的診斷表與 2026-05-18 的歷史案例放在後面。</p>
-  <figure class="bim-hero-figure"><img src="../images/troubleshooting__hero__9-cases.svg" alt="九種排錯情境的示意圖" width="1600" height="900"></figure>
 </header>
 
 <!-- ============================================ -->
@@ -512,9 +510,7 @@ net start http</code></pre></td>
   </div>
 </section>
 <footer class="bim-footer">
-  <div class="bim-footer-actions">
-    <a href="deployment-guide.html" class="bim-footer-btn">← 上一篇</a>
-    <a href="domain-index.html" class="bim-footer-btn primary">下一篇 →</a>
+  <div class="bim-footer-actions" data-route-nav="foot">
     <a href="../index.html" class="bim-footer-btn">回首頁</a>
   </div>
   <p>BIM_MCP · reference / troubleshooting</p>

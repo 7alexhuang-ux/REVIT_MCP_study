@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>try{if(localStorage.getItem("bim-theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 <title>安裝到你的 Revit，完成第一次查詢 · BIM_MCP</title>
 <meta property="og:title" content="安裝到你的 Revit，完成第一次查詢">
 <meta property="og:description" content="Windows 10 或更新、Revit 2022–2026：用 setup.ps1 一鍵安裝或手動 build / 部署、設定 AI Client，最後只用 get_project_info 與 get_active_view 做一次唯讀查詢。">
@@ -20,7 +21,7 @@
   .bim-hero-figure img{display:block;width:100%;height:auto}
   .bim-steps{counter-reset:step;list-style:none;padding:0}
   .bim-steps li{counter-increment:step;margin:0 0 14px;padding:18px 22px 18px 64px;border:1px solid var(--border);border-radius:var(--radius-md);position:relative;background:var(--bg-card)}
-  .bim-steps li:before{content:counter(step);position:absolute;left:20px;top:18px;width:28px;height:28px;display:grid;place-items:center;background:var(--accent);color:#000;border-radius:50%;font-family:var(--font-tech);font-weight:700}
+  .bim-steps li:before{content:counter(step);position:absolute;left:20px;top:18px;width:28px;height:28px;display:grid;place-items:center;background:var(--accent);color:var(--on-accent);border-radius:50%;font-family:var(--font-tech);font-weight:700}
   .bim-steps li strong{display:block;margin-bottom:4px;color:var(--text-primary);}
   .bim-steps li code{font-size:12px;}
   .bim-steps li p{font-size:13px;margin:6px 0 0 0;color:var(--text-muted);}
@@ -52,7 +53,7 @@
   @media (max-width: 700px) { .client-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
-<body data-prev="../index.html" data-next="domain-index.html">
+<body>
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -62,10 +63,8 @@
     <span class="bim-topnav-sep">/</span>
     <span class="bim-topnav-current">安裝與第一次查詢</span>
   </div>
-  <div class="bim-topnav-actions">
+  <div class="bim-topnav-actions" data-route-nav="top">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn bim-topnav-btn-github" title="View source on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
-    <a href="../index.html" class="bim-topnav-btn">← 首頁</a>
-    <a href="domain-index.html" class="bim-topnav-btn">Domain 索引 →</a>
   </div>
 </nav>
 
@@ -78,7 +77,7 @@
     <li><strong>要安裝的兩個元件</strong>：Revit Add-in（<code>MCP/</code>）與 MCP Server（<code>MCP-Server/</code>）。</li>
     <li><strong>完成結果</strong>：AI Client 回傳的專案名稱（即文件（檔案）名稱，會出現在 Revit 視窗標題列中；不是「專案資訊」對話框裡的 Project Name）與視圖名稱，和你眼前的 Revit 一致。</li>
   </ul>
-  <figure class="bim-hero-figure"><img src="../images/deployment__hero__one-cmd.svg" alt="一條安裝指令分別部署到五個 Revit 版本的示意圖" width="1600" height="900"></figure>
+  <figure class="bim-hero-figure"><img src="../images/deployment__hero__one-cmd.svg" alt="安裝腳本 setup.ps1 偵測已安裝的 Revit 2022–2026 並部署 Add-in" width="1600" height="900"></figure>
 </header>
 
 <!-- ============================================ -->
@@ -361,9 +360,7 @@ cd ..
 </section>
 
 <footer class="bim-footer">
-  <div class="bim-footer-actions">
-    <a href="../index.html" class="bim-footer-btn">← 上一篇</a>
-    <a href="domain-index.html" class="bim-footer-btn primary">下一篇 → Domain 索引</a>
+  <div class="bim-footer-actions" data-route-nav="foot">
     <a href="troubleshooting.html" class="bim-footer-btn">出錯了？Troubleshooting</a>
   </div>
   <p>BIM_MCP · reference / deployment-guide</p>

@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>try{if(localStorage.getItem("bim-theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 <title>貢獻者致謝 · BIM_MCP</title>
 <meta property="og:title" content="BIM_MCP 貢獻者致謝 · 27 位建置協助人">
 <meta property="og:description" content="被收編進 main 的 fork 貢獻者名單：GitHub handle + 貢獻內容摘要 + 對應 PR／收編波次。依 domain 分類與貢獻數量排序。">
@@ -20,19 +21,19 @@
   .contrib-card .handle-note { font-size:11px; color:var(--text-faint); font-weight:400; }
   .contrib-card .contrib-refs { margin-top:10px; font-family:var(--font-tech); font-size:11px; color:var(--text-faint); }
   /* 色彩分類 — 對應 domain 五大分類 */
-  .bim-section[data-cat="compliance"] .contrib-card { border-left: 3px solid #ef4444; }
-  .bim-section[data-cat="workflow"] .contrib-card { border-left: 3px solid #60a5fa; }
-  .bim-section[data-cat="ops"] .contrib-card { border-left: 3px solid #fbbf24; }
-  .bim-section[data-cat="mep"] .contrib-card { border-left: 3px solid #4ade80; }
-  .bim-section[data-cat="ref"] .contrib-card { border-left: 3px solid #a78bfa; }
-  .bim-section[data-cat="compliance"] .bim-section-eyebrow { color: #ef4444; }
-  .bim-section[data-cat="workflow"] .bim-section-eyebrow { color: #60a5fa; }
-  .bim-section[data-cat="ops"] .bim-section-eyebrow { color: #fbbf24; }
-  .bim-section[data-cat="mep"] .bim-section-eyebrow { color: #4ade80; }
-  .bim-section[data-cat="ref"] .bim-section-eyebrow { color: #a78bfa; }
+  .bim-section[data-cat="compliance"] .contrib-card { border-left: 3px solid var(--cat-compliance); }
+  .bim-section[data-cat="workflow"] .contrib-card { border-left: 3px solid var(--cat-workflow); }
+  .bim-section[data-cat="ops"] .contrib-card { border-left: 3px solid var(--cat-ops); }
+  .bim-section[data-cat="mep"] .contrib-card { border-left: 3px solid var(--cat-mep); }
+  .bim-section[data-cat="ref"] .contrib-card { border-left: 3px solid var(--cat-ref); }
+  .bim-section[data-cat="compliance"] .bim-section-eyebrow { color: var(--cat-compliance); }
+  .bim-section[data-cat="workflow"] .bim-section-eyebrow { color: var(--cat-workflow); }
+  .bim-section[data-cat="ops"] .bim-section-eyebrow { color: var(--cat-ops); }
+  .bim-section[data-cat="mep"] .bim-section-eyebrow { color: var(--cat-mep); }
+  .bim-section[data-cat="ref"] .bim-section-eyebrow { color: var(--cat-ref); }
 </style>
 </head>
-<body data-prev="contributor-template.html" data-next="../index.html">
+<body>
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -42,10 +43,8 @@
     <span class="bim-topnav-sep">/</span>
     <span class="bim-topnav-current">貢獻者致謝</span>
   </div>
-  <div class="bim-topnav-actions">
+  <div class="bim-topnav-actions" data-route-nav="top">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn bim-topnav-btn-github" title="View source on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
-    <a href="contributor-template.html" class="bim-topnav-btn">← 上一篇</a>
-    <a href="../index.html" class="bim-topnav-btn">回首頁</a>
   </div>
 </nav>
 
@@ -240,10 +239,8 @@
 </section>
 
 <footer class="bim-footer">
-  <div class="bim-footer-actions">
-    <a href="contributor-template.html" class="bim-footer-btn">← 上一篇</a>
+  <div class="bim-footer-actions" data-route-nav="foot">
     <a href="../2026-07/harvest-waves.html" class="bim-footer-btn">五波收編事件頁</a>
-    <a href="../index.html" class="bim-footer-btn primary">回首頁</a>
   </div>
   <p>BIM_MCP · reference / contributors</p>
   <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">2026-10-23 · 27 位建置協助人（5 大分類，依 domain 順序與貢獻數量排序），資料來源 <code>docs/fork-audit/contributor-map.md</code>、<code>log/2026-07.md</code>；第 20、21 位（嘉祥 @laytonluo、尚霖 @Archwiz-boss）的真名由維護者於 2026-10-12 當面確認，記錄見 <code>log/2026-10.md</code>。2026-10-23 新增的 6 位（@a0917-cell、@bestwish1987-hash、@hb5138111、@huynvk19-cell、@penny116889、@Rumi-3653）僅以 GitHub handle 列名。2026-10 起新增的貢獻者一律只列 GitHub handle；本頁不從 commit 作者欄位、fork 名稱或 README 推測真名。</p>
