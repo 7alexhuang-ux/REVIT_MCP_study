@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>try{if(localStorage.getItem("bim-theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 <title>Tools 索引（239 個）· BIM_MCP</title>
 <meta property="og:title" content="RevitMCP Tools 索引：239 個執行層工具">
 <meta property="og:description" content="239 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
@@ -46,7 +47,7 @@
   }
   .tool-badge.readonly { border-color: var(--accent-border); color: var(--accent); }
   .tool-badge.write { border-color: var(--border); color: var(--text-muted); }
-  .tool-badge.destructive { border-color: #b4433a; color: #d9695f; }
+  .tool-badge.destructive { border-color: var(--bad-border); color: var(--bad); }
   .tool-module {
     font-family: var(--font-tech);
     font-size: 10px;
@@ -71,7 +72,7 @@
   }
 </style>
 </head>
-<body data-prev="skills-index.html" data-next="contributor-template.html">
+<body>
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -81,10 +82,8 @@
     <span class="bim-topnav-sep">/</span>
     <span class="bim-topnav-current">Tools 索引</span>
   </div>
-  <div class="bim-topnav-actions">
+  <div class="bim-topnav-actions" data-route-nav="top">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn bim-topnav-btn-github" title="View source on GitHub">GitHub</a>
-    <a href="skills-index.html" class="bim-topnav-btn">← Skill 索引</a>
-    <a href="contributor-template.html" class="bim-topnav-btn">貢獻範本 →</a>
   </div>
 </nav>
 
@@ -2573,9 +2572,7 @@
 </section>
 
 <footer class="bim-footer">
-  <div class="bim-footer-actions">
-    <a href="contributor-template.html" class="bim-footer-btn primary">下一篇 → 貢獻範本</a>
-    <a href="skills-index.html" class="bim-footer-btn">← 上一篇</a>
+  <div class="bim-footer-actions" data-route-nav="foot">
     <a href="domain-index.html" class="bim-footer-btn">Domain 索引</a>
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>

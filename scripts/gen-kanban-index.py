@@ -174,6 +174,7 @@ def build():
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>try{{if(localStorage.getItem("bim-theme")==="light")document.documentElement.setAttribute("data-theme","light")}}catch(e){{}}</script>
 <title>看板卡索引（{total} 張）· BIM_MCP</title>
 <meta property="og:title" content="BIM_MCP 看板卡索引 — 綠建材工具鏈的 {total} 張開發紀錄">
 <meta property="og:description" content="林家維（@CWLin0518）開發綠建材 Revit 導入工具鏈時推完的 {total} 張看板卡。每張卡連到它產出的 domain／skill／工具，以及當時的實測記錄。">
@@ -192,20 +193,20 @@ def build():
   .kb-title{{min-width:260px;line-height:1.5}}
   .kb-tools{{margin-top:6px}}
   .kb-tools code,.kb-produced code,.kb-ids code{{font-size:11px}}
-  .kb-super{{margin-top:8px;padding:8px 10px;border-left:3px solid #fbbf24;background:rgba(251,191,36,.08);font-size:12px;line-height:1.6;color:var(--text-secondary)}}
+  .kb-super{{margin-top:8px;padding:8px 10px;border-left:3px solid var(--warn);background:var(--warn-bg-soft);font-size:12px;line-height:1.6;color:var(--text-secondary)}}
   .kb-produced{{min-width:180px;line-height:1.9}}
   .kb-ids{{font-family:var(--font-tech);white-space:nowrap}}
   .kb-none{{color:var(--text-faint)}}
   .kb-risk{{font-family:var(--font-tech);font-size:11px;padding:2px 8px;border-radius:3px;white-space:nowrap}}
-  .kb-risk-high{{background:rgba(239,68,68,.15);color:#ef4444}}
-  .kb-risk-medium{{background:rgba(251,191,36,.15);color:#fbbf24}}
-  .kb-risk-low{{background:rgba(74,222,128,.15);color:#4ade80}}
-  .kb-warn{{border-left:3px solid #fbbf24;background:rgba(251,191,36,.06);padding:14px 18px;border-radius:var(--radius-md);margin:var(--gap-md) 0}}
+  .kb-risk-high{{background:var(--bad-bg-strong);color:var(--bad)}}
+  .kb-risk-medium{{background:var(--warn-bg-soft);color:var(--warn)}}
+  .kb-risk-low{{background:var(--ok-bg-strong);color:var(--ok)}}
+  .kb-warn{{border-left:3px solid var(--warn);background:var(--warn-bg);padding:14px 18px;border-radius:var(--radius-md);margin:var(--gap-md) 0}}
   .kb-flow{{font-family:var(--font-tech);font-size:12px;line-height:2.1;color:var(--text-secondary);background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);padding:14px 18px;overflow-x:auto}}
   .kb-generated{{font-size:11px;color:var(--text-faint);margin-top:var(--gap-sm)}}
 </style>
 </head>
-<body data-prev="contributors.html" data-next="personal-llm-wiki.html">
+<body>
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -215,9 +216,8 @@ def build():
     <span class="bim-topnav-sep">/</span>
     <span class="bim-topnav-current">看板卡索引</span>
   </div>
-  <div class="bim-topnav-actions">
+  <div class="bim-topnav-actions" data-route-nav="top">
     <a href="{BOARD}" target="_blank" rel="noopener" class="bim-topnav-btn">開啟看板 ↗</a>
-    <a href="contributors.html" class="bim-topnav-btn">← 貢獻者</a>
   </div>
 </nav>
 
@@ -300,8 +300,7 @@ def build():
 </section>
 
 <footer class="bim-footer">
-  <div class="bim-footer-actions">
-    <a href="contributors.html" class="bim-footer-btn">← 貢獻者</a>
+  <div class="bim-footer-actions" data-route-nav="foot">
     <a href="{BOARD}" target="_blank" rel="noopener" class="bim-footer-btn primary">開啟看板 ↗</a>
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
