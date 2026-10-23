@@ -1094,10 +1094,98 @@ Write-Host "    Tools   = $toolCount  (runtime registerRevitTools())" -Foregroun
 # Snapshot policy: every docs/MMDD-*.html is an immutable event snapshot — its numbers reflect
 # the event date and are never re-synced. Living documents (BIM_MCP reference) stay in scope.
 # Exclusions are enumerated here and nowhere else. Note what is deliberately ABSENT:
-# docs\BIM_MCP\2026-*\ stays in scope. Those pages are mixed - frozen day-of-harvest numbers
-# sit next to live navigation cards describing the CURRENT index pages. A file-level exemption
-# would re-create the very blind spot the recursive glob was added to close.
+# docs\BIM_MCP\YYYY-MM\*.html (event pages) are NOT in $skipPatterns. They are exempt from the
+# claim scan only by passing the snapshot guard below (Get-SnapshotState), never by path alone:
+# a glob exemption would re-create the blind spot the recursive glob was added to close, because
+# a page that merely sits in a month folder would stop being read while still reporting PASS.
+# Why event pages are snapshots: they narrate one dated event, so their numbers (103->146, 192->221)
+# are history and must never be re-synced. The old mixed state - frozen numbers next to live
+# navigation cards - is gone: the nav cards on those pages are count-free, so the only numbers
+# left are historical ones.
+# The guard has two halves that must hold together. (1) The page carries data-snapshot="YYYY-MM-DD"
+# whose month equals its folder, so a banner cannot be pasted onto a page to buy an exemption
+# for the wrong month. (2) A banner in any docs\BIM_MCP html file outside the YYYY-MM event folders is a 7-8 FAIL
+# and the file stays in scope (docs\*.html date-prefixed pages are covered by the original 7-8 check), so a living reference page cannot opt out of count checks by adding the attribute.
+# The stray check below is stricter than the event check: ANY live, case-insensitive occurrence of the substring
+# data-snapshot in a non-event docs\BIM_MCP html file is a FAIL, so nothing can hide there.
+# Real meta-refresh redirect stubs (almost no visible text, no page structure) hold no claims and
+# need no banner; a content page with a meta refresh still needs one. Path regexes accept both
+# separators so the gate also runs on macOS/Linux.
 $skipPatterns = @('_archive', '\log\', '\docs\0425-', '\docs\0523-', 'reference\external')
+
+$snapshotEventRx = '[\\/]docs[\\/]BIM_MCP[\\/](20\d\d-(?:0[1-9]|1[0-2]))[\\/][^\\/]+\.html$'
+# The event-page banner has ONE canonical form, by design, and anything else is "no banner":
+# the first <body> start tag is followed, with only whitespace between, by
+#   <div data-snapshot="YYYY-MM-DD"
+# in double quotes. The six event pages and docs/0425-presentation.html already use exactly this
+# form, and the original docs/MMDD-*.html 7-8 check is unchanged. Parsing arbitrary HTML with a
+# regex (attribute tokenizers) kept producing new bypasses - a fake banner inside another tag's
+# quoted value, a malformed tag restarting the match inside a quote - and was O(n^2) on hostile
+# input, so there is deliberately no tokenizer here. One anchored regex (see Anchoring below).
+# Get-LiveHtml first removes everything that is not rendered markup: comments, script, style,
+# template, textarea. An unterminated comment/script/style/template/textarea runs to end of file
+# (fail-safe = no banner). The body pattern excludes "<" as well as ">" from its character class so a hostile run of "<body "
+# cannot make the scan quadratic.
+function Get-LiveHtml {
+    param([string]$Text)
+    $t = [regex]::Replace($Text, '(?s)<!--(?:.*?-->|.*\z)', '')
+    foreach ($tag in 'script', 'style', 'template', 'textarea') {
+        $t = [regex]::Replace($t, '(?is)<' + $tag + '\b(?:.*?</' + $tag + '\s*>|.*\z)', '')
+    }
+    return $t
+}
+# Anchoring: the live HTML must contain EXACTLY ONE <body start tag and EXACTLY ONE occurrence of
+# data-snapshot (both case-insensitive); the banner is then matched only AT that body's index with
+# a \G-anchored regex. A fake "<body><div data-snapshot=..." hidden in an attribute value, <pre>
+# text, <noscript>, <svg><title> or <iframe srcdoc> adds a second <body or a second data-snapshot
+# and so makes the page "no banner" (fail-safe). Still O(n): two linear scans plus one anchored match.
+# The redirect branch in Get-SnapshotState also excludes "<" from its character classes, for the same reason as the body
+# pattern, so a run of "<" without ">" cannot make it quadratic.
+# The banner pattern also requires the literal text 活動快照 snapshot inside the div, so an empty div
+# cannot buy an exemption.
+# Known and accepted limits: (1) a page whose real <body> tag has been deleted and replaced by a
+# fake one inside an attribute can still pass - that requires breaking the page's own markup;
+# (2) a <body> tag containing ">" inside an attribute value yields "no banner" (fail-safe);
+# (3) a head <script> containing the string '<!--' wipes to end of file and yields "no banner"
+# (fail-safe false RED). Cases 2 and 3 fail loudly, which is the intended direction.
+# (4) a banner div hidden via CSS (display:none in its own style attribute) still exempts - detecting
+# that needs an attribute tokenizer, which is deliberately absent; (5) a page with no real <body>
+# whose only <body> + banner sit inside <title> still exempts - same as limit (1), it requires
+# breaking the page's own markup. The 7-8 check on docs\MMDD-*.html is unchanged and intentionally looser.
+$bodyRx     = [regex]::new('<body\b', 'IgnoreCase')
+$snapAttrRx = [regex]::new('data-snapshot', 'IgnoreCase')
+$bannerAtRx = [regex]::new('\G<body\b[^<>]*>\s*<div data-snapshot="(\d{4}-\d{2})-\d{2}"[^<>]*>[^<]*活動快照 snapshot', 'IgnoreCase,Singleline')
+function Get-BannerMonth {
+    param([string]$Live)
+    $bodies = $bodyRx.Matches($Live)
+    if ($bodies.Count -ne 1) { return $null }
+    if ($snapAttrRx.Matches($Live).Count -ne 1) { return $null }
+    $m = $bannerAtRx.Match($Live, $bodies[0].Index)
+    if ($m.Success) { return $m.Groups[1].Value }
+    return $null
+}
+function Get-SnapshotState {
+    param([string]$Path)
+    $state = @{ IsEvent = $false; Folder = $null; Redirect = $false; BannerMonth = $null; Valid = $false }
+    if ($Path -notmatch $snapshotEventRx) { return $state }
+    $state.IsEvent = $true
+    $state.Folder  = $Matches[1]
+    $raw = Read-FileText $Path
+    if (-not $raw) { return $state }
+    $live = Get-LiveHtml $raw
+    # A redirect is a real stub only: meta refresh AND almost no visible text AND no page
+    # structure. A page with real content that also has a meta refresh still needs the banner.
+    if ($live -match '<meta[^<>]+http-equiv="refresh"') {
+        $visible = ([regex]::Replace($live, '<[^<>]*>', '') -replace '\s+', ' ').Trim()
+        if ($visible.Length -lt 500 -and $live -notmatch '<main\b|<section\b|bim-hero') { $state.Redirect = $true }
+    }
+    $state.BannerMonth = Get-BannerMonth $live
+    $state.Valid = [bool]($state.BannerMonth -and $state.BannerMonth -eq $state.Folder)
+    return $state
+}
+$bimMcpHtml = @(Get-ChildItem -Path "$projectRoot\docs\BIM_MCP" -Filter *.html -Recurse -File -ErrorAction SilentlyContinue |
+    ForEach-Object { $_.FullName })
+$snapshotExempt = @($bimMcpHtml | Where-Object { (Get-SnapshotState $_).Valid })
 
 # Scan target files for claim-site checks (7-1/7-2/7-3)
 # DEFAULT IS SCAN. The BIM_MCP glob is recursive on purpose: a non-recursive glob silently
@@ -1227,6 +1315,9 @@ $scanFiles = $scanFiles | Where-Object {
     $f = $_
     -not ($skipPatterns | Where-Object { $f -like "*$_*" })
 }
+# Event pages that passed the snapshot guard are historical; drop them from the claim scan
+# (7-1/7-2/7-3/7-13 all read $scanFiles). Pages that failed the guard stay in.
+$scanFiles = $scanFiles | Where-Object { $snapshotExempt -notcontains $_ }
 
 # 7-1/7-2/7-3 unified exact-match scanner
 function Find-ClaimMismatches {
@@ -1411,6 +1502,30 @@ foreach ($sf in $snapshotHtml) {
 }
 Write-Check "All $($snapshotHtml.Count) date-prefixed HTMLs carry data-snapshot banner" ($missingBanner.Count -eq 0) `
     $(if ($missingBanner.Count -gt 0) { "Missing banner: $($missingBanner -join ', ')" } else { "" })
+
+# 7-8 (event pages): docs/BIM_MCP/YYYY-MM/*.html are dated event narratives, i.e. snapshots too.
+# They must carry the banner (meta-refresh redirects excepted) and its month must equal the
+# folder month; the same pages are what the claim scan above stops reading, so this check is
+# what keeps that exemption honest. A banner anywhere else under docs/BIM_MCP is a FAIL.
+$eventPages    = @($bimMcpHtml | Where-Object { $_ -match $snapshotEventRx })
+$eventBad      = @()
+foreach ($ep in $eventPages) {
+    $st = Get-SnapshotState $ep
+    if ($st.Redirect) { continue }
+    $rel = "$($st.Folder)/$([System.IO.Path]::GetFileName($ep))"
+    if (-not $st.BannerMonth)           { $eventBad += "$rel (no banner)" }
+    elseif (-not $st.Valid)             { $eventBad += "$rel (banner month $($st.BannerMonth) != folder $($st.Folder))" }
+}
+Write-Check "All $($eventPages.Count) BIM_MCP event pages carry a data-snapshot banner matching their folder month" ($eventBad.Count -eq 0) `
+    $(if ($eventBad.Count -gt 0) { "Event page banner problem: $($eventBad -join '; ')" } else { "" })
+$strayBanner = @()
+foreach ($hp in $bimMcpHtml) {
+    if ($hp -match $snapshotEventRx) { continue }
+    $ht = Read-FileText $hp
+    if ($ht -and (Get-LiveHtml $ht).IndexOf('data-snapshot', [StringComparison]::OrdinalIgnoreCase) -ge 0) { $strayBanner += ($hp -replace '^.*[\\/]docs[\\/]BIM_MCP[\\/]', '') }
+}
+Write-Check "No data-snapshot banner outside snapshot locations under docs/BIM_MCP" ($strayBanner.Count -eq 0) `
+    $(if ($strayBanner.Count -gt 0) { "banner outside snapshot locations (still count-scanned): $($strayBanner -join ', ')" } else { "" })
 
 # 7-9: Real domain files → BIM_MCP domain-index.html (forward check)
 # Catches domains added to the repo but never carded in the teaching-site index
