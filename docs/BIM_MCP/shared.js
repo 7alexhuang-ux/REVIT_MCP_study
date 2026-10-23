@@ -500,13 +500,35 @@
   // ============================================================
   // revealHash — 讓深層連結在抽屜 / details / 搜尋篩選之下仍然可到達
   // ============================================================
-  window.revealHash = function revealHash() {
+  window.revealHash = function revealHash(opts) {
+    // focusOnly：load 後補做用，只重新聚焦，不清搜尋/篩選、不開關抽屜或 details
+    var focusOnly = !!(opts && opts.focusOnly === true);
+    if (focusOnly) {
+      var ae = document.activeElement;
+      if (ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable)) return;
+    }
     var id = "";
     try { id = decodeURIComponent((location.hash || "").slice(1)); } catch (e) { id = (location.hash || "").slice(1); }
     if (!id) return;
     var el = document.getElementById(id);
     if (!el) return;
     var changed = false;
+
+    if (focusOnly) {
+      var tr = qs("#__section_drawer_templates");
+      if (!tr || !tr.contains(el)) return;
+      var dr = qs(".bim-drawer");
+      var be = dr && qs("[data-drawer-body]", dr);
+      if (!be || !dr.classList.contains("open")) return;
+      if (document.activeElement && be.contains(document.activeElement) && document.activeElement !== be) return;
+      var cp = qs('[id="' + id.replace(/"/g, '\\"') + '"]', be);
+      if (cp) {
+        if (!cp.hasAttribute("tabindex")) cp.setAttribute("tabindex", "-1");
+        cp.focus();
+        if (cp.scrollIntoView) cp.scrollIntoView({ block: "start" });
+      }
+      return;
+    }
 
     // 1) 搜尋/篩選把目標藏起來 → 先清除
     var item = el.closest("[data-search-item]");
@@ -570,9 +592,24 @@
     window.revealHash();
     if (!hashBound) {
       hashBound = true;
-      window.addEventListener("hashchange", window.revealHash);
-      // 瀏覽器在載入後才執行自己的 fragment 捲動/聚焦，會把剛聚焦的副本 blur；load 之後補做一次聚焦
-      window.addEventListener("load", function () { window.setTimeout(window.revealHash, 0); });
+      window.addEventListener("hashchange", function () { window.revealHash(); });
+      // 追蹤使用者在載入前聚焦的欄位：瀏覽器的 fragment 聚焦會把它 blur 成 body，load 後若使用者沒有主動離開就還給它
+      var lastField = null, userLeft = false;
+      var isField = function (n) { return !!n && (/^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName) || n.isContentEditable); };
+      document.addEventListener("focusin", function (e) { if (isField(e.target)) { lastField = e.target; userLeft = false; } });
+      document.addEventListener("pointerdown", function (e) { if (e.target !== lastField) userLeft = true; }, true);
+      document.addEventListener("keydown", function (e) { if (e.key === "Tab" || e.key === "Escape") userLeft = true; }, true);
+      // 瀏覽器在載入後才執行自己的 fragment 捲動/聚焦，會把剛聚焦的副本 blur；load 之後只補做聚焦（不清篩選、不開關抽屜）
+      window.addEventListener("load", function () {
+        window.setTimeout(function () {
+          var ae = document.activeElement;
+          if ((!ae || ae === document.body) && lastField && !userLeft && document.contains(lastField)) {
+            lastField.focus({ preventScroll: true });
+            return;
+          }
+          window.revealHash({ focusOnly: true });
+        }, 0);
+      });
     }
   };
 })();
