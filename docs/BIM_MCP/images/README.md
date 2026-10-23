@@ -35,3 +35,26 @@ The visual direction is deliberately minimal: black background, white geometric 
 | `troubleshooting__fix4__by-design.svg` | `reference/troubleshooting.html` fix 4 |
 | `contributor__hero__dual-write.svg` | `reference/contributor-template.html` hero |
 | `contributor__s04__6-step.svg` | `reference/contributor-template.html` example workflow |
+
+## AI 生成概念插圖（2026-10）
+
+以下 8 張 `.webp` 是 2026-10-23 以 gpt-image-2 生成（經 Codex CLI，模型 gpt-5.6-terra / gpt-6-luna）的**概念示意圖，非軟體畫面**。原始 PNG 未收錄，這裡只放壓縮後的 `.webp`（`cwebp -q 82`，長邊上限依下表）。另有一張把「AI Client → MCP Server → Revit 外掛 → Revit」畫成擬真應用視窗的圖，因含虛構的軟體介面，已不採用。
+
+放寬的規則：早期 `_IMAGE_PLAN_CODEX.md`（2026-05）針對手繪 SVG，禁止圖內出現中文與 3D 標記，該文件保留為歷史紀錄、不修改。這批插圖允許圖內含繁體中文，條件是：
+
+- 每張圖旁邊的 HTML 文字必須載有同樣的資訊（圖不是唯一來源）；
+- `alt` 用繁體中文，`<figcaption>` 註明「概念示意圖（AI 生成），非軟體畫面」；
+- 圖內不得出現數字、版本號、錯誤碼、標誌或真人臉孔。
+
+| 檔案 | 頁面／位置 | 一句話含義 | alt 文字 | 非軟體畫面 |
+|---|---|---|---|---|
+| `index__hero__first-success-path.webp` | `index.html` hero（取代 `index__hero__three-layer.svg`） | 認識、安裝、第一次查詢、找方法、貢獻的使用路徑 | 從安裝、第一次唯讀查詢，到選擇方法與貢獻的使用路徑 | 是 |
+| `deployment__verify__compare.webp` | `reference/deployment-guide.html` `#verify` | 先查詢，再核對工具回傳與 Revit 畫面是否一致 | 比對 AI 回傳的專案與視圖名稱，是否與目前 Revit 畫面一致 | 是 |
+| `architecture__responsibilities__two-relations.webp` | `reference/architecture-v2.html` `#responsibilities` | 上方為責任分工（Skill 流程、Domain 方法、Tool 操作），下方為軟體連線；卡片邊框顏色不代表 Domain 分類 | 上方區分流程、方法與工具；下方呈現 AI Client 到 Revit API 的連線 | 是 |
+| `troubleshooting__diagnose__symptoms.webp` | `reference/troubleshooting.html` `#diagnose` | 依症狀選排錯入口，再檢查、收集資訊、回報 | 依看不到外掛、無法連線、結果不符合預期三種症狀選擇排錯入口 | 是 |
+| `three-const__hero__four-rules.webp` | `reference/three-constitutions.html` hero（取代 `three-const__hero__pyramid.svg`） | 被動就緒、資料誠實、方法依據、狀態重查四條底線 | 四條底線分別處理介入時機、資料來源、方法依據與目前狀態 | 是 |
+| `domain__search__task-to-method.webp` | `reference/domain-index.html` 搜尋區塊 | 由任務（例：採光）找到方法原文、工作流程與資料查詢工具；卡片上的彩色圓點僅為裝飾，不是分類 | 以採光任務找到方法原文、相關工作流程及資料查詢工具 | 是 |
+| `contributor__route__three-branches.webp` | `reference/contributor-template.html` `#route` | 依只有方法、跨工具流程、缺少工具能力選擇貢獻入口 | 依方法、跨工具流程或缺少工具能力，選擇不同貢獻入口 | 是 |
+| `wiki__firstrun__repo-and-vault.webp` | `reference/personal-llm-wiki.html` `#firstrun` | 閱讀範圍是整個 repo；`domain/` 為公共方法，`vault/` 為個人內容 | 以整個 repo 作閱讀範圍，公共 Domain 與 vault 個人區透過連結關聯 | 是 |
+
+最大寬度：index、deployment、architecture、contributor 1600 px；domain 1400 px；troubleshooting、three-const、wiki 1200 px。單檔上限 400 KB。
