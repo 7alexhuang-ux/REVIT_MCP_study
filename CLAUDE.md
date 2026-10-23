@@ -37,8 +37,8 @@ These counts must be derived from source, not copied by memory.
 
 | Item | Current Count | Source of Truth |
 |---|---:|---|
-| Runtime MCP tools | 220 | `registerRevitTools()` from `MCP-Server/src/tools/index.ts` |
-| Domain SOP files | 90 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
+| Runtime MCP tools | 239 | `registerRevitTools()` from `MCP-Server/src/tools/index.ts` |
+| Domain SOP files | 94 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
 | Claude skills | 61 | `.claude/skills/*/SKILL.md` |
 
 When these numbers change, update `CLAUDE.md`, `README.md`, `README.zh-TW.md`, `docs/DOCUMENT_AUDIENCE_INVENTORY.md`, and any public site copy that makes grand-total claims. Then run `scripts/verify-qaqc.ps1 -SkipBuild -SkipDeploy`.
@@ -362,6 +362,11 @@ Read the matching file before applying a workflow or calculation.
 | archicad 結構 dwg, archicad 逐層校準, archicad 版次比對, Property 標記 | `domain/archicad-structural-dwg-sync.md` |
 | 批次注入共用參數, 門窗共參, shared parameter injection, FamilyManager.AddParameter, CategoryBinding, 模型檢查器 | `domain/revit-batch-family-shared-param-injection-spec.md` |
 | 材料影像, 貼圖遺失, 重連貼圖, relink material images, Appearance Asset, unifiedbitmap | `domain/material-image-relinking.md` |
+| 送照面積計算式, 樓板面積算式, 面積計算式, floor area formula, create_floor_area_formula | `domain/permit-floor-area-formula.md` |
+| 順序編號, 編號插入, 圖面編號, 跳4, sequence numbering, create_sequence_numbers | `domain/sequence-numbering.md` |
+| 停車格重新編號, renumber_parking_spaces | `domain/parking-auto-numbering.md` |
+| 梁下淨高, 樑下淨高, 淨高檢討, 天花內管線空間, clear height, check_beam_clear_height | `domain/beam-clear-height-check.md` |
+| 管線間距, 管線淨距, 管線預留, 維修空間, 保溫間距, MEP spacing, check_mep_spacing | `domain/mep-spacing-clearance-check.md` |
 
 Meta and governance domain files:
 

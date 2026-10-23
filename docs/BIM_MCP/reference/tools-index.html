@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tools 索引（220 個）· BIM_MCP</title>
-<meta property="og:title" content="RevitMCP Tools 索引：220 個執行層工具">
-<meta property="og:description" content="220 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
+<title>Tools 索引（239 個）· BIM_MCP</title>
+<meta property="og:title" content="RevitMCP Tools 索引：239 個執行層工具">
+<meta property="og:description" content="239 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@300;400;600;700;800&display=swap">
@@ -89,17 +89,17 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">220 個</span></div>
+  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">239 個</span></div>
   <h1 class="bim-hero-title">Tools · <span class="accent">執行層</span><br>模型上真正被動到的那一下</h1>
-  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 220 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
+  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 239 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
 </header>
 
 <section class="bim-section">
   <h2 class="bim-section-title">先看懂三個標記</h2>
   <p>每張卡右上角的標記來自工具自己宣告的 <code>annotations</code>，不是這一頁另外標的——閘門 <code>9-1</code> 會驗證它們與程式碼一致。</p>
   <ul>
-    <li><strong>唯讀</strong>（89 個）——只讀不寫。跑錯了不會留下痕跡，可以放心探索。</li>
-    <li><strong>會寫入</strong>（127 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
+    <li><strong>唯讀</strong>（95 個）——只讀不寫。跑錯了不會留下痕跡，可以放心探索。</li>
+    <li><strong>會寫入</strong>（140 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
     <li><strong>破壞性</strong>（4 個）——刪除或不可逆地取代既有內容：<code>curate_mep_sizes · dedup_detail_elements_in_view · delete_element · import_excel_to_drafting_views</code>。這份名單是白名單，程式碼裡多一個就會被閘門擋下。</li>
   </ul>
   <p style="color:var(--text-muted);font-size:13px;">「唯讀」是工具作者的宣告，不是執行時的沙箱。它告訴你這支工具<em>設計上</em>不寫入，不是保證它<em>不可能</em>寫入。</p>
@@ -112,23 +112,23 @@
       <tr><th>類</th><th>名稱</th><th class="num">數量</th><th>涵蓋</th></tr>
     </thead>
     <tbody>
-        <tr><td><strong>A</strong></td><td>基礎與查詢</td><td class="num">31</td><td>讀模型、找元素、問參數，也含少數寫入前置（載入共用參數）。</td></tr>
-        <tr><td><strong>B</strong></td><td>建模與構件</td><td class="num">45</td><td>產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</td></tr>
-        <tr><td><strong>C</strong></td><td>房間與空間</td><td class="num">18</td><td>房間邊界、編號、面積、走廊、施工架周長。</td></tr>
-        <tr><td><strong>D</strong></td><td>MEP 與碰撞</td><td class="num">17</td><td>風管系統、空間代表點、套管開孔、CSA 干涉。</td></tr>
+        <tr><td><strong>A</strong></td><td>基礎與查詢</td><td class="num">32</td><td>讀模型、找元素、問參數，也含少數寫入前置（載入共用參數）。</td></tr>
+        <tr><td><strong>B</strong></td><td>建模與構件</td><td class="num">51</td><td>產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</td></tr>
+        <tr><td><strong>C</strong></td><td>房間與空間</td><td class="num">19</td><td>房間邊界、編號、面積、走廊、施工架周長。</td></tr>
+        <tr><td><strong>D</strong></td><td>MEP 與碰撞</td><td class="num">25</td><td>風管系統、空間代表點、套管開孔、CSA 干涉、梁下淨高與管線淨距檢討。</td></tr>
         <tr><td><strong>E</strong></td><td>法規檢核</td><td class="num">13</td><td>排煙、偵煙、樓梯——有法源、有判準的檢查。</td></tr>
         <tr><td><strong>F</strong></td><td>視圖與圖紙</td><td class="num">40</td><td>建視圖、裁剪、圖紙配置、視埠定位、跨專案複製。</td></tr>
-        <tr><td><strong>G</strong></td><td>標註與詳圖</td><td class="num">25</td><td>尺寸、詳圖元件、填充區域、圖例、明細表、文字。</td></tr>
+        <tr><td><strong>G</strong></td><td>標註與詳圖</td><td class="num">28</td><td>尺寸、詳圖元件、填充區域、圖例、明細表、文字。</td></tr>
         <tr><td><strong>H</strong></td><td>視覺化</td><td class="num">31</td><td>上色、覆寫、隱藏顯示，也含材質與 Type 建構。</td></tr>
     </tbody>
   </table>
-  <p style="color:var(--text-muted);font-size:13px;">分類是 48 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 220。這一頁由 <code>scripts/gen-tools-index.py</code> 從 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
+  <p style="color:var(--text-muted);font-size:13px;">分類是 54 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 239。這一頁由 <code>scripts/gen-tools-index.py</code> 從 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
 </section>
 
 <section class="bim-section">
-  <h2 class="bim-section-title">220 個工具 · 依用途分組</h2>
+  <h2 class="bim-section-title">239 個工具 · 依用途分組</h2>
 
-    <div class="cat-header">A · 基礎與查詢（31 個）</div>
+    <div class="cat-header">A · 基礎與查詢（32 個）</div>
     <p class="cat-blurb">讀模型、找元素、問參數，多數工作的第一步；也包含少數寫入型前置工具（如載入共用參數檔 load_shared_parameters）。</p>
     <div class="tool-card" id="adjust_section_datums" data-tool="adjust_section_datums">
       <div>
@@ -238,6 +238,16 @@
       </div>
       <div>
         <div class="tool-desc">[Phase 2: Alignment] Get all parameter names for a specific category. MANDATORY: Run this before &#x27;query_elements_with_filter&#x27; to identify exact localized parameter names.</div>
+      </div>
+    </div>
+    <div class="tool-card" id="get_door_window_coordinates" data-tool="get_door_window_coordinates">
+      <div>
+        <div class="tool-name">get_door_window_coordinates</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">base-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">一次撈全部門窗的座標清單：插入點 (LocationPoint) 與 boundingbox（含中心點），座標為 mm。可依門/窗/全部與樓層篩選，並可選擇一併掃描連結模型（自動套用 Transform 轉專案座標）。回傳每筆含 ElementId、族群、類型、標記、樓層、宿主牆ID、朝向。</div>
       </div>
     </div>
     <div class="tool-card" id="get_element_info" data-tool="get_element_info">
@@ -440,8 +450,18 @@
         <div class="tool-desc">將視圖縮放至指定元素，讓使用者可以快速定位。</div>
       </div>
     </div>
-    <div class="cat-header">B · 建模與構件（45 個）</div>
+    <div class="cat-header">B · 建模與構件（51 個）</div>
     <p class="cat-blurb">產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</p>
+    <div class="tool-card" id="align_structural_framing" data-tool="align_structural_framing">
+      <div>
+        <div class="tool-name">align_structural_framing</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">structure-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">自動將結構構架（梁）端點的實體延伸切齊到相接的樑面或柱面，含連結檔 (RVT Links) 中的構材。只寫起點/終點延伸參數，構架的軸線位置不會被移動。相接構材貫穿本樑（T 接）時退到近端面貼齊；相接構材在此終止（L 轉角）時延伸到遠端面。節點過於繁忙（相接候選超過 4 個）的端點會跳過不動並回報，需人工確認。支援單一/多支構架或當前視圖中的所有結構構架。</div>
+      </div>
+    </div>
     <div class="tool-card" id="analyze_beam_penetration" data-tool="analyze_beam_penetration">
       <div>
         <div class="tool-name">analyze_beam_penetration</div>
@@ -595,6 +615,36 @@
         <div class="tool-desc">在 Revit 中建立樓板。需要指定邊界點座標。回傳值會揭露實際採用的樓層與樓板類型。</div>
       </div>
     </div>
+    <div class="tool-card" id="create_grids" data-tool="create_grids">
+      <div>
+        <div class="tool-name">create_grids</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">grid-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">依座標（公釐）批次建立直線網格線（軸線），可逐條指定名稱（如 1、2、A、B）。與既有網格線共線重疊者會略過（status=duplicate）；名稱已被其他網格線使用者不建立（status=name_conflict）。Revit 預設把軸號圓圈放在終點端，需要軸號在哪一端就把該端當 end。回傳逐筆 Results（status: created / duplicate / name_conflict / invalid / failed）。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="create_grids_from_dwg" data-tool="create_grids_from_dwg">
+      <div>
+        <div class="tool-name">create_grids_from_dwg</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">grid-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">依 CAD 指定圖層的直線建立 Revit 網格線（軸線）。參數與 preview_dwg_grids 相同，請先用相同參數預覽並經使用者確認。同一直線上被軸號圓圈打斷的線段會合併成一條；與既有網格線共線重疊者略過，名稱衝突者不建立。垂直軸線由下往上、水平軸線由左往右建立（軸號圓圈在上方／右方端）。此操作會修改 Revit 模型。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="create_opening_types" data-tool="create_opening_types">
+      <div>
+        <div class="tool-name">create_opening_types</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">opening-type-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">批次建立門/窗『型別』（FamilySymbol）：複製指定的種子型別（seed）→ 命名 → 設定寬×高。輸入寬高單位為公分（cm），內部自動換算為 Revit 英尺。**只建立型別，絕不在模型中放置任何門窗實體**。可重複執行（idempotent）：同一族群中已存在同名型別則略過。適合把 CAD 門窗表的『編號→寬×高』一次生成整套型別，供後續 door-window-legend-tools 產生門窗圖例使用。寬或高任一參數設定不到即回滾該筆並列入 failed（不留尺寸錯一半的型別）。回傳 created / skipped / failed 三個清單。</div>
+      </div>
+    </div>
     <div class="tool-card" id="create_wall" data-tool="create_wall">
       <div>
         <div class="tool-name">create_wall</div>
@@ -603,6 +653,16 @@
       </div>
       <div>
         <div class="tool-desc">建立非結構直線牆，座標與高度為公釐。可明確指定樓層與基本牆類型；未指定樓層時使用目前平面視圖的樓層，無樓層則報錯。定位線為牆中心線、基準偏移為零。回傳值會揭露實際採用的樓層與牆類型（LevelSource / WallTypeSource）。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="create_wall_sweeps" data-tool="create_wall_sweeps">
+      <div>
+        <div class="tool-name">create_wall_sweeps</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">wall-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">在指定牆上用牆飾條（Wall Sweep）或分隔縫（Reveal）把牆等分：垂直方向沿牆長、水平方向沿牆高，divisions 等分會建立 divisions-1 條。可指定既有輪廓，或給 profileWidth/profileDepth 自動新建矩形輪廓族群。先用 listOnly 查專案有哪些飾條類型與輪廓，或用 dryRun 預覽等分位置。</div>
       </div>
     </div>
     <div class="tool-card" id="create_window" data-tool="create_window">
@@ -825,6 +885,16 @@
         <div class="tool-desc">解析 CAD 指定圖層中的矩形幾何，預覽識別到的柱資訊（位置、寬度、深度、旋轉角）。此工具不會建立任何 Revit 元素，僅回傳解析結果供確認。建議在執行 create_columns_from_dwg 前先呼叫此工具確認數量與尺寸。</div>
       </div>
     </div>
+    <div class="tool-card" id="preview_dwg_grids" data-tool="preview_dwg_grids">
+      <div>
+        <div class="tool-name">preview_dwg_grids</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">grid-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">讀取目前平面視圖中連結或匯入的 CAD（DWG/DXF）。不給 layerName：列出含直線的圖層與各層直線數，並推薦可能的軸線圖層（grid/axis/軸/柱心…）。給 layerName：把該圖層的直線（含 PolyLine、圖塊內一層）合併共線段後，預覽將建立的網格線與自動命名，不修改模型。建議流程：preview_dwg_grids（無參數）→ preview_dwg_grids（layerName）→ 使用者確認 → create_grids_from_dwg。</div>
+      </div>
+    </div>
     <div class="tool-card" id="preview_family_instances_from_dwg_blocks" data-tool="preview_family_instances_from_dwg_blocks">
       <div>
         <div class="tool-name">preview_family_instances_from_dwg_blocks</div>
@@ -895,7 +965,7 @@
         <div class="tool-desc">以指定來源類別為中心，解除其與鄰近 target 類別元素的幾何接合（BoundingBox 外擴 1 ft 搜尋）。預設 target 為 8 類（Walls、Floors、Columns、StructuralColumns、StructuralFraming、StructuralFoundation、Roofs、Ceilings）。常見用法：牆-柱（上色前置）＝ sourceCategory: Walls、targetCategories: [Columns, StructuralColumns]；柱本位 ＝ sourceCategories: [Columns, StructuralColumns]、targetCategories: [Walls, Floors, StructuralFraming]。解除的配對存在同一份 session 儲存，可用 rejoin_wall_joins 還原（限同一 Revit session）。</div>
       </div>
     </div>
-    <div class="cat-header">C · 房間與空間（18 個）</div>
+    <div class="cat-header">C · 房間與空間（19 個）</div>
     <p class="cat-blurb">房間邊界、編號、面積、走廊、施工架周長。</p>
     <div class="tool-card" id="analyze_corridor_width" data-tool="analyze_corridor_width">
       <div>
@@ -985,6 +1055,16 @@
       </div>
       <div>
         <div class="tool-desc">在 Revit 中自動建立粉刷／油漆材料填滿圖例。同時偵測兩種資料來源：(1) 全專案房間的粉刷層（CompoundStructure Function=Finish）、(2) 被「油漆工具」塗在 Wall/Floor/Ceiling 的材料（依面法向量分類牆/地/天）。為每種材料建立 FilledRegionType 並在 Legend 視圖中繪製三張表（地坪/牆面/天花）。每張表三欄：編號 | 圖例 | 說明；粉刷類型使用 TypeMark/TypeName，油漆材料使用 Material.Mark/Description（空值顯示『(未填)』）。粉刷列在上、油漆列在下，中間以分隔列隔開。前提：專案必須已有任一 Legend 視圖（即使空白）作為複製模板，因 Revit API 不允許直接建立 Legend。版面固定（1:100 比例，欄寬 130/120/650 cm、列高 50 cm）。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="create_floor_area_formula" data-tool="create_floor_area_formula">
+      <div>
+        <div class="tool-name">create_floor_area_formula</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">area-formula-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">產出建照送審用的樓板面積計算式文字（矩形 長×寬、三角形 底×高÷2），並可寫成圖面上的 TextNote。來源是使用者已用區域邊界線／房間分隔線切分好的封閉區域，本工具不自行分解多邊形；無法判定為矩形或三角形的區域、以及含內環（開口、管道間、樓梯間等鏤空）的區域，都會列入 Undecomposed 回報而不編入計算式。每一項都會拿「四捨五入後的邊長乘積」與「實際幾何面積」對帳，差異超過容差即列入 Mismatches，且 dryRun=false 時預設會擋下寫入。</div>
       </div>
     </div>
     <div class="tool-card" id="get_room_daylight_info" data-tool="get_room_daylight_info">
@@ -1077,8 +1157,8 @@
         <div class="tool-desc">依房間範圍偵測同樓層天花板，讀取天花板類型標記，預覽或寫回房間參數（預設：天花板塗層）以更新粉刷明細表。</div>
       </div>
     </div>
-    <div class="cat-header">D · MEP 與碰撞（17 個）</div>
-    <p class="cat-blurb">風管系統、空間代表點、套管開孔、CSA 干涉。</p>
+    <div class="cat-header">D · MEP 與碰撞（25 個）</div>
+    <p class="cat-blurb">風管系統、空間代表點、套管開孔、CSA 干涉；也含模型檢討工具組（梁下淨高、管線淨距、模型快照與警告、安全批次編輯）。</p>
     <div class="tool-card" id="add_pipe_cap" data-tool="add_pipe_cap">
       <div>
         <div class="tool-name">add_pipe_cap</div>
@@ -1087,6 +1167,46 @@
       </div>
       <div>
         <div class="tool-desc">在管件的未連線端安裝管帽或法蘭。自動尋找開放的接頭並連接。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="batch_modify_elements" data-tool="batch_modify_elements">
+      <div>
+        <div class="tool-name">batch_modify_elements</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">model-review-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">安全地批次調整現有模型（改參數、換類型、移動、複製、旋轉），全部包在同一個交易群組，任一步失敗就整批回滾。預設 dryRun=true：實際跑過 Revit 的接合/約束/警告檢查後回滾，回報每個元素修改前後的值與會產生的警告，模型不變。流程：先 dryRun 檢查 → 向使用者說明結果 → 取得同意後 dryRun=false 正式執行（可在 Revit Ctrl+Z 復原）。參數值以專案顯示單位解讀（台灣專案通常 mm）。位移與旋轉中心一律 mm。不支援刪除（請用 delete_element）。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="check_beam_clear_height" data-tool="check_beam_clear_height">
+      <div>
+        <div class="tool-name">check_beam_clear_height</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">model-review-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">梁下淨高檢討（含連結的結構模型）：沿每支梁取樣，量測梁底到下方第一片樓板頂面的淨高，與要求值比較；同時量測梁底到天花板頂的管線可用空間與天花高度。回傳不合格清單、各樓層最小淨高，可選擇在模型放置檢討標記或在「AI檢討_結果3D」上色。方法見 domain/beam-clear-height-check.md。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="check_mep_spacing" data-tool="check_mep_spacing">
+      <div>
+        <div class="tool-name">check_mep_spacing</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">model-review-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">管線間預留淨距檢討（管、風管、電纜架、導線管；含連結模型、含保溫）：找出彼此淨距小於要求或已碰撞的管段，可用 rules 依類別組合設定不同淨距，可用 checkAgainst 同時檢查管線與梁/柱等結構的淨距。經由管件相連的同一路由不互相比較。方法見 domain/mep-spacing-clearance-check.md。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="clear_review_markers" data-tool="clear_review_markers">
+      <div>
+        <div class="tool-name">clear_review_markers</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">model-review-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">清除 check_beam_clear_height / check_mep_spacing 放置的檢討標記（只刪除本工具建立的標記）。</div>
       </div>
     </div>
     <div class="tool-card" id="colorize_clashes" data-tool="colorize_clashes">
@@ -1149,6 +1269,16 @@
         <div class="tool-desc">把專案中已載入的可編輯族群另存為 .rfa 檔到指定資料夾,建立可重用元件庫。預設匯出管配件(OST_PipeFitting)與管附件(OST_PipeAccessory)。自動依類別建立子資料夾;subFolderBySeries=true 時再依族群名稱系列(CIP/DWV/碳鋼.../)細分。略過系統族群、現地(in-place)與不可編輯族群。</div>
       </div>
     </div>
+    <div class="tool-card" id="export_view_image" data-tool="export_view_image">
+      <div>
+        <div class="tool-name">export_view_image</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">model-review-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">把 Revit 視圖輸出成 PNG 影像回傳給 AI 檢視（不需要使用者截圖）。可指定視圖名稱/ID，或用 focusElementIds 在「AI檢討_結果3D」視圖以剖面框框住指定元素後輸出，適合修改後目視確認或查看檢討結果。</div>
+      </div>
+    </div>
     <div class="tool-card" id="get_connector_info" data-tool="get_connector_info">
       <div>
         <div class="tool-name">get_connector_info</div>
@@ -1207,6 +1337,36 @@
       </div>
       <div>
         <div class="tool-desc">盤點模型裡「真的有元件在用」哪些 MEP 尺寸（唯讀）。這與 get_mep_segments_and_sizes 讀的「目錄裡列了哪些尺寸」是兩件事——目錄不知道自己有沒有被用，只看目錄就刪除等於盲刪。掃描來源包含直管/直風管的寬高與直徑，以及配件與附件的 Connector 尺寸（漏掃配件會把「只有變徑頭在用」的尺寸誤判成可刪）。管的用量以 Pipe.PipeSegment 精確歸戶到各 segment。回傳每個目錄尺寸的 usageCount 與 removable 旗標，另列 orphans（模型有用但目錄沒有的尺寸，屬「該增」的候選）。刪除任何尺寸前一定要先跑這支。方法見 domain/mep-mechanical-settings.md。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="get_model_snapshot" data-tool="get_model_snapshot">
+      <div>
+        <div class="tool-name">get_model_snapshot</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">model-review-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">一次取得 Revit 目前狀態，不需要截圖：文件、作用視圖（含平面視圖範圍）、目前選取、樓層與標高、軸網、連結模型、主要類別數量、警告總數、變更序號 changeSeq。開始任何建模或檢討前先呼叫，用來確認 AI 對模型的認知是最新的。長度值單位 mm。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="get_model_warnings" data-tool="get_model_warnings">
+      <div>
+        <div class="tool-name">get_model_warnings</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">model-review-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">讀取 Revit 警告（依訊息分組，含數量與範例元素 ID）。修改模型後用 elementIds 只看受影響元素的警告，可提早發現重疊牆、重複實例、房間未封閉等建置錯誤。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="get_recent_changes" data-tool="get_recent_changes">
+      <div>
+        <div class="tool-name">get_recent_changes</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">model-review-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">取得模型變更紀錄（使用者手動或 AI 的每筆交易：新增/修改/刪除數量、類別、範例 ID）。把 get_model_snapshot 回傳的 changeSeq 當 sinceSeq 傳入，就能知道之後使用者在 Revit 改了什麼，避免拿過期狀態做決策。</div>
       </div>
     </div>
     <div class="tool-card" id="get_space_centroid" data-tool="get_space_centroid">
@@ -1783,7 +1943,7 @@
         <div class="tool-desc">補丁工具：為 target 中已存在的 sheets 從 source 同號 sheet 補齊 custom parameters（例如修補先前 copy_sheets_from_file 沒帶到的 sheet folder/圖集 / Discipline / 繪圖人 等）。**不會重建 sheet、不會動 viewport**，只比對同 SheetNumber 並複製 custom parameters。同名 + 同 StorageType 的 writable parameter 才會被複製，ElementId 類型跳過。觸發條件：使用者提到 sheet folder 缺失、補圖集、修圖紙分組、sheet 沒歸入 folder、補 sheet metadata、sync sheet parameter、batch update sheet parameter。</div>
       </div>
     </div>
-    <div class="cat-header">G · 標註與詳圖（25 個）</div>
+    <div class="cat-header">G · 標註與詳圖（28 個）</div>
     <p class="cat-blurb">尺寸、詳圖元件、填充區域、圖例、明細表、文字。</p>
     <div class="tool-card" id="auto_convert_rotated_viewport_patterns" data-tool="auto_convert_rotated_viewport_patterns">
       <div>
@@ -1895,6 +2055,16 @@
         <div class="tool-desc">Create filled regions covering rooms in a view (e.g. to colour/mark rooms), optionally clearing previously created markers and setting colour and transparency.</div>
       </div>
     </div>
+    <div class="tool-card" id="create_sequence_numbers" data-tool="create_sequence_numbers">
+      <div>
+        <div class="tool-name">create_sequence_numbers</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">numbering-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">在視圖上依順序放置編號 TextNote，對象可以是任意元件（車位、設備、開口皆可）。支援數字（1,2,3）與字母（a,b,c）兩種序列，搭配 prefix 可組出 A1、A2；可選擇跳過含 4 的號碼。順序取自 elementIds 的給定次序，或依 Y 上到下、X 左到右自動排序。</div>
+      </div>
+    </div>
     <div class="tool-card" id="create_view_schedule" data-tool="create_view_schedule">
       <div>
         <div class="tool-name">create_view_schedule</div>
@@ -1922,7 +2092,17 @@
         <div class="tool-module">door-window-legend-tools</div>
       </div>
       <div>
-        <div class="tool-desc">門窗圖例工具。mode=list 列出專案中已使用的門/窗型；mode=create 以 seed Legend 複製生成 A+ managed 圖例；mode=update 更新既有門窗圖例；mode=migrate 預覽或套用 legacy item 的 A+ ownership migration。</div>
+        <div class="tool-desc">門窗圖例工具。mode=list 列出專案中已使用的門/窗型；mode=create 以 seed Legend 複製生成 A+ managed 圖例；mode=update 更新既有門窗圖例；mode=migrate 預覽或套用 legacy item 的 A+ ownership migration；mode=scaffold_template 一鍵自動搭建空白門窗圖例樣板視圖（自動畫格線、放佔位文字與圖例）。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="get_all_tags" data-tool="get_all_tags">
+      <div>
+        <div class="tool-name">get_all_tags</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">tags-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">一次讀取全專案所有標籤（Tag）資料。涵蓋 IndependentTag（門/窗/梁/柱/牆/材料/多類別標籤）與空間標籤（房間 RoomTag、面積 AreaTag、空間 SpaceTag）。每筆重點回傳：標籤頭座標 TagHeadPosition{x,y,z}（mm）、標註對象 TaggedElements（哪根梁/柱/房間，含 ElementId、類別、族群、類型、Mark；被標註者若在連結模型會標示來源與引線末端座標）、TagText 顯示文字、HasLeader、Orientation、所在視圖 ViewId/ViewName。可用 viewName 只掃單一視圖、category 篩選標籤類別（子字串比對，如「門」「柱」「房間」）、includeSpatialTags 關閉空間標籤、maxCount 限制數量。</div>
       </div>
     </div>
     <div class="tool-card" id="get_detail_components" data-tool="get_detail_components">
@@ -2023,6 +2203,16 @@
       </div>
       <div>
         <div class="tool-desc">讀取單一明細表的完整表格內容（欄位標頭 + 逐格 body 資料，忠實呈現 Revit 畫面顯示的文字）。用 scheduleId 或 scheduleName 指定。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="renumber_parking_spaces" data-tool="renumber_parking_spaces">
+      <div>
+        <div class="tool-name">renumber_parking_spaces</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">numbering-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">依幾何位置批次重編停車格編號並寫入參數（預設「備註」）。汽車／機車／大客車各自獨立起號，先依 Y 由上到下分排、同排依 X 由左到右排序。可指定起點元件把某一格釘為該類別的第一號。預設 dryRun=true，必須先看過排序結果再正式寫入。</div>
       </div>
     </div>
     <div class="tool-card" id="sync_detail_component_numbers" data-tool="sync_detail_component_numbers">
@@ -2358,7 +2548,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / tools-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">220 個 MCP 工具完整索引，由 scripts/gen-tools-index.py 從 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">239 個 MCP 工具完整索引，由 scripts/gen-tools-index.py 從 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
 </footer>
 
 <script src="../shared.js"></script>

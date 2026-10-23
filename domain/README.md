@@ -32,7 +32,7 @@
 | `wall-check.md` | wall-orientation-check | 牆壁方向、內外側 |
 | `dependent-view-crop-workflow.md` | dependent-view-crop | 從屬視圖、分區出圖 |
 
-### 不需要成為 Skill 的 Domain（27 個，含 README）
+### 不需要成為 Skill 的 Domain（31 個，含 README）
 
 | Domain 文件 | 類型 | 不成為 Skill 的原因 |
 |------------|------|-------------------|
@@ -44,7 +44,7 @@
 | `path-maintenance-qa.md` | 內部維護指南 | 目錄重構後的路徑交叉參照檢查清單，是開發者維護用文件 |
 | `core-reload-boundary.md` | 開發流程知識（opt-in） | 定義 Loader/Core 熱重載邊界、重啟條件與效率估算；對應 opt-in 開發分支，非 main 單一 csproj 架構，供進階開發者引用 |
 | `skill-authoring-standard.md` | Skill 品質規範 | 定義 Skill 編寫標準與品質要求，是 meta-reference |
-| `parking-auto-numbering.md` | 輔助工作流程 | 停車位自動編號邏輯，被 `parking-check` Skill 引用 |
+| `parking-auto-numbering.md` | 工具方法定義 | `renumber_parking_spaces` 的分類、排序與起始號規則；`parking-check` Skill 目前未引用，尚無專屬 Skill |
 | `revit-fill-pattern-conversion.md` | 技術參考 | 填充圖案轉換規則，被多個 Skill 引用 |
 | `room-numbering-workflow.md` | 輔助工作流程 | 房間自動編號邏輯，被其他 Skill 引用 |
 | `room-surface-area-review.md` | 輔助工作流程 | 房間表面積與粉刷檢討，可被 `building-compliance` Skill 引用 |
@@ -62,6 +62,10 @@
 | `view-template-comparison.md` | 唯讀審計規範 | 定義多 View Template 差異矩陣的比對演算法與矩陣視圖 UI 規範；嚴格禁止任何覆蓋寫入，屬出圖期 QC 審計方法，尚無專屬 Skill |
 | `revit-batch-family-shared-param-injection-spec.md` | 增益集架構規範 | 門窗族群共用參數批次注入的四段解耦架構（`.rvt` 走 CategoryBinding、`.rfa` 走 `FamilyManager.AddParameter`）；本研習庫未含其實做程式碼，供開發參考，無對應 MCP 工具與 Skill |
 | `material-image-relinking.md` | 工具操作規範 | `relink_material_images` 的資料夾／檔名比對規則與衝突判定表，是單一工具的使用邊界說明，非多步驟工作流程 |
+| `permit-floor-area-formula.md` | 工具方法定義 | `create_floor_area_formula` 把使用者已切好的矩形／三角形區域轉成送照面積計算式並對帳；不定義哪些面積該計入（見 `floor-area-review.md`），無專屬 Skill |
+| `sequence-numbering.md` | 工具方法定義 | `create_sequence_numbers` 在視圖上放順序編號文字（可跳 4）；寫參數的編號見 `parking-auto-numbering.md`，無專屬 Skill |
+| `beam-clear-height-check.md` | 檢討方法 | `check_beam_clear_height` 以射線量測梁底至樓板頂淨高與天花內空間；要求值由使用者給定、無預設，尚無專屬 Skill |
+| `mep-spacing-clearance-check.md` | 檢討方法 | `check_mep_spacing` 檢查管線彼此（含保溫、含連結模型）與結構的外緣淨距；預留值由使用者給定、無預設，尚無專屬 Skill |
 | `README.md` | 目錄導航 | 本檔案，不是工作流程 |
 
 ---

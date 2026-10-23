@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Domain 索引（90 個 SOP）· BIM_MCP</title>
-<meta property="og:title" content="BIM_MCP Domain SOP Index — 90 個知識層檔案">
+<title>Domain 索引（94 個 SOP）· BIM_MCP</title>
+<meta property="og:title" content="BIM_MCP Domain SOP Index — 94 個知識層檔案">
 <meta property="og:description" content="依 domain/*.md 整理的 BIM compliance 與 workflow SOP 索引。五分類各自彩色，含觸發關鍵字、反查 Skill、5 個重點 domain 抽屜摘要。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -72,10 +72,10 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">DOMAIN INDEX <span class="accent">90 個 SOP / 5 分類</span></div>
+  <div class="bim-hero-eyebrow">DOMAIN INDEX <span class="accent">94 個 SOP / 5 分類</span></div>
   <h1 class="bim-hero-title">Domain · <span class="accent">知識層</span><br>方法寫一次，多個 Skill 共用</h1>
-  <p class="bim-hero-sub">Domain 是<strong>知識本身</strong>——法規條文、SOP、公式、例外。Skill 是<strong>編排</strong>（61 個）。Tool 是<strong>原子執行</strong>（220 個）。<strong>知識不應該重複在每個 Skill 裡</strong>——這是本專案核心架構原則。本頁列 90 個 <code>domain/*.md</code>，依五大類彩色標示，每張 card 含觸發關鍵字與反查 Skill。</p>
-  <figure class="bim-hero-figure"><img src="../images/domain__hero__grains.svg" alt="90 個 domain SOP，依五大類彩色方塊排列" width="1200" height="1142"></figure>
+  <p class="bim-hero-sub">Domain 是<strong>知識本身</strong>——法規條文、SOP、公式、例外。Skill 是<strong>編排</strong>（61 個）。Tool 是<strong>原子執行</strong>（239 個）。<strong>知識不應該重複在每個 Skill 裡</strong>——這是本專案核心架構原則。本頁列 94 個 <code>domain/*.md</code>，依五大類彩色標示，每張 card 含觸發關鍵字與反查 Skill。</p>
+  <figure class="bim-hero-figure"><img src="../images/domain__hero__grains.svg" alt="94 個 domain SOP，依五大類彩色方塊排列" width="1200" height="1142"></figure>
 </header>
 
 <section data-collapse class="bim-section bim-anchor" data-cat="frame" id="frame">
@@ -102,8 +102,8 @@
   </div>
 
   <div class="bim-grid bim-grid-3">
-    <div class="bim-card"><h4>Tool（220）</h4><p style="font-size:13px;">執行 Revit 查詢、建立、修改。<strong>所有具體資料</strong>必須來自工具回傳。</p></div>
-    <div class="bim-card bim-card-accent"><h4>Domain（90）</h4><p style="font-size:13px;">保存 SOP、公式、例外與判斷流程。<strong>方法的單一來源</strong>。</p></div>
+    <div class="bim-card"><h4>Tool（239）</h4><p style="font-size:13px;">執行 Revit 查詢、建立、修改。<strong>所有具體資料</strong>必須來自工具回傳。</p></div>
+    <div class="bim-card bim-card-accent"><h4>Domain（94）</h4><p style="font-size:13px;">保存 SOP、公式、例外與判斷流程。<strong>方法的單一來源</strong>。</p></div>
     <div class="bim-card"><h4><a href="skills-index.html" style="border-bottom:1px solid var(--accent-border);">Skill（61）</a></h4><p style="font-size:13px;">把 Domain 與工具串成工作流。<strong>不藏方法在 Skill body</strong>。</p></div>
   </div>
   <p class="bim-section-desc" style="margin-top:var(--gap-sm);">完整三層定義見 <a href="architecture-v2.html">三層架構 V2</a>。</p>
@@ -250,11 +250,11 @@
 </section>
 
 <!-- ============================================ -->
-<!-- B · WORKFLOW（46 個 · 青）-->
+<!-- B · WORKFLOW（48 個 · 青）-->
 <!-- ============================================ -->
 <section data-collapse class="bim-section bim-anchor" data-cat="workflow" id="workflow">
   <div class="bim-section-eyebrow">SECTION 03 · MODEL WORKFLOW</div>
-  <h2 class="bim-section-title">模型操作與圖面 workflow（46）</h2>
+  <h2 class="bim-section-title">模型操作與圖面 workflow（48）</h2>
   <p class="bim-section-desc">非法規驅動的日常 BIM 作業 SOP——查詢、上色、標註、出圖、視圖管理、立面/帷幕牆設計。</p>
 
   <div class="bim-grid bim-grid-3">
@@ -752,6 +752,28 @@
       </div>
     </div>
 
+    <div id="permit-floor-area-formula" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">permit-floor-area-formula.md</div>
+        <div class="domain-desc">送照樓板面積計算式：把使用者已切分好的封閉區域（矩形／三角形，直角三角形取兩股）轉成建照送審圖面上的計算式文字，並與實際幾何面積對帳。<strong>不判定哪些面積該計入</strong>——那是使用者畫邊界時的法規判斷（見 floor-area-review）。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">送照面積計算式</span><span class="domain-trigger">樓板面積算式</span><span class="domain-trigger">對帳</span>
+        <a href="tools-index.html#create_floor_area_formula" class="domain-skill">↔ create_floor_area_formula</a>
+      </div>
+    </div>
+
+    <div id="sequence-numbering" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">sequence-numbering.md</div>
+        <div class="domain-desc">圖面順序編號：在視圖上依順序對任意元件放置編號 TextNote（1,2,3 / a,b,c / A1,A2），可跳過含 4 的號碼。要寫進元件參數而不是放文字的，見 parking-auto-numbering。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">順序編號</span><span class="domain-trigger">編號插入</span><span class="domain-trigger">跳 4</span>
+        <a href="tools-index.html#create_sequence_numbers" class="domain-skill">↔ create_sequence_numbers</a>
+      </div>
+    </div>
+
   </div>
 </section>
 
@@ -924,7 +946,7 @@
 <!-- ============================================ -->
 <section data-collapse class="bim-section bim-anchor" data-cat="mep" id="mep">
   <div class="bim-section-eyebrow">SECTION 05 · MEP + STRUCTURE</div>
-  <h2 class="bim-section-title">MEP、構件與穿梁（18）</h2>
+  <h2 class="bim-section-title">MEP、構件與穿梁（20）</h2>
   <p class="bim-section-desc">機電與結構的交界面——碰撞、穿梁、機械構件、跨領域出圖。MEP 與結構的交界面 SOP 群組（穿梁套管 PR #68 已收編 main，v2 完整線於 <code>feature/seven777-beam-penetration-v2</code> 續行）。</p>
 
   <div class="bim-grid bim-grid-3">
@@ -1125,6 +1147,28 @@
       <div class="domain-meta">
         <span class="domain-trigger">IFC</span><span class="domain-trigger">structural sync</span><span class="domain-trigger">原生梁柱</span><span class="domain-trigger">replaceExisting</span>
         <a href="skills-index.html#skills" class="domain-skill">↔ /ifc-structural-sync</a>
+      </div>
+    </div>
+
+    <div id="beam-clear-height-check" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">beam-clear-height-check.md</div>
+        <div class="domain-desc">梁下淨高檢討：以射線量測每支梁（含連結結構模型）梁底到下方樓板頂的淨高，並回報梁底到天花板頂的管線空間。<strong>要求淨高必填、沒有預設值</strong>——依使用者指定值判定。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">梁下淨高</span><span class="domain-trigger">淨高檢討</span><span class="domain-trigger">天花內空間</span>
+        <a href="tools-index.html#check_beam_clear_height" class="domain-skill">↔ check_beam_clear_height</a>
+      </div>
+    </div>
+
+    <div id="mep-spacing-clearance-check" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">mep-spacing-clearance-check.md</div>
+        <div class="domain-desc">管線間預留淨距檢討：管、風管、電纜架、導線管彼此（含保溫、含連結模型）及與梁柱的外緣淨距是否達使用者指定預留值，回報不足與碰撞位置。<strong>預留值必填、沒有預設值</strong>。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">管線淨距</span><span class="domain-trigger">管線預留</span><span class="domain-trigger">維修空間</span>
+        <a href="tools-index.html#check_mep_spacing" class="domain-skill">↔ check_mep_spacing</a>
       </div>
     </div>
 
@@ -1360,7 +1404,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / domain-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-07-09 · 90 個 domain SOP 完整索引，五分類彩色標示，5 個重點 domain 含抽屜摘要。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-07-09 · 94 個 domain SOP 完整索引，五分類彩色標示，5 個重點 domain 含抽屜摘要。</p>
 </footer>
 
 <script src="../shared.js"></script><script>initAll();</script>
