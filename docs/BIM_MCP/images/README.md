@@ -55,5 +55,6 @@ The visual direction is deliberately minimal: black background, white geometric 
 | `domain__search__task-to-method.webp` | `reference/domain-index.html` 搜尋區塊 | 由任務（例：採光）找到方法原文、工作流程與資料查詢工具；卡片上的彩色圓點僅為裝飾，不是分類 | 以採光任務找到方法原文、相關工作流程及資料查詢工具 | 是 |
 | `contributor__route__three-branches.webp` | `reference/contributor-template.html` `#route` | 依只有方法、跨工具流程、缺少工具能力選擇貢獻入口 | 依方法、跨工具流程或缺少工具能力，選擇不同貢獻入口 | 是 |
 | `wiki__firstrun__repo-and-vault.webp` | `reference/personal-llm-wiki.html` `#firstrun` | 閱讀範圍是整個 repo；`domain/` 為公共方法，`vault/` 為個人內容 | 以整個 repo 作閱讀範圍，公共 Domain 與 vault 個人區透過連結關聯 | 是 |
+| `index__og__hub.jpg` | `index.html` `<head>` 的 `og:image` / `twitter:image` | 首頁社群連結預覽（og:image）；來源：使用者提供的首頁截圖，裁去導覽列，1200×630 | BIM_MCP 首頁：用自然語言查詢與操作 Revit，認識、安裝、第一次查詢、找方法、貢獻五步 | 非 AI 生成；為網站實際畫面截圖 |
 
 最大寬度：index、deployment、architecture、contributor 1600 px；domain 1400 px；troubleshooting、three-const、wiki 1200 px。單檔上限 400 KB。
