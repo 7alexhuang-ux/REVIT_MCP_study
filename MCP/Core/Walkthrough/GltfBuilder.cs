@@ -7,6 +7,16 @@ using System.Text;
 
 namespace RevitMCP.Core.Walkthrough
 {
+    /// <summary>設計選項的穩定識別；名稱只供顯示，跨次匯出以 UniqueId 為鍵。</summary>
+    public sealed class GltfDesignOptionInfo
+    {
+        public string SetKey;
+        public string SetName;
+        public string OptionKey;
+        public string OptionName;
+        public bool IsPrimary;
+    }
+
     /// <summary>Per-element metadata written to glTF node.extras by <see cref="GltfBuilder.BeginElement"/>.</summary>
     public sealed class GltfElementInfo
     {
@@ -21,6 +31,8 @@ namespace RevitMCP.Core.Walkthrough
         public int SourceTriangles;
         /// <summary>True when the geometry was replaced by its bounding box.</summary>
         public bool Placeholder;
+        /// <summary>主模型保持 null，不輸出 designOption 欄位。</summary>
+        public GltfDesignOptionInfo DesignOption;
     }
 
     /// <summary>One embedded texture image (JPEG/PNG bytes).</summary>
@@ -630,7 +642,8 @@ namespace RevitMCP.Core.Walkthrough
                     JsonString(element.Info.Family ?? string.Empty),
                     JsonString(element.Info.Source ?? "(host)"),
                     (element.Info.SourceTriangles > 0 ? ",\"sourceTriangles\":" + element.Info.SourceTriangles.ToString(CultureInfo.InvariantCulture) : string.Empty) +
-                    (element.Info.Placeholder ? ",\"placeholder\":true" : string.Empty)));
+                    (element.Info.Placeholder ? ",\"placeholder\":true" : string.Empty) +
+                    DesignOptionJson(element.Info.DesignOption)));
                 meshes.Add("{\"name\":" + name + ",\"primitives\":[" + string.Join(",", elementPrimitives) + "]}");
             }
 
@@ -792,6 +805,15 @@ namespace RevitMCP.Core.Walkthrough
         private static string Num(double v) => v.ToString("R", CultureInfo.InvariantCulture);
 
         private static string Num(float v) => v.ToString("R", CultureInfo.InvariantCulture);
+
+        private static string DesignOptionJson(GltfDesignOptionInfo option)
+        {
+            if (option == null) return string.Empty;
+            return ",\"designOption\":{\"setKey\":" + JsonString(option.SetKey) +
+                ",\"setName\":" + JsonString(option.SetName) + ",\"optionKey\":" + JsonString(option.OptionKey) +
+                ",\"optionName\":" + JsonString(option.OptionName) + ",\"isPrimary\":" +
+                (option.IsPrimary ? "true" : "false") + "}";
+        }
 
         private static string JsonString(string value)
         {

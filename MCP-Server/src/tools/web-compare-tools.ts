@@ -129,3 +129,43 @@ export const webCompareTools: Tool[] = [
         },
     },
 ];
+
+
+// 與既有匯出的重網格、排除條件保持同一份 schema。
+const exportProperties = webCompareTools[0].inputSchema.properties!;
+webCompareTools[0].inputSchema.properties!.designOptions = {
+    type: "boolean", default: false,
+    description: "true 改走 export_design_options 分件匯出（不產生六模式 PNG／IFC）；用 tools/merge-option-glbs.mjs 合成可切換的單一 GLB。",
+};
+webCompareTools.push(
+    {
+        name: "list_design_options",
+        description: "唯讀盤點設計選項集與選項，含 ElementId、UniqueId、IsPrimary、元素數。3D 視圖選項可見性無可靠 API 時回 null 及 notes，不推測。",
+        inputSchema: { type: "object", properties: { includeViews: { type: "boolean", default: true } } },
+    },
+    {
+        name: "export_design_options",
+        description: "把主模型及每個設計選項分別匯出 GLB，避免跨選項集組合爆炸；保留逐元素 extras 並加 designOption 穩定 UniqueId。暫存視圖與設定在 TransactionGroup RollBack 後復原；API 無法可靠顯示選項時明確失敗。產生 design_options.json 與 design_options_export.json，再用 merge-option-glbs 合併。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                ...Object.fromEntries(Object.entries(exportProperties).filter(([key]) => !["designOptions", "includeImages", "includeIfc", "includeGlb", "pixelSize", "camera"].includes(key))),
+                optionKeys: { type: "array", items: { type: "string" }, uniqueItems: true, description: "選項 UniqueId；省略或空陣列匯出全部" },
+                originOffsetMeters: { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3, description: "共用 Revit XYZ 公尺原點偏移；所有分件與命名視圖必須一致" },
+            },
+        },
+    },
+    {
+        name: "export_named_views",
+        description: "唯讀匯出非樣板 3D 命名視圖到 named_views.json，含 eye／target／up、顯示模式及 glTF sectionBox。與 GLB 共用單一原點；需明示 originOffsetMeters 或既有 camera.json。未驗證的透視 FOV 回 null 與 warnings。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                outputDir: exportProperties.outputDir,
+                uniqueIds: { type: "array", items: { type: "string" }, uniqueItems: true },
+                originOffsetMeters: { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3 },
+                cameraPath: { type: "string", description: "camera.json 路徑；省略讀 outputDir/camera.json" },
+            },
+        },
+    },
+);

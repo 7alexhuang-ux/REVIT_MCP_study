@@ -1,0 +1,11 @@
+{
+  "viewName": "WEB_COMPARE",
+  "outputDir": "C:\\Temp\\revit-design-options-fast",
+  "excludeElements": ["ID_CPC:4513008"],
+  "maxTriangles": 4000000,
+  "maxElementTriangles": 100000,
+  "overCapMode": "simplify",
+  "simplifyRatio": 0.1,
+  "contourIntervalMeters": 0,
+  "sectionBox": {"mode":"off"}
+}

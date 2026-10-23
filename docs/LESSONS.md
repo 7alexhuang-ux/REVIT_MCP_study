@@ -121,3 +121,29 @@
 - **解法**：C# 讀參數容忍字串（`WebCompareStringList` 接受 JSON 字串陣列；數字用 `Value<int?>()` 轉）；schema 更新後重建 MCP-Server 並重開客戶端。
 - **下次怎麼避免**：加參數時 C# 端一律容錯；改完 schema 記得 `npm run build`。
 - **適用範圍**：所有 MCP 工具新增參數。
+
+
+## L-14 設計選項的身分資料不等於未顯示選項的幾何（2026-10-23）
+
+- **症狀／風險**：只替目前視圖 GLB 加 designOption extras，會讓選單看似完整、切換後卻缺幾何。
+- **查證**：2024 SDK 有 Element.DesignOption、ElementDesignOptionFilter 和 OPTION_SET_ID；官方 View Templates 文件明列 V/G Design Options 無 API。不能把 VIEWER_OPTION_VISIBILITY 名稱猜成完整覆寫控制。
+- **解法**：主模型一次 CustomExporter，各 host option 依實際成員抽 Solid／Mesh／GeometryInstance；在報告明示 elementGeometry 限制。群組改由成員匯出，未知或重疊幾何設 complete=false，不假成功。詳 D-010。
+- **驗證範圍**：R24 編譯、真實二進位 GLB 離線 fixture 已跑；AR_CPC 沒有取得實機證據，不能宣稱選項數、幾何完整度或匯出速度。
+
+## L-15 合併器需驗證完整交付與輸出路徑（2026-10-23）
+
+- **發現**：fresh review 用 triangle GLB 重現：report 標 complete=true 但少 option part 仍能合併；outputPath 指到 design_options.json 會覆寫 manifest。
+- **解法**：雙向比對 manifest options 與成功分件、拒絕重複 key；輸出限 .glb 且不得覆寫輸入檔。重編貼圖／幾何索引與 alignment，以實體三角形 fixture 驗證，並支援合法空主模型 GLB。
+- **避免方式**：Success envelope、檔案存在、metadata 非空都不足以證明模型完整；驗收要檢查實際 mesh、選項集合、parts 完成狀態與同一共用原點。
+
+## L-16 無人流程需涵蓋失敗路徑（2026-10-23）
+
+- **發現**：既有 socket 啟動會彈 TaskDialog 及自動修 port；只加 OnStartup 自動呼叫會阻塞，或干擾別的 Revit。fresh review 另發現啟動 catch 未受 marker guard，以及 reload 有效名稱先執行後才發現下一個錯名。
+- **解法**：opt-in 單次 Idling、auto模式關閉對話框與port修復；初始失敗也只記錄。reload 在任何 Load 前驗證整批目標。開檔第三參數固定 false，避免 API 忽略 DoNotDetach 而要求互動；dirty close=false 明確拒絕。
+- **限制**：Revit 本身的缺連結、升版、工作共享或其他 modal dialogs 尚未實機驗證；本輪不部署、不建立marker，不能宣稱所有 Revit 提示都已消除。
+
+## L-17 接手他人完成品要逐條對照原需求（2026-10-24）
+
+- **發現**：前一輪建置通過編譯與測試，但逐條對照需求仍有偏離：中央檔搭配 `detach=false` 沒有拒絕、`list_design_options` 缺主模型元件數、`list_links` 缺參考類型與實例數、`reload_links` 空陣列語意相反、報告沒有「貼圖找不到」清單、缺一鍵驗收腳本。
+- **解法**：以 `BasicFileInfo.IsCentral` 擋中央檔；補欄位；`names` 省略／空陣列＝全部且只重載未載入者；`textureProblems` 提到報告頂層；新增 `tools/verify-design-options.mjs`（驗證函式離線測試）。
+- **避免方式**：「編譯過、測試綠」不等於符合規格；交付前把需求逐條列成清單，各自指到程式行或測試。

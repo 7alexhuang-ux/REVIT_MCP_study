@@ -37,6 +37,8 @@ namespace RevitMCP.Core
 
         private object ExportWebCompare(JObject parameters)
         {
+            if (parameters["designOptions"]?.Value<bool?>() == true)
+                return ExportDesignOptions(parameters);
             var uiDoc = _uiApp.ActiveUIDocument ?? throw new InvalidOperationException("目前沒有開啟的 Revit 專案。");
             var doc = uiDoc.Document;
             var warnings = new List<string>();
@@ -816,7 +818,7 @@ namespace RevitMCP.Core
             List<WebCompareDoc> linkedDocs, WebCompareSectionOptions sectionOptions, MeterBox? sectionBox,
             List<WebCompareTerrainPiece> terrainPieces, JObject linkReport, double webCompareContourInterval, List<string> webCompareExcludedCategories,
             List<string> webCompareExcludedElements, int webCompareMaxElementTriangles, bool webCompareDumpAppearance,
-            WebCompareHeavyOptions heavyOptions)
+            WebCompareHeavyOptions heavyOptions, Func<Document, Element, bool> elementPredicate = null)
         {
             ElementId tempViewId;
             using (var tx = new Transaction(doc, "WEB_COMPARE：建立 GLB 匯出暫存視圖"))
@@ -859,6 +861,7 @@ namespace RevitMCP.Core
                     ContourIntervalMeters = webCompareContourInterval,
                     DiagPath = Path.ChangeExtension(glbPath, ".diag.log")
                 };
+                context.ElementPredicate = elementPredicate;
                 foreach (var excluded in webCompareExcludedCategories)
                 {
                     context.ExcludedCategories.Add(excluded);
@@ -882,7 +885,7 @@ namespace RevitMCP.Core
                     using (var exporter = new CustomExporter(doc, context))
                     {
                         exporter.IncludeGeometricObjects = false;
-                        exporter.ShouldStopOnError = false;
+                        exporter.ShouldStopOnError = elementPredicate != null;
                         exporter.Export(tempView);
                     }
                     context.Diag("export finished normally");
@@ -932,6 +935,7 @@ namespace RevitMCP.Core
                 ["trianglesByLink"] = JObject.FromObject(context.LinkTriangles),
                 ["elementsSeenByDoc"] = JObject.FromObject(context.ElementsSeenByDoc),
                 ["exceptions"] = context.ExceptionCount,
+                ["budgetExceeded"] = context.BudgetExceeded,
                 ["trianglesByKey"] = JObject.FromObject(context.TrianglesByKey),
                 ["texturedMaterials"] = context.TexturedMaterials,
                 ["images"] = builder.ImageCount,

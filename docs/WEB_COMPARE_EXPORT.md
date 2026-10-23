@@ -82,3 +82,83 @@
 - 材質貼圖：可在本機找到的外觀貼圖會嵌進 GLB（上限 80 MB）；找不到的（例如指向 Z:、W: 槽的廠商貼圖）列在 `textureProblems`，該材質退回外觀顏色。
 - 相機：`camera.json.projection.frustumTan` 是**未驗證的經驗式**，CPC 案網頁構圖仍比 Revit 放大約 2 倍（LESSONS L-06）。
 - IFC 匯出若報需要 Transaction，會自動在 Transaction 內重試並 RollBack。
+
+
+## 設計選項與命名視圖（2026-10-23）
+
+架構取捨見 [D-010](adr/D-010-design-options-and-named-views.md)。本輪程式已通過建置與離線測試；尚未部署、尚未取得 AR_CPC 的實機選項數及匯出證據。
+
+- `list_design_options({includeViews:true})`：盤點主文件各 set／option 的 ElementId、UniqueId、名稱、isPrimary、elementCount；另回 `mainModelElementCount`（`Element.DesignOption == null` 的非類型元素數，與匯出器同判準）。views 的 `designOptionVisibility:null` 與 notes 表示公開 API 缺口，不表示全部可見。
+- `export_design_options`：主模型一次＋每個 host option 一份實體幾何 GLB，產 `main_model.glb`、`option_<UniqueId>.glb`、`design_options.json`、`design_options_export.json`。`optionKeys` 可指定 UniqueId 子集合。`export_web_compare({designOptions:true,...})` 是這個流程的別名；`false`／省略保持原匯出。
+- 主模型採暫存全模型等角視圖；option 採真實成員 `Element.Geometry`。這個模式不套用 `viewName`／相機／來源 sectionBox／隱藏狀態，與原比對匯出的範圍不同。option 沒有材質外觀貼圖與等高線；連結內選項暫不支援。
+- `maxTriangles` 為每份 GLB 預算；延續 D-009 的 simplify 預設。`excludeElements` 在主模型細分前排除，在選項抽幾何前排除。省時間的快速驗收例排除 `ID_CPC:4513008`；正式交付可移除此排除條件。
+- `complete:false` 代表有失敗、未知／無幾何、共享子元件重疊或預算截斷。先看 parts 的 `noGeometry`／`failed`／`diagnostics`；不得僅因有 GLB 檔就視為完成。`excluded` 為呼叫者明確排除的元素，`containers` 為改由成員匯出的群組。
+
+每個選項元素保留原本 `elementId`／`uniqueId`／`category`／`family`／`source`，新增：
+
+```json
+{"designOption":{"setKey":"<set UniqueId>","setName":"集合名稱","optionKey":"<option UniqueId>","optionName":"選項名稱","isPrimary":true}}
+```
+
+主模型節點省略 `designOption`。`design_options.json` 契約（實作另保留 setId／optionId 便於診斷）：
+
+```json
+{"sets":[{"setKey":"<set UniqueId>","setName":"集合名稱","options":[{"optionKey":"<option UniqueId>","optionName":"選項名稱","isPrimary":true,"elementCount":123}]}],"generatedAt":"<ISO 8601>","revitDoc":"文件名稱"}
+```
+
+`elementCount` 是 Revit 成員盤點數；實際有網格的數量看分件報告的 `elementNodeCount`。元素與選項關聯一律比 UniqueId，名稱不作 key。
+
+`export_design_options` 回傳另含頂層 `textureProblems`：`[{material,file,path,problem}]`，列出主模型匯出時找不到（或讀不了）的貼圖檔名與原路徑；該材質退回外觀顏色，**不偽造貼圖**。空陣列代表主模型貼圖都找得到。
+
+### 一鍵驗收
+
+```powershell
+npm --prefix MCP-Server run build
+node tools/verify-design-options.mjs
+```
+
+依序呼叫 `list_design_options` → `export_design_options`（請求檔預設 `tools/requests/export-design-options-fast.json`，可用第一個參數換檔）→ 合併 GLB 並檢查 → `export_named_views`（原點取自匯出報告 `originOffsetMeters`，與 GLB 同一組）。檢查項：必要欄位、座標有限數、每個選項 `elementCount > 0`、`complete:true`、GLB 內每個 `designOption.setKey／optionKey` 都在 `design_options.json`、named view 的 target 距眼點 10 m。最後一行 `VERIFY_DESIGN_OPTIONS_OK` 或 `VERIFY_DESIGN_OPTIONS_FAILED`。驗證函式有離線測試（`tools/verify-design-options.test.mjs`，`npm test` 會跑）。
+
+### 可重跑的快速驗收（分步）
+
+先建置 MCP-Server。以下工具使用 repo 正式 `RevitSocketClient`／工具註冊與 dispatcher，不載入個人 `rc.cjs`。連線的 wire 格式是 `{CommandName,Parameters,RequestId}`／`{Success,Data,Error,RequestId}`；參數從 UTF-8 JSON 檔讀取，避免 shell 引號問題。連線預設 localhost:8964，可用 `REVIT_MCP_PORT` 改變。一次只讓一個 MCP client 連到 Revit。
+
+```powershell
+npm --prefix MCP-Server run build
+node tools/revit-command.mjs list_design_options tools/requests/list-design-options.json C:/Temp/options-list-result.json
+node tools/revit-command.mjs export_design_options tools/requests/export-design-options-fast.json C:/Temp/options-export-result.json
+node tools/merge-option-glbs.mjs C:/Temp/revit-design-options-fast/design_options_export.json
+node tools/inspect-option-glb.mjs C:/Temp/revit-design-options-fast/cpc.glb C:/Temp/revit-design-options-fast/design_options.json
+```
+
+快速請求檔不聲稱能保證三十秒；應記錄實際時間、排除條件及 parts。合併器拒絕不完整報告、失敗／遺漏／重複分件、未知選項 key、重複元素身分及未支援 glTF extensions。它會重編 mesh／accessor／bufferView／material／texture／image／sampler 索引；不是只合併 metadata。正常輸出 `cpc.glb` 與同目錄的 `design_options.json`。
+
+### named_views.json
+
+`export_named_views` 唯讀匯出所有非樣板 View3D；`uniqueIds` 可篩選。`outputDir` 沿用既有預設；共用原點來自明示 `originOffsetMeters`、`cameraPath` 或 outputDir/camera.json。沒有原點就拒絕，不對每個相機另選眼點。若設計選項包沒有 camera.json，請從 `design_options_export.json.originOffsetMeters` 複製同一組值建立請求檔。
+
+```json
+{"outputDir":"C:/Temp/revit-design-options-fast","originOffsetMeters":[0,0,0],"uniqueIds":[]}
+```
+
+```powershell
+node tools/revit-command.mjs export_named_views C:/Temp/named-views-request.json C:/Temp/named-views-result.json
+```
+
+輸出 `{originOffsetMeters,views,warnings}`；每個 view 含 viewId、uniqueId、name、isPerspective、displayStyle、viewerMode、gltf、sectionBox、revit。gltf 含 eye／target／up、fovVerticalDeg、orthoWidthMeters／orthoHeightMeters。點／向量轉換沿用上節；target 沿 forward 十公尺。viewerMode 無對應時為 null。
+
+- `fovVerticalDeg:null`：目前沒有可靠校準，詳 L-06。正交尺寸僅讀已開 UIView；未開啟則 null，匯出不開視圖、不切相機。raw orientation 與 UIView pan／zoom 尚未驗證像素對齊。
+- sectionBox 的 min／max 已是 glTF 座標；旋轉框取八角點 AABB，另帶 corners。`revit.sectionBox` 保留 localMinMeters／localMaxMeters 與 transform，不會假裝 AABB 就是精確旋轉裁切框。
+
+## 無人操作前置：自動啟動、文件、連結
+
+這裡描述新 DLL 部署後的能力。本輪不修改 `%APPDATA%\Autodesk`、不部署、不建立 opt-in marker，也不重啟 Revit。
+
+- 使用者預先建立 `%USERPROFILE%\.revit-mcp\autostart` **檔案**後，外掛在 OnStartup 註冊單次 Idling 啟動 WebSocket。沒有 marker 保持手動 ribbon。auto 模式不彈啟動對話框、不搶占 port、不殺程序、不執行 netsh；失敗寫日誌。port 取合法 `REVIT_MCP_PORT`，否則既有設定（預設 8964）。
+- `open_document`：`path` 為現有絕對 RVT 路徑；預設 `detach:true,preserveWorksets:true,activate:true,audit:false`。非工作共享檔明示 detach 不適用。**工作共享中央檔（`BasicFileInfo.IsCentral`）搭配 `detach:false` 一律拒絕**；其他檔的 `detach:false` 使用 DoNotDetach，開檔失敗不偷偷改為分離。已開檔的 detach／worksets 要求衝突會拒絕。不儲存原檔。
+- `list_open_documents`：列出 title、真實 revitTitle、path／sourcePath、isActive、isDetached、isModified 等。背景 detached 文件可能沒有 PathName；會保留來源映射，但無安全 API 可重新啟用時明確拒絕。
+- `close_document({title,discard:false})`：有未儲存變更就拒絕，不無聲保存或丟棄。`discard:true` 才允許捨棄；Revit API 禁止關閉作用中文件，需先啟用另一份文件。名稱不唯一時拒絕。
+- `list_links`：列既有 RevitLinkType、載入狀態、原始與絕對路徑；不可讀的雲端參照回 null＋notes。
+- `reload_links({names?,pathOverrides?})`：names 省略或空陣列＝全部頂層連結，此時只重載「未載入／找不到」者，已載入者標 `skipped`；明確列名者一律重載。`list_links` 另回 `referenceType`（Overlay／Attachment）與 `instanceCount`。pathOverrides 為既有連結名稱到現有絕對 RVT 路徑的 object。整批驗證名稱／路徑後逐項回報；不下載、不猜檔、不新建連結。Load／LoadFrom 必須在 Transaction 外，**會清除 Undo history，並可能丟棄連結未儲存的共享座標變更**；此 API 副作用無法 RollBack。此工具不保存主檔或連結原檔。
+
+Revit API 呼叫仍經 ExternalEventManager；MCP-Server 不能在 Revit 沒開、外掛沒部署或存在 Revit modal dialog 時憑空完成操作。

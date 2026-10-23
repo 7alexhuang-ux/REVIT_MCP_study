@@ -139,6 +139,9 @@ namespace RevitMCP.Core.Walkthrough
         /// </summary>
         public bool TrackElements { get; set; }
 
+        /// <summary>匯出前依實際元件篩選；在細分之前跳過，連結容器仍須可通行。</summary>
+        public Func<Document, Element, bool> ElementPredicate { get; set; }
+
         /// <summary>Stops the export once the triangle budget is exceeded (protects Revit from runaway memory).</summary>
         public int TriangleBudget { get; set; } = 2_000_000;
 
@@ -201,6 +204,12 @@ namespace RevitMCP.Core.Walkthrough
 
         public RenderNodeAction OnElementBegin(ElementId elementId)
         {
+            if (ElementPredicate != null)
+            {
+                var element = _documents.Peek().GetElement(elementId);
+                if (element != null && !ElementPredicate(_documents.Peek(), element))
+                    return RenderNodeAction.Skip;
+            }
             var seenKey = _linkNames.Peek();
             ElementsSeenByDoc[seenKey] = ElementsSeenByDoc.TryGetValue(seenKey, out var seen) ? seen + 1 : 1;
             if (TrackElements)
@@ -359,6 +368,7 @@ namespace RevitMCP.Core.Walkthrough
                 info.Name = element.Name;
                 var type = document.GetElement(element.GetTypeId()) as ElementType;
                 info.Family = type?.FamilyName ?? (element as ElementType)?.FamilyName;
+                info.DesignOption = ReadDesignOptionInfo(element);
             }
             catch (Autodesk.Revit.Exceptions.ApplicationException)
             {
@@ -366,6 +376,21 @@ namespace RevitMCP.Core.Walkthrough
             }
 
             return info;
+        }
+
+        /// <summary>只讀取元件真正所屬的選項，不以視圖可見性或名稱推測。</summary>
+        internal static GltfDesignOptionInfo ReadDesignOptionInfo(Element element)
+        {
+            var option = element.DesignOption;
+            if (option == null) return null;
+            var setId = option.get_Parameter(BuiltInParameter.OPTION_SET_ID)?.AsElementId();
+            var set = setId == null ? null : element.Document.GetElement(setId);
+            if (set == null) throw new InvalidOperationException("設計選項缺少 OPTION_SET_ID，無法建立穩定識別：" + option.UniqueId);
+            return new GltfDesignOptionInfo
+            {
+                SetKey = set.UniqueId, SetName = set.Name,
+                OptionKey = option.UniqueId, OptionName = option.Name, IsPrimary = option.IsPrimary
+            };
         }
 
         public RenderNodeAction OnLinkBegin(LinkNode node)

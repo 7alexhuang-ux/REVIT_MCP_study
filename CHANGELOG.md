@@ -8,6 +8,18 @@
 
 ## [Unreleased]
 
+### 新增 — 設計選項實體幾何、命名視圖與無人操作工具（2026-10-23）
+
+- 新增 list_design_options／export_design_options／export_named_views；export_web_compare 以 designOptions:true 選用新流程，預設保留原匯出。穩定 UniqueId、逐元素 designOption extras、design_options.json 及共用原點相機資料。
+- 主模型一次＋逐 host option 真實幾何，暫存視圖 TransactionGroup RollBack；API 可見性缺口、後備材質／裁切差異及不完整結果明示。tools/merge-option-glbs.mjs 合併實際 GLB，驗證分件與索引。
+- opt-in marker 單次 Idling 自動啟動；新增 open/list/close documents、list/reload links。預設detach開檔，髒文件關閉需明示捨棄；auto不彈啟動對話框、不修port、不殺程序。連結reload會清Undo，整批先驗證。
+- 可重跑 JSON 請求、正式 bridge 命令列工具與 GLB inspector；長任務 timeout、完成 timer 清理及錯誤紀錄。詳 docs/WEB_COMPARE_EXPORT.md、docs/adr/D-010-design-options-and-named-views.md。
+- 2026-10-24 補強：list_design_options 加 `mainModelElementCount`；export_design_options 報告頂層加 `textureProblems`（找不到貼圖的檔名與原路徑）；新增一鍵驗收 `tools/verify-design-options.mjs`（含離線測試）。
+- 僅建置與離線驗證；尚未部署、未改 Add-ins、未建立 marker、未取得 AR_CPC 實機結果。
+
+
+> ⚠️ **本節所列全部尚未 commit。** 截至 2026-09-21，工作目錄有 100 個未提交檔案，分支 `grading-workflow-v2`（停在 2026-07-09）落後 `main` 192 個 commit、領先 42 個。整併前請先處理分支分歧，見 [ROADMAP.md](ROADMAP.md) R-01。
+
 ### 🆕 新增 — `export_web_compare`：網頁檢視器 × Revit 顯示模式比對包（2026-10-17）
 
 一次呼叫為 issue-manager S1 驗證產出同視圖、同相機的檔案：六種顯示模式 PNG（`revit_wireframe`／`hiddenLine`／`shaded`／`shadedEdges`／`consistent`／`realistic`）與 `cpc_consistent.png`／`cpc_realistic.png`、`cpc.ifc`（IFC4 Reference View，失敗退 IFC2x3 CV2.0）、`cpc.glb`（每元素一節點，`extras` 帶 elementId／uniqueId／category／family）、`camera.txt` 與 `camera.json`（Revit 與 glTF 座標、原點偏移、FOV／正交尺寸、PNG 像素）。回傳每檔路徑、大小、耗時、warnings，超過 500 MB 提醒。
@@ -15,7 +27,87 @@
 - 新增 `MCP/Core/Commands/CommandExecutor.WebCompare.cs`、`MCP-Server/src/tools/web-compare-tools.ts`（full／architect profile）、`docs/WEB_COMPARE_EXPORT.md`
 - `GltfBuilder` 新增 `BeginElement`／`EndElement`（逐元素節點，未使用時行為不變）；`RevitGltfExportContext` 新增 `TrackElements`（預設 false，走動展示不受影響）
 - 測試：NUnit +3（逐元素節點、空元素、合併與逐元素並存）、MCP Server +4
-- 未實機驗收；部署需先關閉 Revit
+- 2026-10-18 實機驗收（CPC 案）並補強：新增 `sectionBox`（auto＝基地線外框＋10 m，Z 取建築與地形表面再加邊距）、`camera`（匯出前設相機）、`linkedTerrain`（CustomExporter 不匯出連結 Toposolid，改自行三角化並依 section box 裁切後補進 GLB）；不再另存與 `revit_*.png` 相同的 `cpc_consistent.png`／`cpc_realistic.png`；新增 `WebCompareMath`（裁切與範圍運算，NUnit +6）。圖片空白的兩個原因（遠裁剪、Revit 硬體加速異常）見 `docs/WEB_COMPARE_EXPORT.md`
+- 部署需先關閉 Revit
+
+### 🆕 新增 — 建築走動展示交付包（7 個 MCP 工具）
+
+把 Revit 排好的透視相機站點，變成雙擊即開的離線四視窗（影格／平面／剖面／3D）簡報網頁，四窗以「相機路徑上的位置」連動。
+
+- **`get_camera_stations`** — 列出 `WALK-NN` 透視站點，回傳眼點／方向／視角與排站 warnings
+- **`export_walkthrough_package`** — 建立交付包（平面/剖面 PNG、manifest.json、data.js、離線 viewer），含像素對位
+- **`export_walkthrough_frames`** — 沿路徑逐格匯出影格 PNG，自動分批、可中斷續跑
+- **`export_model_gltf`** — 匯出 glTF binary（僅材質顏色，無貼圖），可嵌入 data.js
+- **`apply_camera_stations`** — 把網頁「站點編輯模式」調過的站點整批寫回 Revit（`preview`／`apply` 兩段式）
+- **`export_walkthrough_depth`** — 外部 Node.js + headless Chrome 離線渲染逐格深度圖（AI 風格化前置）
+- **`create_camera_stations`** — 讓 AI 從零建立 `WALK-NN` 透視站點，不需使用者先手動放相機
+
+配套：`domain/walkthrough-package.md` SOP、`viewer/walkthrough/` 離線四視窗 viewer 與 `CONTRACT.md` 資料契約、`bridge/node/walkthrough/render-depth.mjs` 深度渲染器、`MCP/Core/Walkthrough/CameraPathMath.cs`（含 NUnit round-trip 測試）。
+
+### 🐛 Bug 修正 — 走動展示（2026-09-21 實機發現）
+
+- **影格全白**：`create_camera_stations` 把相機座標系的裁剪框 Min/Max 寫進 `Transform.Identity` 的新 `BoundingBoxXYZ`，與讀取端經 `crop.Transform.Inverse` 反推眼點的約定不一致，導致匯出的 73 張影格全是空白。改為沿用 `view.CropBox` 既有 Transform（`SetOrientation` 後即相機框）就地替換 Min/Max。此修正同時解釋了先前被誤判為誤報的「裁剪區域未置中於視線」警告。
+- **glTF 截斷導致 3D 視窗不可用**：大模型撞 200 萬三角面上限時匯出提前停止，產出不完整的 glb。`export_model_gltf` 新增 `bounds`（預設 `"path"`）／`marginMeters`／`belowMeters`／`aboveMeters`，依交付包相機路徑自動計算剖面框，**以空間裁切取代類別裁切**，保留門窗、帷幕牆、家具等全部類別。決策理由見 [docs/ADR.md](docs/ADR.md) D-005。
+
+### 💄 改善 — 離線 viewer
+
+- 播放軸由裸 `<input type="range">` 改為**影格縮圖列 ＋ 可點選的 `WALK-NN` 站點刻度 ＋ 播放頭 ＋ hover 預覽**；讀數加上所在段落（如「WALK-02 → WALK-03」）。
+
+### 📄 文件與治理
+
+- **新增 [docs/ADR.md](docs/ADR.md)**：專案首份架構決策紀錄，D-001 ~ D-004 回溯補記既有決策的理由，D-005 ~ D-008 記錄走動展示本輪的決策，另列 3 條待決議題。
+- **新增 [ROADMAP.md](ROADMAP.md)**：現況快照、R-01 ~ R-06 待辦與阻塞點。
+- **新增 `docs/superpowers/specs/2026-09-21-walkthrough-package-design.md`**：走動展示設計檔（先前 specs 目錄只有整地工作流）。
+- **本檔補記 2026-04 ~ 07 的成果**（含已打 tag 但未記錄的 `v1.6.0`）。
+
+### 🔧 QA/QC — 由 FAILED（60 餘項）修復為 PASSED（54 PASS / 0 FAIL）
+
+- **修正掃描器兩處誤判**：`verify-qaqc.ps1` 的過時路徑掃描現在排除 `references/qa-checklist.md`（打包進 skill 的檢查清單副本，本就刻意列舉禁用檔名，正本早已排除）與 worktree 目錄（其他分支的 checkout，理由同 `node_modules`）。
+- **更正 BIM_MCP 公開站的過時計數**：8 份頁面的 Domain 45/46 → 50、Skill 22 → 23，含 og:title、hero 文案、分類標題與三層架構卡片。這些**不是**複本雜訊，是對外公開頁面上的真實錯誤。
+- **補上兩張缺漏索引卡**：`domain-flow-visualization`（domain-index）與 `domain-diagram`（skills-index），並互加反查連結。
+
+### 🆕 新增 — 整地工作流 UI（Ribbon）
+
+- `GradingRibbonCommands`、`SchemeOverviewWindow` 等 WPF UI 與圖示；三鈕任務流（新整地方案／方案總覽／比較出圖）。
+
+---
+
+## [1.6.0] - 2026-07-31
+
+> 涵蓋 2026-04 ~ 2026-07 的社群協作、工具擴充與整地工作流三階段。此版本已打 tag（`v1.6.0`，commit `fcb61a5`）但先前未寫入本檔，於 2026-09-21 補記。
+
+### 🆕 新增 — Toposolid 整地工作流（V1 → V3）
+
+- **基礎**：`grade_toposolid_to_floors` 三種銜接模式（投影直貼 Footprint／外延漸變 Offset／放坡銜接 Slope）。
+- **Phase 1–4**：放坡銜接框架與警告自動消化、方案登記簿與 Excel 比較表、平衡高程反求與鬆實方三本帳、表現與送審層（方案視圖／坡度熱區／標註／還原／計算書）。
+- **Phase 5 + V2**：業主整地圖說五工具、六級坡 domain、三鈕任務流、A0 單張總比較圖（C-00c）。
+- **V3**：板高程／斜板工具、逐邊坡率（無障礙坡道）、邊界政策模型、非控制樓板覆蓋告警（`FloorBurialCheck`，TDD）。
+- **範圍線重寫**：改為「量測差異場邊界的單一封閉曲線」（TDD），並支援貼地形。
+- 對應 domain：`grading-slope-classification.md`、`earthwork-balance.md`、`earthwork-gridsheet.md`。
+
+### 🆕 新增 — 工具與能力
+
+- **DWG 圖層批次建柱**（`create_columns_from_dwg`、`preview_dwg_columns`、`get_dwg_column_layers`）＋ `create_level`；倒角 polyline 通用解析；收編 Roy-y111 的柱號對應（`textLayerName`）成為三模式之一。
+- **`analyze_floor_slopes`** 樓板坡度分析（Issue #45）。
+- **MEP vs CSA 碰撞偵測**完整整合。
+- **族群盤點清整**（`family-inventory-cleanup` domain + skill）。
+- **`domain-diagram` skill**：腳本驅動產出 Mermaid 流程圖並回嵌 domain。
+- 收編社群 fork：`modify_element_parameter` 支援 `Element.Name` 重命名（taiwanbanana）、`move_element`／`flip_element`／門窗 `sourceElementId`／牆原生屬性（poisonsam）。
+
+### 🆕 新增 — 文件與治理
+
+- **BIM_MCP 公開站**上線（`docs/BIM_MCP/`），含個人 LLM Wiki 專題、domain／skills 索引頁。
+- **個人 vault 機制**：`vault/`（gitignored）＋ `/ingest`、`/lint`、`/wiki` 三個轉接指令。
+- **`docs/PROJECT_INTRO.md`** 社群介紹文件。
+- **skill 可分享化**：`.claude-plugin/marketplace.json`，`hj-pr-proposal` 可經 `/plugin install` 安裝。
+- **CLAUDE.md 憲法規則**：Tool Call Data Honesty、Domain Method Compliance、Active State Re-Anchoring。
+- **CLAUDE.md 英文化重構** ＋ `docs/DOCUMENT_AUDIENCE_INVENTORY.md` 文件受眾盤點。
+
+### 🔧 QA/QC
+
+- `verify-qaqc.ps1` 擴充至 8 階段，新增：本地 markdown 連結腐化、文件受眾分類、亂碼風險、計數宣告一致性、client config 可攜性、快照橫幅檢查。
+
+---
 
 ## [1.5.1] - 2026-03-09
 
