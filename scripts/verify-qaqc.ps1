@@ -969,25 +969,42 @@ function Get-ToolNameRenameMap {
     # of `toolName ===` occurrences must equal the number of pairs extracted; a missing assignment
     # is also a problem, not an empty map. Problems are published in $script:RenameMapProblems and
     # reported by 7-15 (9-3 reads the same map from this same function).
+    # The statement is located by its DECLARATION (const/let/var), not by the first `commandName =`
+    # in the file (that could be a `commandName === ...` comparison), and anything left over after
+    # the recognised clauses are removed must be exactly `toolName` - so an object-map lookup, a
+    # reassignment or a reversed comparison fails loudly instead of yielding an empty/short map.
     $map = @{}
     $script:RenameMapProblems = @()
+    # Known limitation: Remove-CSharpComments is not string-literal aware, so a `//` inside a string
+    # literal would truncate that line. Harmless for the commandName statement today; a truncated
+    # statement would surface below as a count/residue problem rather than a silent short map.
     $text = Remove-CSharpComments (Read-FileText (Join-Path $projectRoot "MCP-Server\src\tools\revit-tools.ts"))
     if (-not $text) {
         $script:RenameMapProblems += "MCP-Server/src/tools/revit-tools.ts unreadable or empty - rename map cannot be built"
         return $map
     }
-    $stmt = ([regex]'(?s)\bcommandName\s*=\s*([^;]*);').Match($text)
+    $stmt = ([regex]'(?s)\b(?:const|let|var)\s+commandName\b[^=]*=(?!=)\s*([^;]*);').Match($text)
     if (-not $stmt.Success) {
-        $script:RenameMapProblems += "no ``commandName = ...;`` assignment found in MCP-Server/src/tools/revit-tools.ts - the rename map cannot be verified (an empty map is not a clean map)"
+        $script:RenameMapProblems += "no ``const|let|var commandName = ...;`` declaration found in MCP-Server/src/tools/revit-tools.ts - the rename map cannot be verified (an empty map is not a clean map)"
         return $map
     }
     $stmtText = $stmt.Groups[1].Value
+    $assignCount = ([regex]'\bcommandName\s*=(?!=)').Matches($text).Count
+    if ($assignCount -gt 1) {
+        $script:RenameMapProblems += "commandName is reassigned $($assignCount - 1) time(s) after its declaration - the rename map cannot be derived from one statement"
+    }
     $renameRx = [regex]'toolName\s*===\s*"([^"]+)"\s*\?\s*"([^"]+)"\s*:(?=\s*toolName\b)'
     foreach ($m in $renameRx.Matches($stmtText)) { $map[$m.Groups[1].Value] = $m.Groups[2].Value }
     $expected = ([regex]'toolName\s*===').Matches($stmtText).Count
     $extracted = $renameRx.Matches($stmtText).Count
     if ($expected -ne $extracted) {
         $script:RenameMapProblems += "revit-tools.ts ``commandName`` assignment has $expected ``toolName ===`` clause(s) but the rename parser extracted $extracted pair(s) - an unrecognised rename form would silently shrink the map: $(($stmtText -replace '\s+', ' ').Trim())"
+    }
+    # Residue check: with every recognised clause removed, only the final fall-through `toolName`
+    # (optionally with a TS type assertion) may remain.
+    $residue = ($renameRx.Replace($stmtText, '') -replace '\s+', ' ').Trim()
+    if ($residue -notmatch '^toolName(\s+as\s+\w+)?$') {
+        $script:RenameMapProblems += "commandName assignment is not a pure toolName ternary chain: $residue"
     }
     return $map
 }
