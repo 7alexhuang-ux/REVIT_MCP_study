@@ -169,17 +169,16 @@
   </div>
 
   <h3>Domain 為什麼獨立於 Skill 存在</h3>
-  <p>BIM 的知識是共用的——防火法規同時被消防檢查、走廊分析、建築合規引用。Domain 獨立於 Skill 存在，是因為<strong>知識不應該重複在每個 Skill 裡</strong>。</p>
+  <p>BIM 的知識是共用的——防火法規同時被消防檢查與元素上色引用。Domain 獨立於 Skill 存在，是因為<strong>知識不應該重複在每個 Skill 裡</strong>。</p>
 
   <div class="bim-card bim-card-accent">
-    <h4>實例：防火 Domain 被三個 Skill 引用</h4>
-    <p><code>domain/fire-rating-check.md</code> 同時被以下 3 個 Skill 引用：</p>
+    <h4>實例：防火 Domain 被兩個 Skill 引用</h4>
+    <p><code>domain/fire-rating-check.md</code> 同時被以下 2 個 Skill 引用：</p>
     <ul>
       <li><code>/fire-safety-check</code> — 消防安全檢討（防火時效視覺化）</li>
-      <li><code>/corridor-analysis</code> — 走廊防火分析（隔間時效要求）</li>
-      <li><code>/building-compliance</code> — 建築法規檢討（防火構造合規）</li>
+      <li><code>/element-coloring</code> — 元素上色（依防火時效參數著色）</li>
     </ul>
-    <p>如果防火法規條文更新，<strong>只動 domain/fire-rating-check.md 一處</strong>，三個 Skill 自動拿到新內容。這就是「Domain 是本體」（<a href="philosophy-22-propositions.html#p5">P5</a>）的具體含義。</p>
+    <p>如果防火法規條文更新，<strong>只動 domain/fire-rating-check.md 一處</strong>，兩個 Skill 自動拿到新內容。這就是「Domain 是本體」（<a href="philosophy-22-propositions.html#p5">P5</a>）的具體含義。</p>
   </div>
 
   <div class="how-tech">
@@ -391,7 +390,7 @@ CommandExecutor → Revit API</code></pre>
   </div>
   <div>
     BIM_MCP · 三層模組架構 V2<br>
-    最後更新：2026-05-18 · 來源：0425 五月小聚 Section 3 升級
+    最後更新：2026-10-23 · 來源：0425 五月小聚 Section 3 升級
   </div>
 </footer>
 
