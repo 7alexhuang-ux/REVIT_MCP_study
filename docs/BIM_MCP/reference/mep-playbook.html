@@ -68,7 +68,7 @@
   }
 </style>
 </head>
-<body data-prev="domain-index.html" data-next="tools-index.html">
+<body data-prev="domain-index.html" data-next="skills-index.html">
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -81,7 +81,7 @@
   <div class="bim-topnav-actions">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn bim-topnav-btn-github" title="View source on GitHub">GitHub</a>
     <a href="domain-index.html" class="bim-topnav-btn">← Domain 索引</a>
-    <a href="tools-index.html" class="bim-topnav-btn">Tools 索引 →</a>
+    <a href="skills-index.html" class="bim-topnav-btn">Skills 索引 →</a>
   </div>
 </nav>
 
@@ -90,6 +90,17 @@
   <h1 class="bim-hero-title">機電設計教戰手冊<br><span class="accent">量從哪裡來</span>，以及它怎麼變成可被檢核的東西</h1>
   <p class="bim-hero-sub">多數機電教材從「怎麼畫」開始。這一份不是——它從<strong>畫之前</strong>開始：那些數字的來歷。<br>它是 <a href="domain-index.html#mep-space-demand-matrix">domain/mep-space-demand-matrix</a> 的教學版，把一份方法論走成年輕工程師能實際依循的步驟。</p>
 </header>
+
+<section class="bim-section" style="padding-top:24px;padding-bottom:0;border-bottom:none;">
+<aside class="bim-callout" aria-label="從哪一章開始">
+  <div class="bim-callout-title">從哪一章開始</div>
+  <ul style="margin-bottom:0">
+    <li><a href="#playbook-ch1">第一章：設計之前，量從哪裡來</a>——先弄清楚數字的來歷</li>
+    <li><a href="#playbook-ch2">第二章：把數字放進模型</a>——需求如何變成可被檢核的東西</li>
+    <li><a href="#playbook-ch3">第三章：設備與空間組成系統之後才解鎖的檢核</a>——見下方章節卡</li>
+  </ul>
+</aside>
+</section>
 
 <section class="bim-section">
   <h2 class="bim-section-title">先講清楚它是什麼、不是什麼</h2>
@@ -108,7 +119,7 @@
 <section class="bim-section">
   <h2 class="bim-section-title">三章各自解決什麼</h2>
 
-  <div class="ch-card">
+  <div class="ch-card" id="playbook-ch1">
     <div>
       <div class="ch-num">CHAPTER 01</div>
       <div class="ch-title">設計之前<br>量從哪裡來</div>
@@ -124,7 +135,7 @@
     </div>
   </div>
 
-  <div class="ch-card">
+  <div class="ch-card" id="playbook-ch2">
     <div>
       <div class="ch-num">CHAPTER 02</div>
       <div class="ch-title">把數字放進模型<br>需求如何變成可被檢核的東西</div>
@@ -140,7 +151,7 @@
     </div>
   </div>
 
-  <div class="ch-card">
+  <div class="ch-card" id="playbook-ch3">
     <div>
       <div class="ch-num">CHAPTER 03</div>
       <div class="ch-title">設備與空間<br>組成系統之後才解鎖的檢核</div>
@@ -231,10 +242,10 @@
 
 <footer class="bim-footer">
   <div class="bim-footer-actions">
-    <a href="tools-index.html" class="bim-footer-btn primary">Tools 索引 →</a>
-    <a href="domain-index.html" class="bim-footer-btn">Domain 索引</a>
+    <a href="domain-index.html" class="bim-footer-btn">← 上一篇：Domain 索引</a>
+    <a href="skills-index.html" class="bim-footer-btn primary">下一篇：Skills 索引 →</a>
     <a href="https://github.com/shuotao/REVIT_MCP_study/blob/main/domain/mep-space-demand-matrix.md" target="_blank" rel="noopener" class="bim-footer-btn">方法原文 ↗</a>
-    <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
+    <a href="../index.html" class="bim-footer-btn">回首頁</a>
   </div>
   <p>BIM_MCP · reference / mep-playbook</p>
   <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">機電設計教戰手冊導覽頁。演練標的為 Autodesk 認證課程教學模型，非任何客戶案件；方法定義以 domain/mep-space-demand-matrix.md 為準。</p>

@@ -162,7 +162,7 @@
   }
 </style>
 </head>
-<body data-prev="industry-evidence.html" data-next="skills-index.html">
+<body data-prev="three-constitutions.html" data-next="domain-index.html">
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -174,9 +174,9 @@
   </div>
   <div class="bim-topnav-actions">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn bim-topnav-btn-github" title="View source on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
-    <a href="industry-evidence.html" class="bim-topnav-btn">← 業界證據</a>
-    <a href="three-constitutions.html" class="bim-topnav-btn">四憲法</a>
+    <a href="three-constitutions.html" class="bim-topnav-btn">← 四憲法</a>
     <a href="philosophy-22-propositions.html" class="bim-topnav-btn">22 命題</a>
+    <a href="domain-index.html" class="bim-topnav-btn">Domain 索引 →</a>
   </div>
 </nav>
 
@@ -281,6 +281,7 @@
 <section data-collapse class="bim-section bim-anchor" id="case-daylight">
   <div class="bim-section-eyebrow">CASE 01 · 採光 FAIL</div>
   <h2 class="bim-section-title">套例 1：採光 FAIL（建技 §41）</h2>
+  <p class="bim-section-desc" style="color:var(--text-muted);font-size:13px;"><strong>歷史教學案例</strong>（2026-05 月小聚）：用來示範 A/B/C/D 框架；未標明來源模型。現行採光檢討方法以 <a href="domain-index.html#daylight-area-check">domain/daylight-area-check.md</a> 為準。</p>
   <p class="bim-section-desc">居室採光面積比 ≥ 1/8（≈ 12.5%）。某居室實測 9.5%，FAIL。<strong>同一個 FAIL，四條路線</strong>。</p>
 
   <div class="abcd-grid">
@@ -375,10 +376,10 @@
   </table>
 
   <h3>駐車場 27 採光 FAIL（建技 §41 — 若該空間定義為居室）</h3>
-  <p><code>get_room_daylight_info</code> 顯示駐車場 27 採光比僅 4.5%。但這裡有個<strong>關鍵釐清</strong>——駐車場本來就不適用居室採光要求。實況：<strong>tool 的 raw data 是對的，但<a href="three-constitutions.html#constitution-2">第二憲法 Domain Method Compliance</a>要求查 domain SOP 確認房間是否需檢核</strong>。</p>
+  <p><code>get_room_daylight_info</code> 顯示駐車場 27 採光比僅 4.5%。但這裡有個<strong>關鍵釐清</strong>——駐車場本來就不適用居室採光要求。實況：<strong>tool 的 raw data 是對的，但<a href="three-constitutions.html#constitution-3">第三憲法 Domain Method Compliance</a>要求查 domain SOP 確認房間是否需檢核</strong>。</p>
   <div class="bim-card bim-card-warn">
     <h4>FAIL 不一定要走 A/B/C/D</h4>
-    <p>有時 FAIL 是<strong>檢核被誤用</strong>（用居室標準檢核非居室）。第二憲法要求先過 domain SOP 確認「該不該檢」——這比 A/B/C/D 早一步。框架的應用順序是：<br>1️⃣ 第一憲法 — 設計師問了才檢<br>2️⃣ 第二憲法 — 用對 domain SOP 檢<br>3️⃣ A/B/C/D — 真的 FAIL 才開始選路線</p>
+    <p>有時 FAIL 是<strong>檢核被誤用</strong>（用居室標準檢核非居室）。<a href="three-constitutions.html#constitution-3">第三憲法 Domain Method Compliance</a>要求先過 domain SOP 確認「該不該檢」——這比 A/B/C/D 早一步。先確認方法適用與資料足夠（第三憲法），再選路線。框架的應用順序是：<br>1️⃣ 第一憲法 — 設計師問了才檢<br>2️⃣ 第三憲法（方法依據）— 用對 domain SOP 檢<br>3️⃣ A/B/C/D — 真的 FAIL 才開始選路線</p>
   </div>
 
   <div class="how-tech">
@@ -458,10 +459,10 @@
 
 <footer class="bim-footer">
   <div class="bim-footer-actions">
-    <a href="industry-evidence.html" class="bim-footer-btn">← 業界證據</a>
-    <a href="three-constitutions.html" class="bim-footer-btn">四憲法</a>
-    <a href="philosophy-22-propositions.html" class="bim-footer-btn primary">22 命題</a>
-    <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
+    <a href="three-constitutions.html" class="bim-footer-btn">← 上一篇：四憲法</a>
+    <a href="domain-index.html" class="bim-footer-btn primary">下一篇：Domain 索引 →</a>
+    <a href="philosophy-22-propositions.html" class="bim-footer-btn">22 命題</a>
+    <a href="../index.html" class="bim-footer-btn">回首頁</a>
   </div>
   <p>BIM_MCP · reference / spectrum-decision</p>
   <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-05-18 · 為 5/23 月小聚場後追加光譜決策獨立頁，套採光 + 排煙兩案例證明框架普適性。</p>
