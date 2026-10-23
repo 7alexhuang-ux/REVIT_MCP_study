@@ -299,7 +299,7 @@
         return;
       }
       // 抽屜開啟時，方向鍵與 g+h 不翻頁（避免閱讀抽屜時被帶離本頁）
-      if (qs(".bim-drawer.open")) return;
+      if (qs(".bim-drawer.open") || qs(".bim-toc.open")) return;
       if (event.key === "ArrowLeft" && prev) window.location.href = prev;
       if (event.key === "ArrowRight" && next) window.location.href = next;
       if (event.key.toLowerCase() === "g") {
@@ -699,6 +699,86 @@
     host.appendChild(btn);
   };
 
+  // ============================================================
+  // initMobileToc — 手機目錄按鈕 + 任務列（≤900px 由 styles.css 控制顯示）
+  // 凍結頁只有行為（切換鈕），不注入路由連結（T32）
+  // ============================================================
+  window.initMobileToc = function initMobileToc(opts) {
+    opts = opts || {};
+    var toc = qs(".bim-toc");
+    var bar = qs(".bim-context-bar");
+    if (!toc || !bar) return;
+    if (qs(".bim-toc-toggle", bar)) return;
+    if (!toc.id) toc.id = "bim-toc";
+
+    var btn = document.createElement("button");
+    btn.className = "bim-toc-toggle";
+    btn.type = "button";
+    btn.setAttribute("aria-expanded", "false");
+    btn.setAttribute("aria-controls", toc.id);
+    btn.textContent = "目錄";
+    bar.appendChild(btn);
+
+    var key = routeKey();
+    if (key && !qs(".bim-toc-tasks", toc)) {
+      var tasks = document.createElement("div");
+      tasks.className = "bim-toc-tasks";
+      var add = function (href, text, src) {
+        var a = document.createElement("a");
+        a.setAttribute("href", href);
+        a.textContent = text;
+        if (src) {
+          if (src.getAttribute("target")) a.setAttribute("target", src.getAttribute("target"));
+          if (src.getAttribute("rel")) a.setAttribute("rel", src.getAttribute("rel"));
+        }
+        tasks.appendChild(a);
+      };
+      var prev = document.body.getAttribute("data-prev");
+      var next = document.body.getAttribute("data-next");
+      if (prev) add(prev, "← 上一篇");
+      if (next) add(next, "下一篇 →");
+      var homeHref = opts.home || (key === "index" ? "index.html" : "../index.html");
+      if (key !== "index" && homeHref !== next && homeHref !== prev) add(homeHref, "回首頁");
+      var meetup = qs("[data-meetup-link]");
+      if (meetup && !meetup.classList.contains("is-disabled") && meetup.getAttribute("aria-disabled") !== "true" && meetup.getAttribute("href")) {
+        add(meetup.getAttribute("href"), (meetup.textContent || "").trim() || "小聚報名", meetup);
+      }
+      toc.appendChild(tasks);
+    }
+
+    function isOpen() { return toc.classList.contains("open"); }
+    function setOpen(open, restoreFocus) {
+      if (open === isOpen()) return;
+      if (open) {
+        toc.classList.add("open");
+        btn.setAttribute("aria-expanded", "true");
+        var first = qs("a", toc);
+        if (!toc.hasAttribute("tabindex")) toc.setAttribute("tabindex", "-1");
+        (first || toc).focus();
+      } else {
+        toc.classList.remove("open");
+        btn.setAttribute("aria-expanded", "false");
+        if (restoreFocus) btn.focus();
+      }
+    }
+    btn.addEventListener("click", function () { setOpen(!isOpen(), true); });
+    toc.addEventListener("click", function (e) {
+      var t = e.target;
+      while (t && t !== toc && t.tagName !== "A") t = t.parentNode;
+      if (t && t.tagName === "A") setOpen(false, false);
+    });
+    // capture 階段：先於 initKeyNav 的 Escape 處理，確保焦點回到切換鈕
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && isOpen()) setOpen(false, true);
+    }, true);
+    document.addEventListener("click", function (e) {
+      if (!isOpen()) return;
+      var t = e.target;
+      if (t && (toc.contains(t) || btn.contains(t))) return;
+      setOpen(false, false);
+    });
+  };
+
   var hashBound = false;
 
   // ============================================================
@@ -715,6 +795,7 @@
     window.initDrawer();
     window.initKeyNav(opts);
     window.initMeetupLinks();
+    window.initMobileToc(opts);   // 必須在 initMeetupLinks 之後（報名連結的 href 由它寫入）
     window.initSearch();
     window.revealHash();
     if (!hashBound) {
