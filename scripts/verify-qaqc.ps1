@@ -960,11 +960,34 @@ function Get-ToolNameRenameMap {
     #   const commandName = toolName === "query_elements_with_filter" ? "query_elements" : toolName;
     # Comparing raw tool names without applying this map would falsely flag that redirect as having
     # no dispatcher case (no `case "query_elements_with_filter"` exists - only `case "query_elements"`).
+    # The ternary may be CHAINED:
+    #   const commandName = toolName === "a" ? "b" : toolName === "c" ? "d" : toolName;
+    # so the trailing `:` is matched with a LOOKAHEAD on `toolName`, never by consuming it - the
+    # `toolName` that ends one clause is the one that begins the next, and consuming it silently
+    # dropped every mapping after the first.
+    # FAIL CLOSED: the map never shrinks silently. Inside the `commandName` assignment, the number
+    # of `toolName ===` occurrences must equal the number of pairs extracted; a missing assignment
+    # is also a problem, not an empty map. Problems are published in $script:RenameMapProblems and
+    # reported by 7-15 (9-3 reads the same map from this same function).
     $map = @{}
-    $text = Read-FileText (Join-Path $projectRoot "MCP-Server\src\tools\revit-tools.ts")
-    if ($text) {
-        $renameRx = [regex]'toolName\s*===\s*"([^"]+)"\s*\?\s*"([^"]+)"\s*:\s*toolName'
-        foreach ($m in $renameRx.Matches($text)) { $map[$m.Groups[1].Value] = $m.Groups[2].Value }
+    $script:RenameMapProblems = @()
+    $text = Remove-CSharpComments (Read-FileText (Join-Path $projectRoot "MCP-Server\src\tools\revit-tools.ts"))
+    if (-not $text) {
+        $script:RenameMapProblems += "MCP-Server/src/tools/revit-tools.ts unreadable or empty - rename map cannot be built"
+        return $map
+    }
+    $stmt = ([regex]'(?s)\bcommandName\s*=\s*([^;]*);').Match($text)
+    if (-not $stmt.Success) {
+        $script:RenameMapProblems += "no ``commandName = ...;`` assignment found in MCP-Server/src/tools/revit-tools.ts - the rename map cannot be verified (an empty map is not a clean map)"
+        return $map
+    }
+    $stmtText = $stmt.Groups[1].Value
+    $renameRx = [regex]'toolName\s*===\s*"([^"]+)"\s*\?\s*"([^"]+)"\s*:(?=\s*toolName\b)'
+    foreach ($m in $renameRx.Matches($stmtText)) { $map[$m.Groups[1].Value] = $m.Groups[2].Value }
+    $expected = ([regex]'toolName\s*===').Matches($stmtText).Count
+    $extracted = $renameRx.Matches($stmtText).Count
+    if ($expected -ne $extracted) {
+        $script:RenameMapProblems += "revit-tools.ts ``commandName`` assignment has $expected ``toolName ===`` clause(s) but the rename parser extracted $extracted pair(s) - an unrecognised rename form would silently shrink the map: $(($stmtText -replace '\s+', ' ').Trim())"
     }
     return $map
 }
@@ -1742,6 +1765,7 @@ else {
     # (un-quarantined) orphan, or a quarantine entry that has drifted stale. Either alone must FAIL.
     $reconcileProblems = @()
     if ($orphans.Count -gt 0) { $reconcileProblems += "$($orphans.Count) registered tool(s) have no dispatcher case: $($orphans -join ', ')" }
+    foreach ($rp in @($script:RenameMapProblems)) { if ($rp) { $reconcileProblems += "rename map: $rp" } }
     if ($driftedQuarantine.Count -gt 0) { $reconcileProblems += "$($driftedQuarantine.Count) `$knownUnimplemented entry(ies) now HAVE a dispatcher case - remove from the quarantine list in scripts/verify-qaqc.ps1: $(($driftedQuarantine | ForEach-Object { $_.Name }) -join ', ')" }
 
     Write-Check "Registered tools reconcile against the C# dispatcher ($($dispatcherCaseLabels.Count) case labels across $($dispatcherFiles.Count) dispatcher files, $($renameMap.Count) rename(s) applied, $($knownUnimplemented.Count) quarantined)" ($reconcileProblems.Count -eq 0) `
