@@ -658,6 +658,47 @@
     }
   };
 
+  // ============================================================
+  // initTheme — 淺色／深色主題（預設深色；不跟隨系統偏好）
+  // 快照頁（body > div[data-snapshot]）固定深色：直接返回，不加切換鈕、不改 data-theme
+  // ============================================================
+  window.initTheme = function initTheme() {
+    if (qs("body > div[data-snapshot]")) return;
+    var root = document.documentElement;
+    var KEY = "bim-theme";
+    function readStored() {
+      try { return window.localStorage.getItem(KEY); } catch (e) { return null; }
+    }
+    function writeStored(v) {
+      try { window.localStorage.setItem(KEY, v); } catch (e) { /* 無痕或停用儲存時略過 */ }
+    }
+    function apply(light) {
+      if (light) root.setAttribute("data-theme", "light");
+      else root.removeAttribute("data-theme");
+    }
+    var light = readStored() === "light";
+    apply(light);
+
+    var host = qs(".bim-topnav-actions") || qs(".bim-topnav");
+    if (!host || qs(".bim-theme-toggle")) return;
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "bim-theme-toggle";
+    btn.setAttribute("aria-label", "切換淺色／深色主題");
+    function render() {
+      btn.setAttribute("aria-pressed", light ? "true" : "false");
+      btn.textContent = light ? "深色" : "淺色";
+    }
+    render();
+    btn.addEventListener("click", function () {
+      light = !light;
+      apply(light);
+      writeStored(light ? "light" : "dark");
+      render();
+    });
+    host.appendChild(btn);
+  };
+
   var hashBound = false;
 
   // ============================================================
@@ -665,6 +706,7 @@
   // ============================================================
   window.initAll = function initAll(opts) {
     window.initRoutes();
+    window.initTheme();
     window.initProgress();
     window.initSectionDrawers();   // 必須在 initDrawer 之前（產生 trigger）
     window.initTOC();
