@@ -253,7 +253,7 @@
         '</div>' +
         '<div class="bim-drawer-body" data-drawer-body></div>' +
         '<div class="bim-drawer-foot">' +
-          '<span>Esc 關閉 · ← / → 翻頁</span>' +
+          '<span>Esc 關閉</span>' +
           '<a href="#" data-drawer-permalink>open as page ↗</a>' +
         '</div>';
       document.body.appendChild(drawer);
@@ -311,15 +311,17 @@
       lastOpener = null;
     }
 
-    // 抽屜開啟時，Tab 鍵只在抽屜內循環
-    drawer.addEventListener("keydown", function (e) {
+    // 抽屜開啟時，Tab 鍵只在抽屜內循環（掛在 document，焦點落在 body 時也能拉回抽屜）
+    document.addEventListener("keydown", function (e) {
       if (e.key !== "Tab" || !drawer.classList.contains("open")) return;
       var f = qsa('a[href], button, [tabindex]:not([tabindex="-1"]), input, select, textarea', drawer)
         .filter(function (n) { return !n.disabled && n.offsetParent !== null; });
-      if (f.length === 0) return;
+      if (f.length === 0) { e.preventDefault(); return; }
       var first = f[0], last = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      var ae = document.activeElement;
+      if (!ae || !drawer.contains(ae)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && ae === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && ae === last) { e.preventDefault(); first.focus(); }
     });
 
     qsa("[data-drawer-open]").forEach(function (op) {
@@ -569,6 +571,8 @@
     if (!hashBound) {
       hashBound = true;
       window.addEventListener("hashchange", window.revealHash);
+      // 瀏覽器在載入後才執行自己的 fragment 捲動/聚焦，會把剛聚焦的副本 blur；load 之後補做一次聚焦
+      window.addEventListener("load", function () { window.setTimeout(window.revealHash, 0); });
     }
   };
 })();
