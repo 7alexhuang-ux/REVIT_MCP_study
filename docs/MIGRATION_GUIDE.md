@@ -4,6 +4,28 @@
 
 ---
 
+## 🔗 接合工具收斂：`unjoin_wall_joins`／`unjoin_column_joins` 退場（issue #138 C3）
+
+> **適用對象**：在 prompt、skill 或自建腳本裡直接點名這兩支工具的使用者與 fork 貢獻者
+> **升級日期**：2026-10-23
+> **升級性質**：MCP 工具清單移除 2 支（220 支）；Revit add-in 端保留相容 shim，舊命令名仍可執行
+
+兩支舊工具的行為都已被 `unjoin_element_joins` 涵蓋，因此自 MCP registry 移除。AI client 的工具清單裡看不到它們了，請改用：
+
+| 舊呼叫 | 改成 `unjoin_element_joins` |
+|---|---|
+| `unjoin_wall_joins(wallIds, viewId)` | `sourceCategory: "Walls"`、`targetCategories: ["Columns", "StructuralColumns"]`、`elementIds`、`viewId` |
+| `unjoin_column_joins(columnIds, viewId)` | `sourceCategories: ["Columns", "StructuralColumns"]`、`targetCategories: ["Walls", "Floors", "StructuralFraming"]`、`elementIds`、`viewId` |
+
+- `unjoin_element_joins` 新增 `sourceCategories`（陣列），讓「建築柱＋結構柱」一次呼叫就涵蓋；原本的 `sourceCategory`（單一）照舊可用，兩者擇一。
+- **還原**仍是 `rejoin_wall_joins`，名稱不變。
+- **舊版 MCP-Server 搭新版 add-in 不會壞**：add-in 的 dispatcher 保留兩個舊命令名，內部轉呼叫通用版，並保留舊牆工具「沒給 `wallIds` 也沒給 `viewId` 就拋錯」與「開始前清空還原儲存」兩個行為。回傳欄位改為通用版的格式（`PairsByCategory` 取代 `WallPairs`／`FloorPairs`／`FramingPairs`）。
+- fork 若在自己的 `MCP-Server/src/tools/*.ts` 仍註冊這兩支工具，合併上游時會出現衝突，請直接採用上游版本。
+
+方法說明見 `domain/unjoin-geometry-workflow.md`。
+
+---
+
 ## 🔀 MCP 2026-07-28 雙時代相容升級（Dual-Era Additive Upgrade）
 
 > **適用對象**：所有現有 Revit MCP 使用者（stdio 連線）與 fork 貢獻者

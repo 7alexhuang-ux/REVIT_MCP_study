@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tools 索引（222 個）· BIM_MCP</title>
-<meta property="og:title" content="RevitMCP Tools 索引：222 個執行層工具">
-<meta property="og:description" content="222 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
+<title>Tools 索引（220 個）· BIM_MCP</title>
+<meta property="og:title" content="RevitMCP Tools 索引：220 個執行層工具">
+<meta property="og:description" content="220 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@300;400;600;700;800&display=swap">
@@ -89,9 +89,9 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">222 個</span></div>
+  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">220 個</span></div>
   <h1 class="bim-hero-title">Tools · <span class="accent">執行層</span><br>模型上真正被動到的那一下</h1>
-  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 222 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
+  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 220 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
 </header>
 
 <section class="bim-section">
@@ -99,7 +99,7 @@
   <p>每張卡右上角的標記來自工具自己宣告的 <code>annotations</code>，不是這一頁另外標的——閘門 <code>9-1</code> 會驗證它們與程式碼一致。</p>
   <ul>
     <li><strong>唯讀</strong>（89 個）——只讀不寫。跑錯了不會留下痕跡，可以放心探索。</li>
-    <li><strong>會寫入</strong>（129 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
+    <li><strong>會寫入</strong>（127 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
     <li><strong>破壞性</strong>（4 個）——刪除或不可逆地取代既有內容：<code>curate_mep_sizes · dedup_detail_elements_in_view · delete_element · import_excel_to_drafting_views</code>。這份名單是白名單，程式碼裡多一個就會被閘門擋下。</li>
   </ul>
   <p style="color:var(--text-muted);font-size:13px;">「唯讀」是工具作者的宣告，不是執行時的沙箱。它告訴你這支工具<em>設計上</em>不寫入，不是保證它<em>不可能</em>寫入。</p>
@@ -113,7 +113,7 @@
     </thead>
     <tbody>
         <tr><td><strong>A</strong></td><td>基礎與查詢</td><td class="num">31</td><td>讀模型、找元素、問參數，也含少數寫入前置（載入共用參數）。</td></tr>
-        <tr><td><strong>B</strong></td><td>建模與構件</td><td class="num">47</td><td>產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</td></tr>
+        <tr><td><strong>B</strong></td><td>建模與構件</td><td class="num">45</td><td>產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</td></tr>
         <tr><td><strong>C</strong></td><td>房間與空間</td><td class="num">18</td><td>房間邊界、編號、面積、走廊、施工架周長。</td></tr>
         <tr><td><strong>D</strong></td><td>MEP 與碰撞</td><td class="num">17</td><td>風管系統、空間代表點、套管開孔、CSA 干涉。</td></tr>
         <tr><td><strong>E</strong></td><td>法規檢核</td><td class="num">13</td><td>排煙、偵煙、樓梯——有法源、有判準的檢查。</td></tr>
@@ -122,11 +122,11 @@
         <tr><td><strong>H</strong></td><td>視覺化</td><td class="num">31</td><td>上色、覆寫、隱藏顯示，也含材質與 Type 建構。</td></tr>
     </tbody>
   </table>
-  <p style="color:var(--text-muted);font-size:13px;">分類是 48 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 222。這一頁由 <code>scripts/gen-tools-index.py</code> 從 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
+  <p style="color:var(--text-muted);font-size:13px;">分類是 48 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 220。這一頁由 <code>scripts/gen-tools-index.py</code> 從 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
 </section>
 
 <section class="bim-section">
-  <h2 class="bim-section-title">222 個工具 · 依用途分組</h2>
+  <h2 class="bim-section-title">220 個工具 · 依用途分組</h2>
 
     <div class="cat-header">A · 基礎與查詢（31 個）</div>
     <p class="cat-blurb">讀模型、找元素、問參數，多數工作的第一步；也包含少數寫入型前置工具（如載入共用參數檔 load_shared_parameters）。</p>
@@ -440,7 +440,7 @@
         <div class="tool-desc">將視圖縮放至指定元素，讓使用者可以快速定位。</div>
       </div>
     </div>
-    <div class="cat-header">B · 建模與構件（47 個）</div>
+    <div class="cat-header">B · 建模與構件（45 個）</div>
     <p class="cat-blurb">產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</p>
     <div class="tool-card" id="analyze_beam_penetration" data-tool="analyze_beam_penetration">
       <div>
@@ -852,7 +852,7 @@
         <div class="tool-module">wall-tools</div>
       </div>
       <div>
-        <div class="tool-desc">恢復先前由 unjoin_wall_joins / unjoin_column_joins / unjoin_element_joins 取消的接合關係（共用 pair 儲存，限同一 Revit session）。</div>
+        <div class="tool-desc">恢復先前由 unjoin_element_joins 取消的接合關係（共用 pair 儲存，限同一 Revit session）。</div>
       </div>
     </div>
     <div class="tool-card" id="scan_penetrated_beams_in_view" data-tool="scan_penetrated_beams_in_view">
@@ -885,16 +885,6 @@
         <div class="tool-desc">自動分析視圖中的樓梯幾何，偵測被牆、版等物件遮擋的邊緣線段，回傳座標以供後續繪製虛線。</div>
       </div>
     </div>
-    <div class="tool-card" id="unjoin_column_joins" data-tool="unjoin_column_joins">
-      <div>
-        <div class="tool-name">unjoin_column_joins</div>
-        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
-        <div class="tool-module">wall-tools</div>
-      </div>
-      <div>
-        <div class="tool-desc">以柱子為中心解除其與鄰近元素的幾何接合，涵蓋牆、樓板、結構樑。未指定 columnIds 時預設整個專案所有柱（或 viewId 內的柱）。可用 rejoin_wall_joins 還原（限同一 Revit session）。</div>
-      </div>
-    </div>
     <div class="tool-card" id="unjoin_element_joins" data-tool="unjoin_element_joins">
       <div>
         <div class="tool-name">unjoin_element_joins</div>
@@ -902,17 +892,7 @@
         <div class="tool-module">wall-tools</div>
       </div>
       <div>
-        <div class="tool-desc">通用版：以任一類別為中心解除其與指定 target 類別的幾何接合。預設 target 為 8 類（Walls、Floors、Columns、StructuralColumns、StructuralFraming、StructuralFoundation、Roofs、Ceilings）。共用 _unjoinedPairs，可用 rejoin_wall_joins 還原（限同一 Revit session）。</div>
-      </div>
-    </div>
-    <div class="tool-card" id="unjoin_wall_joins" data-tool="unjoin_wall_joins">
-      <div>
-        <div class="tool-name">unjoin_wall_joins</div>
-        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
-        <div class="tool-module">wall-tools</div>
-      </div>
-      <div>
-        <div class="tool-desc">取消牆體與柱子等元素的幾何接合關係。常用於元素上色前的前置作業。</div>
+        <div class="tool-desc">以指定來源類別為中心，解除其與鄰近 target 類別元素的幾何接合（BoundingBox 外擴 1 ft 搜尋）。預設 target 為 8 類（Walls、Floors、Columns、StructuralColumns、StructuralFraming、StructuralFoundation、Roofs、Ceilings）。常見用法：牆-柱（上色前置）＝ sourceCategory: Walls、targetCategories: [Columns, StructuralColumns]；柱本位 ＝ sourceCategories: [Columns, StructuralColumns]、targetCategories: [Walls, Floors, StructuralFraming]。解除的配對存在同一份 session 儲存，可用 rejoin_wall_joins 還原（限同一 Revit session）。</div>
       </div>
     </div>
     <div class="cat-header">C · 房間與空間（18 個）</div>
@@ -2378,7 +2358,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / tools-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">222 個 MCP 工具完整索引，由 scripts/gen-tools-index.py 從 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">220 個 MCP 工具完整索引，由 scripts/gen-tools-index.py 從 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
 </footer>
 
 <script src="../shared.js"></script>

@@ -474,7 +474,8 @@ namespace RevitMCP.Core
                         break;
                     
                     case "unjoin_wall_joins":
-                        result = UnjoinWallJoins(parameters);
+                        // 相容 shim（#138 C3）：工具已自 registry 移除，保留命令名給舊版 MCP-Server 與既有腳本
+                        result = UnjoinWallJoinsCompat(parameters);
                         break;
                     
                     case "rejoin_wall_joins":
@@ -487,7 +488,8 @@ namespace RevitMCP.Core
 
                     // === 解除幾何接合（劉可 PR#30 bundle②）===
                     case "unjoin_column_joins":
-                        result = UnjoinColumnJoins(parameters);
+                        // 相容 shim（#138 C3）：同上
+                        result = UnjoinColumnJoinsCompat(parameters);
                         break;
 
                     case "unjoin_element_joins":
@@ -3937,99 +3939,6 @@ namespace RevitMCP.Core
 
         // 靜態變數：儲存取消接合的元素對
         private static List<Tuple<ElementId, ElementId>> _unjoinedPairs = new List<Tuple<ElementId, ElementId>>();
-
-        /// <summary>
-        /// 取消牆體與其他元素（柱子等）的接合關係
-        /// </summary>
-        private object UnjoinWallJoins(JObject parameters)
-        {
-            Document doc = _uiApp.ActiveUIDocument.Document;
-            
-            // 取得牆體 ID 列表
-            var wallIdsArray = parameters["wallIds"] as JArray;
-            IdType? viewId = parameters["viewId"]?.Value<IdType>();
-            
-            List<IdType> wallIds = new List<IdType>();
-            if (wallIdsArray != null)
-            {
-                wallIds.AddRange(wallIdsArray.Select(id => id.Value<IdType>()));
-            }
-            
-            // 如果沒有提供 wallIds，則查詢視圖中所有牆體
-            if (wallIds.Count == 0 && viewId.HasValue)
-            {
-                var collector = new FilteredElementCollector(doc, new ElementId(viewId.Value));
-                var walls = collector.OfClass(typeof(Wall)).ToElements();
-                wallIds = walls.Select(w => w.Id.GetIdValue()).ToList();
-            }
-            
-            if (wallIds.Count == 0)
-            {
-                throw new Exception("請提供 wallIds 或 viewId 參數");
-            }
-
-            int unjoinedCount = 0;
-            _unjoinedPairs.Clear();
-
-            using (Transaction trans = new Transaction(doc, "Unjoin Wall Geometry"))
-            {
-                trans.Start();
-
-                foreach (int wallId in wallIds)
-                {
-                    Wall wall = doc.GetElement(new ElementId(wallId)) as Wall;
-                    if (wall == null) continue;
-
-                    // 取得牆體的 BoundingBox 來找附近的柱子
-                    BoundingBoxXYZ bbox = wall.get_BoundingBox(null);
-                    if (bbox == null) continue;
-
-                    // 擴大搜尋範圍
-                    XYZ min = bbox.Min - new XYZ(1, 1, 1);
-                    XYZ max = bbox.Max + new XYZ(1, 1, 1);
-                    Outline outline = new Outline(min, max);
-
-                    // 查詢附近的柱子
-                    var columnCollector = new FilteredElementCollector(doc)
-                        .OfCategory(BuiltInCategory.OST_Columns)
-                        .WherePasses(new BoundingBoxIntersectsFilter(outline));
-                    
-                    var structColumnCollector = new FilteredElementCollector(doc)
-                        .OfCategory(BuiltInCategory.OST_StructuralColumns)
-                        .WherePasses(new BoundingBoxIntersectsFilter(outline));
-
-                    var columns = columnCollector.ToElements().Concat(structColumnCollector.ToElements());
-
-                    foreach (Element column in columns)
-                    {
-                        try
-                        {
-                            if (JoinGeometryUtils.AreElementsJoined(doc, wall, column))
-                            {
-                                JoinGeometryUtils.UnjoinGeometry(doc, wall, column);
-                                _unjoinedPairs.Add(new Tuple<ElementId, ElementId>(wall.Id, column.Id));
-                                unjoinedCount++;
-                            }
-                        }
-                        catch
-                        {
-                            // 忽略無法取消接合的元素
-                        }
-                    }
-                }
-
-                trans.Commit();
-            }
-
-            return new
-            {
-                Success = true,
-                UnjoinedCount = unjoinedCount,
-                WallCount = wallIds.Count,
-                StoredPairs = _unjoinedPairs.Count,
-                Message = $"已取消 {unjoinedCount} 個接合關係"
-            };
-        }
 
         /// <summary>
         /// 恢復之前取消的接合關係

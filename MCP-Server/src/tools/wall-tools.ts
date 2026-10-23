@@ -119,48 +119,30 @@ export const wallTools: Tool[] = [
         },
     },
     {
-        name: "unjoin_wall_joins",
-        description: "取消牆體與柱子等元素的幾何接合關係。常用於元素上色前的前置作業。",
-        inputSchema: {
-            type: "object",
-            properties: {
-                wallIds: { type: "array", items: { type: "number" }, description: "要取消接合的牆體 Element ID 列表" },
-                viewId: { type: "number", description: "視圖 ID" },
-            },
-        },
-    },
-    {
         name: "rejoin_wall_joins",
-        description: "恢復先前由 unjoin_wall_joins / unjoin_column_joins / unjoin_element_joins 取消的接合關係（共用 pair 儲存，限同一 Revit session）。",
+        description: "恢復先前由 unjoin_element_joins 取消的接合關係（共用 pair 儲存，限同一 Revit session）。",
         inputSchema: { type: "object", properties: {} },
     },
     {
-        name: "unjoin_column_joins",
-        description: "以柱子為中心解除其與鄰近元素的幾何接合，涵蓋牆、樓板、結構樑。未指定 columnIds 時預設整個專案所有柱（或 viewId 內的柱）。可用 rejoin_wall_joins 還原（限同一 Revit session）。",
-        inputSchema: {
-            type: "object",
-            properties: {
-                columnIds: { type: "array", items: { type: "number" }, description: "要處理的柱子 Element ID 列表（選填，預設為全部柱）" },
-                viewId: { type: "number", description: "視圖 ID（選填，未給 columnIds 時用來限縮範圍）" },
-            },
-        },
-    },
-    {
         name: "unjoin_element_joins",
-        description: "通用版：以任一類別為中心解除其與指定 target 類別的幾何接合。預設 target 為 8 類（Walls、Floors、Columns、StructuralColumns、StructuralFraming、StructuralFoundation、Roofs、Ceilings）。共用 _unjoinedPairs，可用 rejoin_wall_joins 還原（限同一 Revit session）。",
+        description: "以指定來源類別為中心，解除其與鄰近 target 類別元素的幾何接合（BoundingBox 外擴 1 ft 搜尋）。預設 target 為 8 類（Walls、Floors、Columns、StructuralColumns、StructuralFraming、StructuralFoundation、Roofs、Ceilings）。常見用法：牆-柱（上色前置）＝ sourceCategory: Walls、targetCategories: [Columns, StructuralColumns]；柱本位 ＝ sourceCategories: [Columns, StructuralColumns]、targetCategories: [Walls, Floors, StructuralFraming]。解除的配對存在同一份 session 儲存，可用 rejoin_wall_joins 還原（限同一 Revit session）。",
         inputSchema: {
             type: "object",
             properties: {
-                sourceCategory: { type: "string", description: "來源類別名稱（不含 OST_ 前綴，例如 StructuralFraming、Walls、Floors）" },
+                sourceCategory: { type: "string", description: "來源類別名稱（不含 OST_ 前綴，例如 StructuralFraming、Walls、Floors）。與 sourceCategories 擇一" },
+                sourceCategories: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "多個來源類別（例如 [\"Columns\", \"StructuralColumns\"] 一次涵蓋建築柱與結構柱）。與 sourceCategory 擇一",
+                },
                 targetCategories: {
                     type: "array",
                     items: { type: "string" },
                     description: "目標類別名稱陣列（選填，預設 8 類：Walls、Floors、Columns、StructuralColumns、StructuralFraming、StructuralFoundation、Roofs、Ceilings）",
                 },
-                elementIds: { type: "array", items: { type: "number" }, description: "要處理的來源 Element ID 列表（選填，預設為該類別全部）" },
+                elementIds: { type: "array", items: { type: "number" }, description: "要處理的來源 Element ID 列表（選填，預設為來源類別全部）" },
                 viewId: { type: "number", description: "視圖 ID（選填，未給 elementIds 時用來限縮範圍）" },
             },
-            required: ["sourceCategory"],
         },
     },
     {
