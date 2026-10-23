@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>try{if(localStorage.getItem("bim-theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
 <title>BIM_MCP Reference Hub</title>
 <meta property="og:title" content="BIM_MCP Reference Hub">
 <meta property="og:description" content="安裝 Revit MCP、做第一次只讀查詢，再依任務找方法的入口。">
@@ -27,7 +28,7 @@
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="nav.css">
 <style>
-  .bim-hero-figure,.bim-figure{margin:var(--gap-lg) 0 0;border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;background:#000}
+  .bim-hero-figure,.bim-figure{margin:var(--gap-lg) 0 0;border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;background:var(--figure-bg)}
   .bim-hero-figure img,.bim-figure img{display:block;width:100%;height:auto}
   .hub-card{min-height:190px;display:flex;flex-direction:column;justify-content:space-between;border-bottom:none;color:inherit}
   .hub-card:hover{border-color:var(--accent-border)}
@@ -49,7 +50,7 @@
      兩條匝道刻意不對稱 —— 請勿為了「補齊互指」而給本頁補上 prev 屬性，
      那會讓站點入口長出「上一篇」卡片，且 ← 鍵會跳進導覽末頁。
      （此註解刻意不寫出屬性的完整字面形式，以免被掃描 data-* 的工具誤讀。） -->
-<body data-next="reference/deployment-guide.html">
+<body>
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
     <a href="index.html" class="bim-topnav-home">BIM_MCP</a>
