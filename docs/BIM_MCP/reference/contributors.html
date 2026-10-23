@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>貢獻者致謝 · BIM_MCP</title>
 <meta property="og:title" content="BIM_MCP 貢獻者致謝 · 27 位建置協助人">
-<meta property="og:description" content="被收編進 main 的 fork 貢獻者名單：真名 + GitHub handle + 貢獻內容摘要 + 對應 PR／收編波次。依 domain 分類與貢獻數量排序。">
+<meta property="og:description" content="被收編進 main 的 fork 貢獻者名單：GitHub handle + 貢獻內容摘要 + 對應 PR／收編波次。依 domain 分類與貢獻數量排序。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@300;400;600;700;800&display=swap">
@@ -17,7 +17,7 @@
   .contrib-card .handle-link { font-family:var(--font-tech); font-size:12px; color:var(--text-muted); border-bottom:none; }
   .contrib-card .handle-link:hover { color:var(--accent); }
   .contrib-card p { font-size:13px; color:var(--text-secondary); margin:6px 0 0; line-height:1.55; flex:1; }
-  .contrib-card .name-pending { font-size:11px; color:var(--text-faint); font-weight:400; }
+  .contrib-card .handle-note { font-size:11px; color:var(--text-faint); font-weight:400; }
   .contrib-card .contrib-refs { margin-top:10px; font-family:var(--font-tech); font-size:11px; color:var(--text-faint); }
   /* 色彩分類 — 對應 domain 五大分類 */
   .bim-section[data-cat="compliance"] .contrib-card { border-left: 3px solid #ef4444; }
@@ -32,7 +32,7 @@
   .bim-section[data-cat="ref"] .bim-section-eyebrow { color: #a78bfa; }
 </style>
 </head>
-<body data-prev="contributor-template.html" data-next="kanban-index.html">
+<body data-prev="contributor-template.html" data-next="../index.html">
 
 <nav class="bim-topnav">
   <div class="bim-topnav-left">
@@ -44,7 +44,7 @@
   </div>
   <div class="bim-topnav-actions">
     <a href="https://github.com/shuotao/REVIT_MCP_study" target="_blank" rel="noopener" class="bim-topnav-btn bim-topnav-btn-github" title="View source on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
-    <a href="contributor-template.html" class="bim-topnav-btn">← Contributor Template</a>
+    <a href="contributor-template.html" class="bim-topnav-btn">← 上一篇</a>
     <a href="../index.html" class="bim-topnav-btn">回首頁</a>
   </div>
 </nav>
@@ -65,7 +65,7 @@
       <div class="contrib-refs">PR #10（merged）</div>
     </div>
     <div class="bim-card contrib-card">
-      <h4><a class="handle-link" href="https://github.com/a0917-cell" target="_blank" rel="noopener">@a0917-cell</a> <span class="name-pending">真名待維護者確認</span></h4>
+      <h4><a class="handle-link" href="https://github.com/a0917-cell" target="_blank" rel="noopener">@a0917-cell</a></h4>
       <p>4 支工具 <code>align_structural_framing</code>、<code>create_floor_area_formula</code>、<code>renumber_parking_spaces</code>、<code>create_sequence_numbers</code>；<code>permit-floor-area-formula.md</code>、<code>sequence-numbering.md</code> 兩份新 domain，<code>parking-auto-numbering.md</code> 升為其 v2.0；以及 <code>tests/</code> 測試骨架（需 Windows + Revit 才能執行，本 repo 未執行）。</p>
       <div class="contrib-refs">commit <code>e934da6</code></div>
     </div>
@@ -85,7 +85,7 @@
       <div class="contrib-refs">PR #4（merged）</div>
     </div>
     <div class="bim-card contrib-card">
-      <h4><a class="handle-link" href="https://github.com/huynvk19-cell" target="_blank" rel="noopener">@huynvk19-cell</a> <span class="name-pending">真名待維護者確認</span></h4>
+      <h4><a class="handle-link" href="https://github.com/huynvk19-cell" target="_blank" rel="noopener">@huynvk19-cell</a></h4>
       <p>外牆開口檢查的距離與防火時效門檻改為可注入的參數物件（<code>OpeningCheckThresholds.cs</code>），預設值與報告文字與原寫死值相同；另有 <code>scripts/setup.ps1</code> 偵測 Microsoft Store 版 Claude Desktop 設定目錄的迴圈，以及 Claude Desktop／Gemini CLI 的 JSON 設定改以 UTF-8 無 BOM 寫入（Windows 腳本，本 repo 僅在 macOS 做語法解析，未在 Windows 執行）。</p>
       <div class="contrib-refs">commit <code>53fcd9e</code>、<code>cb159da</code>（fork 內容以檔案移植收編）</div>
     </div>
@@ -127,7 +127,7 @@
       <div class="contrib-refs">PR #67, #95（merged）</div>
     </div>
     <div class="bim-card contrib-card">
-      <h4><a class="handle-link" href="https://github.com/penny116889" target="_blank" rel="noopener">@penny116889</a> <span class="name-pending">真名待維護者確認</span></h4>
+      <h4><a class="handle-link" href="https://github.com/penny116889" target="_blank" rel="noopener">@penny116889</a></h4>
       <p>門窗圖例新增 <code>scaffold_template</code> 模式：從 seed Legend 搭建空白格位樣板（格線、FFL 線、佔位文字、佔位圖例），不讀明細表、不填資料。</p>
       <div class="contrib-refs">commit <code>53fcd9e</code>（Revit 實機未驗證）</div>
     </div>
@@ -154,12 +154,12 @@
       <div class="contrib-refs">Wave 2 收編（108→115 工具）· 2026-10 再收編 7 支工具（commit <code>d89672c</code>）</div>
     </div>
     <div class="bim-card contrib-card">
-      <h4><a class="handle-link" href="https://github.com/hb5138111" target="_blank" rel="noopener">@hb5138111</a> <span class="name-pending">真名待維護者確認</span></h4>
+      <h4><a class="handle-link" href="https://github.com/hb5138111" target="_blank" rel="noopener">@hb5138111</a></h4>
       <p>模型檢討工具組 8 支：<code>get_model_snapshot</code>、<code>get_model_warnings</code>、<code>get_recent_changes</code>、<code>export_view_image</code>、<code>batch_modify_elements</code>、<code>check_beam_clear_height</code>、<code>check_mep_spacing</code>、<code>clear_review_markers</code>，以及 <code>beam-clear-height-check.md</code>、<code>mep-spacing-clearance-check.md</code> 兩份 domain。</p>
       <div class="contrib-refs">commit <code>1eee3e5</code>（以檔案內容移植，Revit 實機未驗證）</div>
     </div>
     <div class="bim-card contrib-card">
-      <h4><a class="handle-link" href="https://github.com/bestwish1987-hash" target="_blank" rel="noopener">@bestwish1987-hash</a> <span class="name-pending">真名待維護者確認・帳號已刪除</span></h4>
+      <h4><a class="handle-link" href="https://github.com/bestwish1987-hash" target="_blank" rel="noopener">@bestwish1987-hash</a> <span class="handle-note">（帳號已刪除）</span></h4>
       <p>PR #71 的併發修正：<code>ExternalEventManager</code> 的單一 <code>_action</code> 欄位會靜默丟掉先到的 MCP 命令（改為 <code>ConcurrentQueue</code>）、WebSocket 送出以 <code>SemaphoreSlim</code> 序列化、<code>socket.ts</code> 的 <code>sendCommand</code> 計時器清理。原分支過舊，由維護者手工移植並保留原作者署名。</p>
       <div class="contrib-refs">PR #71 · commit <code>b85d4b0</code>（Revit 實機未驗證）</div>
     </div>
@@ -206,7 +206,7 @@
       <div class="contrib-refs">PR #124（merged，176→177 工具）· issue #99, #100（規格）· 2 份 domain 骨架經 domain/sc-opening-cad-placement 併入</div>
     </div>
     <div class="bim-card contrib-card">
-      <h4><a class="handle-link" href="https://github.com/Rumi-3653" target="_blank" rel="noopener">@Rumi-3653</a> <span class="name-pending">真名待維護者確認</span></h4>
+      <h4><a class="handle-link" href="https://github.com/Rumi-3653" target="_blank" rel="noopener">@Rumi-3653</a></h4>
       <p>CAD 圖塊點位放置三工具 <code>get_dwg_block_instances</code>、<code>preview_family_instances_from_dwg_blocks</code>、<code>create_family_instances_from_dwg_blocks</code>，實作 <code>domain/cad-block-point-placement.md</code> 規格。PR #115 是 PR #114 的 reopen（見 <code>log/2026-08.md</code>）。</p>
       <div class="contrib-refs">PR #115（issue #113）· commit <code>1761148</code>（Revit 實機未驗證）</div>
     </div>
@@ -241,12 +241,12 @@
 
 <footer class="bim-footer">
   <div class="bim-footer-actions">
-    <a href="contributor-template.html" class="bim-footer-btn">Contributor Template</a>
+    <a href="contributor-template.html" class="bim-footer-btn">← 上一篇</a>
     <a href="../2026-07/harvest-waves.html" class="bim-footer-btn">五波收編事件頁</a>
-    <a href="../index.html" class="bim-footer-btn primary">回 BIM_MCP 首頁</a>
+    <a href="../index.html" class="bim-footer-btn primary">回首頁</a>
   </div>
   <p>BIM_MCP · reference / contributors</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">2026-10-23 · 27 位建置協助人（5 大分類，依 domain 順序與貢獻數量排序），資料來源 <code>docs/fork-audit/contributor-map.md</code>、<code>log/2026-07.md</code>；第 20、21 位（嘉祥 @laytonluo、尚霖 @Archwiz-boss）的真名由維護者於 2026-10-12 當面確認，記錄見 <code>log/2026-10.md</code>。2026-10-23 新增的 6 位（@a0917-cell、@bestwish1987-hash、@hb5138111、@huynvk19-cell、@penny116889、@Rumi-3653）僅以 GitHub handle 列名，真名待維護者確認後補上；本頁不從 commit 作者欄位、fork 名稱或 README 推測真名。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">2026-10-23 · 27 位建置協助人（5 大分類，依 domain 順序與貢獻數量排序），資料來源 <code>docs/fork-audit/contributor-map.md</code>、<code>log/2026-07.md</code>；第 20、21 位（嘉祥 @laytonluo、尚霖 @Archwiz-boss）的真名由維護者於 2026-10-12 當面確認，記錄見 <code>log/2026-10.md</code>。2026-10-23 新增的 6 位（@a0917-cell、@bestwish1987-hash、@hb5138111、@huynvk19-cell、@penny116889、@Rumi-3653）僅以 GitHub handle 列名。2026-10 起新增的貢獻者一律只列 GitHub handle；本頁不從 commit 作者欄位、fork 名稱或 README 推測真名。</p>
 </footer>
 
 <script src="../shared.js"></script><script>initAll();</script>
