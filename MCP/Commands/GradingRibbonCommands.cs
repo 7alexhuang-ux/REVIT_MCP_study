@@ -115,6 +115,44 @@ namespace RevitMCP.Commands
             }
         }
 
+        public static long? PickTitleBlockId(UIApplication uiApp, string purpose)
+        {
+            var doc = uiApp.ActiveUIDocument?.Document;
+            if (doc == null)
+            {
+                TaskDialog.Show(purpose, "沒有作用中的文件。");
+                return null;
+            }
+
+            var symbols = new FilteredElementCollector(doc)
+                .OfClass(typeof(FamilySymbol))
+                .OfCategory(BuiltInCategory.OST_TitleBlocks)
+                .Cast<FamilySymbol>()
+                .OrderBy(symbol => symbol.FamilyName)
+                .ThenBy(symbol => symbol.Name)
+                .ToList();
+            var options = symbols
+                .Select(symbol => new TitleBlockPickerOption(
+                    $"{symbol.FamilyName} : {symbol.Name}",
+                    symbol.Id.GetIdValue()))
+                .ToList();
+            options.Add(new TitleBlockPickerOption("無圖框空白圖紙", TitleBlockChoice.BlankSentinelId));
+
+            var preferred = symbols.FirstOrDefault(symbol =>
+                    symbol.Name.IndexOf("A0", StringComparison.OrdinalIgnoreCase) >= 0
+                    || symbol.FamilyName.IndexOf("A0", StringComparison.OrdinalIgnoreCase) >= 0)
+                ?? symbols.FirstOrDefault();
+            var preferredId = preferred?.Id.GetIdValue() ?? TitleBlockChoice.BlankSentinelId;
+
+            var dialog = new TitleBlockPickerDialog(purpose, options, preferredId);
+            if (dialog.ShowDialog() != true)
+            {
+                return null;
+            }
+
+            return dialog.SelectedTitleBlockId;
+        }
+
         /// <summary>目前選取的摘要字串（對話框顯示用），如「✔ 地形 ×1、樓板 ×2」。</summary>
         public static string DescribeSelection(UIDocument uiDoc)
         {
@@ -131,49 +169,6 @@ namespace RevitMCP.Commands
             }
 
             return (toposolids >= 1 && floors >= 1 ? "✔" : "⚠") + $" 選取狀態：地形 ×{toposolids}、樓板 ×{floors}";
-        }
-    }
-
-    /// <summary>整地-投影直貼（footprint_only）：以選取地形＋樓板執行。</summary>
-    [Transaction(TransactionMode.Manual)]
-    public class GradeFootprintCommand : IExternalCommand
-    {
-        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
-        {
-            return GradingRibbonHelper.RunGrade(commandData, "footprint_only", null);
-        }
-    }
-
-    /// <summary>整地-Offset 外延（offset_transition，預設外延 5m）：以選取地形＋樓板執行。</summary>
-    [Transaction(TransactionMode.Manual)]
-    public class GradeOffsetCommand : IExternalCommand
-    {
-        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
-        {
-            return GradingRibbonHelper.RunGrade(commandData, "offset_transition",
-                new JObject { ["offsetDistance"] = 5.0 });
-        }
-    }
-
-    /// <summary>整地-放坡（slope_transition，預設坡度 1:2）：以選取地形＋樓板執行。</summary>
-    [Transaction(TransactionMode.Manual)]
-    public class GradeSlopeCommand : IExternalCommand
-    {
-        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
-        {
-            return GradingRibbonHelper.RunGrade(commandData, "slope_transition",
-                new JObject { ["slopeRatio"] = "1:2" });
-        }
-    }
-
-    /// <summary>整地圖說一鍵出圖（create_grading_presentation）：對登記簿全部方案出圖並匯 PDF。</summary>
-    [Transaction(TransactionMode.Manual)]
-    public class GradingPresentationCommand : IExternalCommand
-    {
-        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
-        {
-            return GradingRibbonHelper.Run(commandData.Application, "create_grading_presentation",
-                new JObject { ["export"] = true }, "整地圖說一鍵出圖");
         }
     }
 
@@ -195,6 +190,64 @@ namespace RevitMCP.Commands
         }
     }
 
+    /// <summary>平衡高程試算：新整地方案的進階替代做法——以選取地形＋樓板，二分法試算統一升降量使淨土方逼近目標。</summary>
+    [Transaction(TransactionMode.Manual)]
+    public class BalancedElevationCommand : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
+        {
+            var uiApp = commandData.Application;
+            var uiDoc = uiApp.ActiveUIDocument;
+            if (uiDoc?.Document == null)
+            {
+                TaskDialog.Show("平衡高程試算", "沒有作用中的文件。");
+                return Result.Cancelled;
+            }
+
+            var doc = uiDoc.Document;
+            long toposolidId = 0;
+            var floorIds = new List<long>();
+            foreach (var id in uiDoc.Selection.GetElementIds())
+            {
+                var element = doc.GetElement(id);
+                if (element is Toposolid && toposolidId == 0)
+                {
+                    toposolidId = element.Id.GetIdValue();
+                }
+                else if (element is Autodesk.Revit.DB.Floor)
+                {
+                    floorIds.Add(element.Id.GetIdValue());
+                }
+            }
+
+            if (toposolidId == 0 || floorIds.Count == 0)
+            {
+                TaskDialog.Show("平衡高程試算",
+                    "請先在模型中選取「一片地形（Toposolid）」與「至少一片控制樓板（Floor）」，再點此按鈕。");
+                return Result.Cancelled;
+            }
+
+            var dialog = new BalancedElevationDialog(GradingRibbonHelper.DescribeSelection(uiDoc));
+            if (dialog.ShowDialog() != true)
+            {
+                return Result.Cancelled;
+            }
+
+            var parameters = new JObject
+            {
+                ["toposolidId"] = toposolidId,
+                ["floorIds"] = new JArray(floorIds),
+                ["mode"] = dialog.Mode,
+            };
+            foreach (var property in dialog.ExtraParameters.Properties())
+            {
+                parameters[property.Name] = property.Value;
+            }
+
+            return GradingRibbonHelper.Run(uiApp, "solve_balanced_elevation", parameters, "平衡高程試算");
+        }
+    }
+
     /// <summary>②方案總覽：非模態清單視窗（進度儀表板）。</summary>
     [Transaction(TransactionMode.Manual)]
     public class SchemeOverviewCommand : IExternalCommand
@@ -203,17 +256,6 @@ namespace RevitMCP.Commands
         {
             SchemeOverviewWindow.ShowOrActivate(commandData.Application);
             return Result.Succeeded;
-        }
-    }
-
-    /// <summary>③比較出圖：登記簿全部方案 → C-00c 單張總比較圖紙＋PDF。</summary>
-    [Transaction(TransactionMode.Manual)]
-    public class GradingComparisonCommand : IExternalCommand
-    {
-        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
-        {
-            return GradingRibbonHelper.Run(
-                commandData.Application, "create_grading_comparison_sheet", new JObject(), "比較出圖");
         }
     }
 
@@ -412,9 +454,9 @@ namespace RevitMCP.Commands
         }
     }
 
-    /// <summary>整地檢視：選單挑「原地形／某方案」→ 專用視圖顯示（保留樓板），視圖標題含編號＋名稱。</summary>
+    /// <summary>樓板草稿複製：選取樓板→複製一份、原本在目前視圖隱藏，方便準備下一個方案的樓板草稿。</summary>
     [Transaction(TransactionMode.Manual)]
-    public class GradingTerrainViewCommand : IExternalCommand
+    public class DuplicateFloorDraftCommand : IExternalCommand
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
@@ -422,38 +464,30 @@ namespace RevitMCP.Commands
             var uiDoc = uiApp.ActiveUIDocument;
             if (uiDoc?.Document == null)
             {
-                TaskDialog.Show("整地檢視", "沒有作用中的文件。");
+                TaskDialog.Show("複製樓板", "沒有作用中的文件。");
                 return Result.Cancelled;
             }
 
-            var records = RevitToposolidGradingAdapter.ReadSchemeRecords(uiDoc.Document)
-                .Select(JObject.Parse).ToList();
-            if (records.Count == 0)
+            var doc = uiDoc.Document;
+            var floorIds = new List<long>();
+            foreach (var id in uiDoc.Selection.GetElementIds())
             {
-                TaskDialog.Show("整地檢視", "目前沒有整地方案；請先用「新整地方案」建立至少一個。");
+                if (doc.GetElement(id) is Autodesk.Revit.DB.Floor floor)
+                {
+                    floorIds.Add(floor.Id.GetIdValue());
+                }
+            }
+
+            if (floorIds.Count == 0)
+            {
+                TaskDialog.Show("複製樓板", "請先選取至少一片樓板，再點此按鈕。");
                 return Result.Cancelled;
             }
 
-            var options = new List<KeyValuePair<string, long>>
-            {
-                new KeyValuePair<string, long>("原地形（拆除前）", 0)
-            };
-            for (var index = 0; index < records.Count; index++)
-            {
-                var name = records[index].Value<string>("SchemeName") ?? $"方案{index + 1}";
-                options.Add(new KeyValuePair<string, long>(
-                    $"方案{index + 1}：{name}", records[index].Value<long>("DesignToposolidId")));
-            }
-
-            var dialog = new TerrainViewPickerDialog(options);
-            if (dialog.ShowDialog() != true)
-            {
-                return Result.Cancelled;
-            }
-
-            return GradingRibbonHelper.Run(uiApp, "show_grading_terrain",
-                new JObject { ["designToposolidId"] = dialog.SelectedDesignId }, "整地檢視");
+            return GradingRibbonHelper.Run(uiApp, "duplicate_floor_draft",
+                new JObject { ["floorIds"] = new JArray(floorIds) }, "複製樓板");
         }
     }
+
 }
 #endif

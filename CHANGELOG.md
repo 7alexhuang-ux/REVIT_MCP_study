@@ -19,6 +19,17 @@
 - 2026-10-24 實機重跑後再補四類 noGeometry 放行規則：零尺寸帷幕嵌板（System Panel 寬高皆 0）、嵌入牆嵌板（`Panel.FindHostPanel()` 指向已匯出幾何的本選項 Wall）、無分類 SketchPlane（含 1F Level）、無分類且名稱以 Wall Profile 開頭的 Family／Element。`ignoredNoGeometry` 每筆新增 `basis`。判斷輸入改為純資料 `NoGeometryFacts`／`DesignOptionNoGeometryPolicy.Evaluate`，NUnit 288→314；有尺寸 Glazed、找不到宿主牆的 Wall 嵌板、其他無分類 Element 仍算失敗。未連 Revit，待實機重跑驗證。
 - 僅建置與離線驗證；尚未部署、未改 Add-ins、未建立 marker、未取得 AR_CPC 實機結果。
 
+### 🆕 新增 — 整地工作流後續批次（2026-07-08 ～ 2026-10-05，既有 staged 批次整批提交）
+
+> 本段依既有 staged 批次的檔案內容與 `log/2026-07.md` 歸納；本批次原作者未留 CHANGELOG，提交者未逐項重跑實機，僅驗證建置與離線測試。
+
+- **坵塊法與限建核對（4 個 MCP 工具）**：`get_parcel_contour_layers`、`preview_parcel_slope`、`create_parcel_slope_map`（建築技術規則施工編 §261／§262，`domain/parcel-slope-analysis.md`）、`check_grading_parcel_limits`（整地方案 × 坵塊限建疊圖檢查，設計檔 `docs/superpowers/specs/2026-10-05-grading-parcel-limit-check-design.md`）；程式 `CommandExecutor.ParcelSlope.cs`、`CommandExecutor.GradingParcelLimitCheck.cs`、`Core/Grading/ParcelSlopeMath.cs`、`ParcelLimitCheck.cs`。
+- **整地分析與樓板設計副本**：`generate_grading_analysis`（`CommandExecutor.GradingAnalysis.cs`）、`duplicate_floor_draft`（`CommandExecutor.FloorDraft.cs`，樓板比照地形走設計副本模式，設計檔 `2026-07-10-grading-floor-per-scheme-design.md`）。
+- **Ribbon 與出圖**：平衡高程試算對話框 `BalancedElevationDialog`、圖框挑選 `TitleBlockPickerDialog`／`TitleBlockChoice`（取代 `TerrainViewPickerDialog`）、標註排版 `AnnotationLayoutMath`、出圖契約與 C-00c 品質改版（設計檔 `2026-07-09-grading-ribbon-output-contract-design.md`、`2026-07-10-grading-c00c-output-quality-design.md`、`2026-07-10-grading-ribbon-consolidation-design.md`）；Ribbon 圖示重生（balance／duplicate 新增，compare／set／view 移除）。
+- **domain 與 skill**：新增 `domain/hillside-site-review.md`（山坡地基地檢討總流程）、`earthwork-balance.md`、`earthwork-gridsheet.md`、`parcel-slope-analysis.md`，更新 `grading-slope-classification.md`；新增 `/hillside-site-review` skill。
+- **測試**：`MCP.Tests/Grading/` 新增 ParcelSlopeMath、ParcelLimitCheck、AnnotationLayout、TitleBlockChoice 測試並擴充既有案例；MCP-Server 的 `grading-tools.test.ts` 同步。
+- **開發日誌**：`log/2026-07.md` 補入 2026-07-08 ～ 07-11 的整地實機驗證與逐輪修正紀錄。
+- 註冊與通訊層見同批次後續 commit（`CommandExecutor.cs` 指令分派、`tools/index.ts`）；單獨此 commit 不含分派註冊。
 
 > ⚠️ **本節所列全部尚未 commit。** 截至 2026-09-21，工作目錄有 100 個未提交檔案，分支 `grading-workflow-v2`（停在 2026-07-09）落後 `main` 192 個 commit、領先 42 個。整併前請先處理分支分歧，見 [ROADMAP.md](ROADMAP.md) R-01。
 

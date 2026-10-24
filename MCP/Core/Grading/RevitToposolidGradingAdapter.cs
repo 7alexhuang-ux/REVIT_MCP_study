@@ -1092,7 +1092,7 @@ namespace RevitMCP.Core.Grading
 
                     try
                     {
-                        editor.DrawSplitLine(startVertex, endVertex);
+                        DrawSlabSplitLine(editor, startVertex, endVertex);
                     }
                     catch (Autodesk.Revit.Exceptions.ApplicationException)
                     {
@@ -1101,6 +1101,24 @@ namespace RevitMCP.Core.Grading
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// 2026-07-10：SlabShapeEditor.DrawSplitLine 於 Revit 2025 起棄用、2026 移除，
+        /// 改用 AddSplitLine（參數相同、回傳型別不同，本專案兩處呼叫都不用回傳值）。
+        /// 查證來源：revitapidocs.com DrawSplitLine/AddSplitLine 方法頁（2025/2026）。
+        /// AddSplitLine 僅 2025+ 存在，R22~R24 仍須呼叫 DrawSplitLine——單一程式碼庫同時
+        /// 編譯五個 Revit 版本，用 Nice3point SDK 自動產生的 REVIT2025_OR_GREATER 版本條件式
+        /// 收斂成一個共用入口，避免兩處呼叫各自寫一份 #if 之後漏改。
+        /// </summary>
+        private static void DrawSlabSplitLine(
+            SlabShapeEditor editor, SlabShapeVertex startVertex, SlabShapeVertex endVertex)
+        {
+#if REVIT2025_OR_GREATER
+            editor.AddSplitLine(startVertex, endVertex);
+#else
+            editor.DrawSplitLine(startVertex, endVertex);
+#endif
         }
 
         private static SlabShapeVertex FindNearestVertex(
@@ -1363,7 +1381,7 @@ namespace RevitMCP.Core.Grading
 
                     try
                     {
-                        editor.DrawSplitLine(startVertex, endVertex);
+                        DrawSlabSplitLine(editor, startVertex, endVertex);
                     }
                     catch (Autodesk.Revit.Exceptions.ApplicationException)
                     {

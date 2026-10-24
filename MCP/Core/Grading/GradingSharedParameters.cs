@@ -81,7 +81,7 @@ namespace RevitMCP.Core.Grading
             var ledger = record["Ledger"] as JObject;
             SetNumber(design, "RevitMCP運土鬆方m3", ledger?.Value<double?>("HaulVolumeLooseCubicMeters") ?? 0);
             SetNumber(design, "RevitMCP所需自然方m3", ledger?.Value<double?>("RequiredBankForFillCubicMeters") ?? 0);
-            SetNumber(design, "RevitMCP實質淨土方m3", ledger?.Value<double?>("EffectiveNetCubicMeters") ?? 0);
+            SetNumber(design, "RevitMCP實質淨土方m3", cut - (ledger?.Value<double?>("RequiredBankForFillCubicMeters") ?? 0));
         }
 
         private static string DescribeParameters(JObject record)
@@ -109,7 +109,7 @@ namespace RevitMCP.Core.Grading
         private static void SetNumber(Element element, string name, double value)
         {
             var parameter = element.LookupParameter(name);
-            if (parameter != null && !parameter.IsReadOnly) { parameter.Set(value); }
+            if (parameter != null && !parameter.IsReadOnly) { parameter.Set(Math.Round(value, 2)); }
         }
 
         private static DefinitionFile OpenOrCreateDefinitionFile(RevitApp app)

@@ -17,6 +17,7 @@ namespace RevitMCP.Core
         private object CreateGradingPresentation(JObject parameters)
         {
             var doc = _uiApp.ActiveUIDocument.Document;
+            ClearActiveSelection();
             var records = RevitToposolidGradingAdapter.ReadSchemeRecords(doc)
                 .Select(JObject.Parse)
                 .ToList();
@@ -39,7 +40,7 @@ namespace RevitMCP.Core
 
             var export = parameters["export"]?.Value<bool?>() ?? true;
             var outputPath = parameters["outputPath"]?.Value<string>();
-            var titleBlockId = ResolvePresentationTitleBlock(doc, parameters);
+            var titleBlock = ResolveGradingTitleBlock(doc, parameters, preferA0: true);
 
             var schemeResults = new List<object>();
             var sheetIds = new List<ElementId>();
@@ -51,6 +52,7 @@ namespace RevitMCP.Core
                 var steps = new List<string>();
                 try
                 {
+                    var focus = TryComputeComparisonFocus(doc, new[] { record });
                     var mainViewId = EnsureSchemeView(doc, designId, record, steps);
                     var viewIds = new List<long> { mainViewId };
 
@@ -75,18 +77,85 @@ namespace RevitMCP.Core
                             ["sampleStepMeters"] = 3.0
                         }));
                     viewIds.Add(slopeViewId);
+                    ApplyFocusSectionBoxToViewId(doc, mainViewId, focus);
+                    ApplyFocusSectionBoxToViewId(doc, cutfillViewId, focus);
+                    ApplyFocusSectionBoxToViewId(doc, slopeViewId, focus);
 
                     TrySubStep(steps, "整地範圍線", () =>
                         CreateGradingExtentLines(new JObject { ["designToposolidId"] = designId, ["viewId"] = mainViewId }));
+                    // 2026-07-10 D2/D3/D11：與 C-00c 同規——daylight 合併標籤＋坡率文字。
+                    // 三輪：挖填/坡度視圖也標關鍵高程（拉線到圖外）。
+                    // 2026-07-11 十四輪：十一輪移除強制單側、十二輪加 CropBox 硬裁切後，
+                    // C-00c 端實機重驗證實 3D 視圖的 CropBox 不會真的裁掉超出範圍的
+                    // TextNote（只決定 viewport 外框）——中間夾縫互撞是結構性問題，跟這裡
+                    // 一橫排三格緊鄰同理，恢復強制單側：最左格只往左、最右格只往右，
+                    // 中間格（挖填）維持自動雙分（兩側都有鄰格，效果一樣）。
+                    // 2026-07-11 十五輪追修：v15 實機重驗發現十四輪的「最左格強制單側」對
+                    // mainViewId 是錯誤類比——mainViewId 同時標樓板＋daylight＋坡率（三種標籤
+                    // 疊加，項目數是 (b)(c) 純 daylight 欄的近兩倍），AssignSideColumnSlots
+                    // 帶 itemHeights 時「允許溢出、不硬壓縮」（見 AnnotationLayoutMathTests
+                    // 的 StacksWithoutOverlapEvenWhenForcedOneSide 測試，此為刻意設計，壓縮會讓
+                    // 間距小於實際文字框而重疊），強制單側把全部項目擠一邊，堆疊總高度溢出
+                    // 裁切框下緣，撞進 Revit 視埠自動標題（"1 整地-...-排圖副本 / Scale:"）。
+                    // C-00c 的 (a) 欄本來就是自動雙分且項目量相同，沒有這個問題；本欄與右側
+                    // 挖填欄之間留白夠寬（一般網格排版，非 C-00c 緊鄰比較欄），改回自動雙分
+                    // 把項目數腰斬到單側可負荷的範圍，不會撞進挖填欄的標籤。
+                    // 十七輪：標註帶 labelScaleHint——一橫排三格（A0 假設）每格約 380×790mm，
+                    // 槽位高度按預估出圖比例換算實際字高（詳見 EstimateLabelScaleHint 註解）。
+                    var presentationHint = EstimateLabelScaleHint(focus, 380.0, 790.0);
                     TrySubStep(steps, "標高標註", () =>
-                        AnnotateGradingScheme(new JObject { ["designToposolidId"] = designId, ["viewId"] = mainViewId }));
+                        AnnotateGradingScheme(new JObject
+                        {
+                            ["designToposolidId"] = designId,
+                            ["viewId"] = mainViewId,
+                            ["annotateDaylight"] = true,
+                            ["annotateSlopeLabel"] = true,
+                            ["labelScaleHint"] = presentationHint
+                        }));
+                    TrySubStep(steps, "標高標註(挖填)", () =>
+                        AnnotateGradingScheme(new JObject
+                        {
+                            ["designToposolidId"] = designId,
+                            ["viewId"] = cutfillViewId,
+                            ["annotateFloors"] = false,
+                            ["annotateDaylight"] = true,
+                            ["annotateSlopeLabel"] = false,
+                            ["labelScaleHint"] = presentationHint
+                        }));
+                    TrySubStep(steps, "標高標註(坡度)", () =>
+                        AnnotateGradingScheme(new JObject
+                        {
+                            ["designToposolidId"] = designId,
+                            ["viewId"] = slopeViewId,
+                            ["annotateFloors"] = false,
+                            ["annotateDaylight"] = true,
+                            ["annotateSlopeLabel"] = false,
+                            ["labelSide"] = 1,
+                            ["labelScaleHint"] = presentationHint
+                        }));
 
-                    var sheetId = CreatePresentationSheet(doc, titleBlockId, $"整地-{schemeName}");
+                    var sheetId = CreatePresentationSheet(doc, titleBlock.TitleBlockId, $"整地-{schemeName}");
                     sheetIds.Add(sheetId);
+                    // D8 修正：書籤視圖被比較出圖先佔時，複製一份（含標高標註）再排，不再上半頁留白。
+                    var placeableViewIds = viewIds;
+                    using (var transaction = new Transaction(doc, "出圖視圖佔用解套"))
+                    {
+                        GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
+                        transaction.Start();
+                        if (doc.GetElement(sheetId) is ViewSheet sheetElement)
+                        {
+                            placeableViewIds = viewIds
+                                .Select(id => ResolvePlaceableViewId(doc, sheetElement, id, steps, "方案視圖"))
+                                .ToList();
+                        }
+
+                        transaction.Commit();
+                    }
+
                     PlaceViewsOnSheet(new JObject
                     {
                         ["sheetId"] = sheetId.GetIdValue(),
-                        ["viewIds"] = new JArray(viewIds),
+                        ["viewIds"] = new JArray(placeableViewIds),
                         ["columns"] = 3,
                         ["rows"] = 1
                     });
@@ -134,22 +203,62 @@ namespace RevitMCP.Core
                 }
             }
 
+            object excel = null;
+            try
+            {
+                excel = ExportGradingComparison(new JObject
+                {
+                    ["outputPath"] = DeriveGradingExcelOutputPath(doc, parameters, "整地各別出圖比較表"),
+                    ["includeScreenshots"] = true
+                });
+            }
+            catch (Exception ex)
+            {
+                excel = new { Success = false, Error = ex.Message };
+            }
+
             return new
             {
                 SchemeCount = records.Count,
                 SheetCount = sheetIds.Count,
                 Schemes = schemeResults,
                 Pdf = pdf,
-                Message = $"整地圖說出圖完成：{sheetIds.Count} 張圖紙"
-                    + (export ? "，已嘗試匯出 PDF。" : "。")
+                Excel = excel,
+                UsedBlankTitleBlock = titleBlock.UsedBlankSheet,
+                TitleBlockMessage = titleBlock.Message,
+                Message = $"各別出圖完成：{sheetIds.Count} 張圖紙"
+                    + (export ? "，已嘗試匯出 PDF" : string.Empty)
+                    + "，已嘗試匯出 Excel。"
+                    + (titleBlock.UsedBlankSheet ? " 本次使用空白圖紙。" : string.Empty)
             };
         }
 
         private long EnsureSchemeView(Document doc, long designId, JObject record, List<string> steps)
         {
             var viewId = record.Value<long?>("SchemeViewId") ?? 0;
-            if (viewId > 0 && doc.GetElement(new ElementId(checked((int)viewId))) is View)
+            if (viewId > 0 && doc.GetElement(new ElementId(checked((int)viewId))) is View view)
             {
+                using (var transaction = new Transaction(doc, "更新方案視圖顯示"))
+                {
+                    GradingFailuresPreprocessor.Attach(transaction, new GradingFailuresPreprocessor());
+                    transaction.Start();
+                    var hideIds = CollectOtherTerrainIds(doc, new ElementId(checked((int)designId)))
+                        .Concat(CollectOtherSchemeFloorIds(doc, record))
+                        .Distinct()
+                        .ToList();
+                    var ownFloorIds = ReadRecordFloorIds(record)
+                        .Select(id => new ElementId(checked((int)id)))
+                        .ToList();
+                    ApplySchemeVisibility(
+                        doc,
+                        view,
+                        new ElementId(checked((int)designId)),
+                        hideIds,
+                        ownFloorIds);
+                    ClearAnalysisVisualization(view);
+                    transaction.Commit();
+                }
+
                 steps.Add("沿用方案視圖");
                 return viewId;
             }
@@ -178,6 +287,11 @@ namespace RevitMCP.Core
                 var duplicateId = source.Duplicate(ViewDuplicateOption.Duplicate);
                 var duplicate = (View)doc.GetElement(duplicateId);
                 duplicate.Name = UniqueViewName(doc, baseName);
+                ClearAnalysisVisualization(duplicate);
+                if (duplicate is View3D view3d && view3d.IsSectionBoxActive)
+                {
+                    view3d.IsSectionBoxActive = false;
+                }
                 newId = duplicate.Id.GetIdValue();
                 transaction.Commit();
             }
@@ -220,28 +334,6 @@ namespace RevitMCP.Core
             }
 
             return baseName;
-        }
-
-        private static ElementId ResolvePresentationTitleBlock(Document doc, JObject parameters)
-        {
-            var explicitId = parameters["titleBlockId"]?.Value<long?>() ?? 0;
-            if (explicitId > 0)
-            {
-                return new ElementId(checked((int)explicitId));
-            }
-
-            var titleBlock = new FilteredElementCollector(doc)
-                .OfClass(typeof(FamilySymbol))
-                .OfCategory(BuiltInCategory.OST_TitleBlocks)
-                .Cast<FamilySymbol>()
-                .FirstOrDefault();
-            if (titleBlock == null)
-            {
-                throw new InvalidOperationException(
-                    "模型沒有可用的圖框（TitleBlock）；請先載入圖框族群或提供 titleBlockId。");
-            }
-
-            return titleBlock.Id;
         }
 
         /// <summary>

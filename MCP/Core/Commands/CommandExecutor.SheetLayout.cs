@@ -146,7 +146,8 @@ namespace RevitMCP.Core
         /// </summary>
         private static void FitViewportToCell(
             Document doc, Viewport viewport, View view,
-            double cellWidthFeet, double cellHeightFeet, XYZ center)
+            double cellWidthFeet, double cellHeightFeet, XYZ center,
+            bool snapToStandardScale = true, int? forceScale = null)
         {
             if (view is View3D perspective && perspective.IsPerspective)
             {
@@ -156,16 +157,31 @@ namespace RevitMCP.Core
             try
             {
                 doc.Regenerate();
-                var outline = viewport.GetBoxOutline();
-                var outlineWidth = outline.MaximumPoint.X - outline.MinimumPoint.X;
-                var outlineHeight = outline.MaximumPoint.Y - outline.MinimumPoint.Y;
-                if (outlineWidth <= 1e-9 || outlineHeight <= 1e-9 || view.Scale <= 0)
+                int targetScale;
+                if (forceScale.HasValue)
                 {
-                    return;
+                    // 2026-07-10 六輪：C-00c 比較出圖同列（同案例類型）跨欄共用同一比例，
+                    // 才是真正「同尺度可比較」——呼叫端已算好列內最大需求比例，這裡直接套用。
+                    targetScale = forceScale.Value;
+                }
+                else
+                {
+                    var outline = viewport.GetBoxOutline();
+                    var outlineWidth = outline.MaximumPoint.X - outline.MinimumPoint.X;
+                    var outlineHeight = outline.MaximumPoint.Y - outline.MinimumPoint.Y;
+                    if (outlineWidth <= 1e-9 || outlineHeight <= 1e-9 || view.Scale <= 0)
+                    {
+                        return;
+                    }
+
+                    var ratio = Math.Max(outlineWidth / cellWidthFeet, outlineHeight / cellHeightFeet);
+                    // 2026-07-10 D6：C-00c 圖面撐滿格位——snap=false 用最小可容納整數比例（圖形最大化），
+                    // 一般排圖維持標準比例。
+                    targetScale = snapToStandardScale
+                        ? RevitMCP.Core.Grading.SheetLayoutMath.SnapToStandardScale(view.Scale * ratio)
+                        : Math.Max(1, (int)Math.Ceiling((view.Scale * ratio) - 1e-9));
                 }
 
-                var ratio = Math.Max(outlineWidth / cellWidthFeet, outlineHeight / cellHeightFeet);
-                var targetScale = RevitMCP.Core.Grading.SheetLayoutMath.SnapToStandardScale(view.Scale * ratio);
                 if (targetScale != view.Scale)
                 {
                     view.Scale = targetScale;
@@ -182,11 +198,45 @@ namespace RevitMCP.Core
         }
 
         /// <summary>
+        /// 2026-07-10 六輪：算出「這個 viewport 若要完整容納其內容，最小需要放大到幾比幾」，
+        /// 但不套用——供呼叫端跨欄取最大值算出共用比例後再一次性套用（FitViewportToCell 的
+        /// forceScale）。透視圖或退化外框回 null（呼叫端略過該格的比例投票，只置中）。
+        /// </summary>
+        private static int? ComputeRequiredScale(
+            Document doc, Viewport viewport, View view, double cellWidthFeet, double cellHeightFeet)
+        {
+            if (view is View3D perspective && perspective.IsPerspective)
+            {
+                return null;
+            }
+
+            try
+            {
+                doc.Regenerate();
+                var outline = viewport.GetBoxOutline();
+                var outlineWidth = outline.MaximumPoint.X - outline.MinimumPoint.X;
+                var outlineHeight = outline.MaximumPoint.Y - outline.MinimumPoint.Y;
+                if (outlineWidth <= 1e-9 || outlineHeight <= 1e-9 || view.Scale <= 0)
+                {
+                    return null;
+                }
+
+                var ratio = Math.Max(outlineWidth / cellWidthFeet, outlineHeight / cellHeightFeet);
+                return Math.Max(1, (int)Math.Ceiling((view.Scale * ratio) - 1e-9));
+            }
+            catch (Autodesk.Revit.Exceptions.ApplicationException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// PDF 匯出：把指定圖紙以 PDFExportOptions 批次匯出（Revit 2022+）；預設合併為單一 PDF。
         /// </summary>
         private object ExportSheetsPdf(JObject parameters)
         {
             Document doc = _uiApp.ActiveUIDocument.Document;
+            ClearActiveSelection();
             var sheetIdTokens = parameters["sheetIds"] as JArray;
             if (sheetIdTokens == null || sheetIdTokens.Count == 0)
             {
@@ -259,6 +309,18 @@ namespace RevitMCP.Core
                 Combined = combine,
                 Message = $"已匯出 {sheetIds.Count} 張圖紙為 PDF（{(combine ? "合併單檔" : "逐張")}）：{directory}"
             };
+        }
+
+        private void ClearActiveSelection()
+        {
+            try
+            {
+                _uiApp.ActiveUIDocument?.Selection?.SetElementIds(new List<ElementId>());
+            }
+            catch (Autodesk.Revit.Exceptions.ApplicationException)
+            {
+                // 匯出時若目前文件狀態不允許改選取，不阻斷主流程。
+            }
         }
     }
 }

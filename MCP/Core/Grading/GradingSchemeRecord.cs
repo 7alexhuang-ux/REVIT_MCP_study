@@ -10,7 +10,7 @@ namespace RevitMCP.Core.Grading
     /// </summary>
     public sealed class GradingSchemeRecord
     {
-        public int SchemaVersion { get; set; } = 4;
+        public int SchemaVersion { get; set; } = 6;
         public string AssociationId { get; set; }
         public string SchemeName { get; set; }
         public string Timestamp { get; set; }
@@ -44,6 +44,145 @@ namespace RevitMCP.Core.Grading
 
         /// <summary>本次生效的邊坡率政策快照（v4 新增；V3-S2 逐邊坡率，可重現/可比較）。</summary>
         public IReadOnlyList<FloorEdgePolicySnapshot> EdgePolicies { get; set; }
+
+        /// <summary>
+        /// 方案建立當下的控制樓板幾何快照（v5 新增）。輪廓以公尺、專案內部原點座標儲存，
+        /// 讓舊方案比較圖不受後續編輯同一片樓板的影響。
+        /// </summary>
+        public IReadOnlyList<FloorGeometrySnapshot> FloorSnapshots { get; set; }
+
+        /// <summary>「產生分析圖」最後一次執行時間戳（v6 新增）；null＝尚未產生過分析圖。方案總覽的完成度狀態依此欄判斷。</summary>
+        public string AnalysisGeneratedAt { get; set; }
+
+        /// <summary>「產生分析圖」建立的挖填熱區視圖 ID（v6 新增）。</summary>
+        public long? AnalysisCutfillViewId { get; set; }
+
+        /// <summary>「產生分析圖」建立的坡度熱區視圖 ID（v6 新增）。</summary>
+        public long? AnalysisSlopeViewId { get; set; }
+
+        /// <summary>「產生分析圖」建立的方案專屬正剖面視圖 ID（v6 新增）。</summary>
+        public long? AnalysisSectionViewId { get; set; }
+
+        /// <summary>「產生分析圖」建立的方案專屬剖面立體視圖 ID（v6 新增）。</summary>
+        public long? AnalysisSectionIsoViewId { get; set; }
+    }
+
+    /// <summary>方案建立當下的單一控制樓板幾何快照（登記簿用；公尺）。</summary>
+    public sealed class FloorGeometrySnapshot
+    {
+        public long FloorId { get; set; }
+        public IReadOnlyList<FloorSnapshotPoint> OuterLoopMeters { get; set; }
+        public double BottomZMinMeters { get; set; }
+        public double BottomZMaxMeters { get; set; }
+    }
+
+    /// <summary>樓板輪廓快照點（公尺，專案內部原點座標）。</summary>
+    public sealed class FloorSnapshotPoint
+    {
+        public double XMeters { get; set; }
+        public double YMeters { get; set; }
+    }
+
+    /// <summary>比較圖共同聚焦範圍（公尺，專案內部原點座標）。</summary>
+    public readonly struct GradingComparisonFocusBounds
+    {
+        private GradingComparisonFocusBounds(
+            double minX, double minY, double minZ,
+            double maxX, double maxY, double maxZ)
+        {
+            MinXMeters = minX;
+            MinYMeters = minY;
+            MinZMeters = minZ;
+            MaxXMeters = maxX;
+            MaxYMeters = maxY;
+            MaxZMeters = maxZ;
+        }
+
+        public double MinXMeters { get; }
+        public double MinYMeters { get; }
+        public double MinZMeters { get; }
+        public double MaxXMeters { get; }
+        public double MaxYMeters { get; }
+        public double MaxZMeters { get; }
+        public double CenterXMeters => (MinXMeters + MaxXMeters) / 2.0;
+        public double CenterYMeters => (MinYMeters + MaxYMeters) / 2.0;
+        public double CenterZMeters => (MinZMeters + MaxZMeters) / 2.0;
+        public double WidthMeters => MaxXMeters - MinXMeters;
+        public double DepthMeters => MaxYMeters - MinYMeters;
+        public double HeightMeters => MaxZMeters - MinZMeters;
+
+        public static GradingComparisonFocusBounds FromFloorSnapshots(
+            IEnumerable<FloorGeometrySnapshot> snapshots,
+            double horizontalPaddingMeters,
+            double minimumPlanSpanMeters,
+            double verticalPaddingMeters,
+            double minimumHeightMeters)
+        {
+            if (snapshots == null)
+            {
+                throw new ArgumentNullException(nameof(snapshots));
+            }
+
+            var minX = double.MaxValue;
+            var minY = double.MaxValue;
+            var minZ = double.MaxValue;
+            var maxX = double.MinValue;
+            var maxY = double.MinValue;
+            var maxZ = double.MinValue;
+            var pointCount = 0;
+            foreach (var snapshot in snapshots)
+            {
+                if (snapshot?.OuterLoopMeters == null)
+                {
+                    continue;
+                }
+
+                minZ = Math.Min(minZ, snapshot.BottomZMinMeters);
+                maxZ = Math.Max(maxZ, snapshot.BottomZMaxMeters);
+                foreach (var point in snapshot.OuterLoopMeters)
+                {
+                    if (point == null)
+                    {
+                        continue;
+                    }
+
+                    minX = Math.Min(minX, point.XMeters);
+                    minY = Math.Min(minY, point.YMeters);
+                    maxX = Math.Max(maxX, point.XMeters);
+                    maxY = Math.Max(maxY, point.YMeters);
+                    pointCount++;
+                }
+            }
+
+            if (pointCount == 0)
+            {
+                throw new ArgumentException("至少需要一個樓板輪廓快照點。", nameof(snapshots));
+            }
+
+            minX -= horizontalPaddingMeters;
+            minY -= horizontalPaddingMeters;
+            maxX += horizontalPaddingMeters;
+            maxY += horizontalPaddingMeters;
+            minZ -= verticalPaddingMeters;
+            maxZ += verticalPaddingMeters;
+            ExpandSpan(ref minX, ref maxX, minimumPlanSpanMeters);
+            ExpandSpan(ref minY, ref maxY, minimumPlanSpanMeters);
+            ExpandSpan(ref minZ, ref maxZ, minimumHeightMeters);
+            return new GradingComparisonFocusBounds(minX, minY, minZ, maxX, maxY, maxZ);
+        }
+
+        private static void ExpandSpan(ref double min, ref double max, double minimumSpan)
+        {
+            if (minimumSpan <= 0 || max - min >= minimumSpan)
+            {
+                return;
+            }
+
+            var center = (min + max) / 2.0;
+            var half = minimumSpan / 2.0;
+            min = center - half;
+            max = center + half;
+        }
     }
 
     /// <summary>單一樓板的邊坡率政策快照（登記簿用；公尺）。</summary>

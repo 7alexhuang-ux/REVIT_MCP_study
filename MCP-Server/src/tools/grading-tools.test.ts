@@ -84,6 +84,11 @@ test("V2 比較出圖與刪除方案工具存在且參數正確", () => {
     const comparisonProps = comparisonTool.inputSchema.properties as Record<string, Record<string, unknown>>;
     assert.equal(comparisonProps.export.default, true);
     assert.equal(comparisonProps.designToposolidIds.type, "array");
+    assert.equal(comparisonProps.excelOutputPath.type, "string");
+    assert.match(String(comparisonProps.titleBlockId.description), /-1/);
+    assert.match(String(comparisonTool.description), /PDF/);
+    assert.match(String(comparisonTool.description), /Excel/);
+    assert.match(String(comparisonTool.description), /空白圖紙/);
 
     const removeTool = gradingTools.find(item => item.name === "remove_grading_scheme");
     assert.ok(removeTool);
@@ -95,6 +100,15 @@ test("V2 比較出圖與刪除方案工具存在且參數正確", () => {
     assert.ok(viewerTool);
     const viewerProps = viewerTool.inputSchema.properties as Record<string, Record<string, unknown>>;
     assert.equal(viewerProps.designToposolidId.type, "integer");
+
+    const presentationTool = gradingTools.find(item => item.name === "create_grading_presentation");
+    assert.ok(presentationTool);
+    const presentationProps = presentationTool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(presentationProps.excelOutputPath.type, "string");
+    assert.match(String(presentationProps.titleBlockId.description), /-1/);
+    assert.match(String(presentationTool.description), /PDF/);
+    assert.match(String(presentationTool.description), /Excel/);
+    assert.match(String(presentationTool.description), /空白圖紙/);
 });
 
 test("V3 板高程與邊坡率工具存在且參數正確", () => {
@@ -141,6 +155,20 @@ test("整地工具限制整數 ID、非空樓板清單與預設值", () => {
     assert.match(String(properties.updateExisting.description), /只接受 false/);
 });
 
+test("坵塊限建疊圖檢查工具存在且參數正確", () => {
+    const tool = gradingTools.find(item => item.name === "check_grading_parcel_limits");
+    assert.ok(tool);
+    assert.deepEqual(tool.inputSchema.required, ["designToposolidId", "layerName", "contourIntervalMeters"]);
+    const properties = tool.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(properties.designToposolidId.type, "integer");
+    assert.equal(properties.cellSizeMeters.maximum, 25);
+    assert.equal(properties.drawOverlay.type, "boolean");
+    assert.equal(properties.drawOverlay.default, false);
+    assert.ok(properties.parcelViewId, "parcelViewId 必須存在，與 drawOverlay 用的 viewId 分開");
+    assert.ok(properties.viewId, "viewId 用於 drawOverlay 的 3D 方案視圖");
+    assert.match(String(tool.description), /不輸出可否開發建築之結論/);
+});
+
 test("整地工具只註冊於核准的 Profile", () => {
     const originalProfile = process.env.MCP_PROFILE;
     const gradingToolNames = [
@@ -163,6 +191,7 @@ test("整地工具只註冊於核准的 Profile", () => {
         "show_grading_terrain",
         "set_floor_elevations",
         "set_floor_edge_slope",
+        "check_grading_parcel_limits",
     ];
 
     try {

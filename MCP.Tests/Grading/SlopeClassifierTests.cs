@@ -34,10 +34,23 @@ namespace RevitMCP.Tests.Grading
         }
 
         [Test]
-        public void GetClass_五級坡宜林地_六級坡加強保育地_超界丟例外()
+        public void GetClass_僅六級坡標宜林地_其餘留空_超界丟例外()
         {
-            Assert.AreEqual("宜林地", SlopeClassifier.GetClass(5).Attribute);
-            Assert.AreEqual("加強保育地", SlopeClassifier.GetClass(6).Attribute);
+            // 山坡地土地可利用限度分類標準第 4 條：僅六級坡無條件屬宜林地。
+            Assert.AreEqual("宜林地", SlopeClassifier.GetClass(6).Attribute);
+
+            // 四、五級坡是否為宜林地另須土層深度／沖蝕程度／母岩硬度，
+            // 單憑坡度不可判定，故必須留空，不得回推屬性。
+            Assert.AreEqual(string.Empty, SlopeClassifier.GetClass(4).Attribute);
+            Assert.AreEqual(string.Empty, SlopeClassifier.GetClass(5).Attribute);
+
+            // 「加強保育地」以地質條件（沖蝕極嚴重／崩塌／地滑／脆弱母岩裸露）
+            // 界定，與坡度無關，任何級別都不得出現此字樣。
+            foreach (var cls in SlopeClassifier.Classes)
+            {
+                Assert.AreNotEqual("加強保育地", cls.Attribute, $"{cls.Name} 不得標為加強保育地");
+            }
+
             Assert.Throws<ArgumentOutOfRangeException>(() => SlopeClassifier.GetClass(0));
             Assert.Throws<ArgumentOutOfRangeException>(() => SlopeClassifier.GetClass(7));
         }

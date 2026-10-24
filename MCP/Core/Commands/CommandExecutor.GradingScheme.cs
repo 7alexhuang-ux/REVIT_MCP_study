@@ -58,9 +58,10 @@ namespace RevitMCP.Core
                 var headers = new[]
                 {
                     "方案名稱", "時間", "模式", "Offset(m)", "坡度", "放坡上限(m)",
-                    "原地形ID", "設計地形ID", "樓板IDs", "CUT(m³)", "FILL(m³)", "淨土方(m³)",
+                    "原地形ID", "設計地形ID", "樓板IDs", "挖方(m³)", "填方(m³)", "淨土方(+餘/-缺)(m³)",
+                    "挖填總量(m³)",
                     "最大挖深(m)", "最大填高(m)", "擾動面積(m²)",
-                    "鬆方係數", "壓實係數", "運土鬆方(m³)", "填方所需自然方(m³)", "實質淨土方(m³)",
+                    "鬆方係數", "壓實係數", "運土鬆方(m³)", "所需自然方(m³)", "實質淨土方(+餘/-缺)(m³)",
                     "警告", "方案截圖"
                 };
                 for (var column = 0; column < headers.Length; column++)
@@ -76,7 +77,7 @@ namespace RevitMCP.Core
                 {
                     if (value.HasValue)
                     {
-                        sheet.Cell(rowIndex, columnIndex).Value = value.Value;
+                        sheet.Cell(rowIndex, columnIndex).Value = Math.Round(value.Value, 2);
                     }
                 }
 
@@ -95,14 +96,17 @@ namespace RevitMCP.Core
                     sheet.Cell(row, 9).Value = string.Join(", ",
                         (scheme["FloorIds"] as JArray)?.Select(idToken => idToken.ToString())
                             ?? Enumerable.Empty<string>());
-                    SetNumber(row, 10, scheme.Value<double?>("CutCubicMeters"));
-                    SetNumber(row, 11, scheme.Value<double?>("FillCubicMeters"));
-                    SetNumber(row, 12, scheme.Value<double?>("NetCubicMeters"));
-                    SetNumber(row, 13, scheme.Value<double?>("MaxCutDepthMeters"));
-                    SetNumber(row, 14, scheme.Value<double?>("MaxFillHeightMeters"));
+                    var cut = scheme.Value<double?>("CutCubicMeters") ?? 0.0;
+                    var fill = scheme.Value<double?>("FillCubicMeters") ?? 0.0;
+                    SetNumber(row, 10, cut);
+                    SetNumber(row, 11, fill);
+                    SetNumber(row, 12, cut - fill);
+                    SetNumber(row, 13, cut + fill);
+                    SetNumber(row, 14, scheme.Value<double?>("MaxCutDepthMeters"));
+                    SetNumber(row, 15, scheme.Value<double?>("MaxFillHeightMeters"));
                     var disturbedArea = scheme.Value<double?>("DisturbedAreaSquareMeters");
                     var isApproximate = scheme.Value<bool?>("DisturbedAreaIsApproximate") ?? false;
-                    sheet.Cell(row, 15).Value = disturbedArea.HasValue
+                    sheet.Cell(row, 16).Value = disturbedArea.HasValue
                         ? (isApproximate
                             ? $"≈{disturbedArea.Value:#,##0.00}"
                             : disturbedArea.Value.ToString("#,##0.00"))
@@ -110,14 +114,14 @@ namespace RevitMCP.Core
                     var ledger = scheme["Ledger"] as JObject;
                     if (ledger != null)
                     {
-                        SetNumber(row, 16, ledger.Value<double?>("LooseFactor"));
-                        SetNumber(row, 17, ledger.Value<double?>("CompactionFactor"));
-                        SetNumber(row, 18, ledger.Value<double?>("HaulVolumeLooseCubicMeters"));
-                        SetNumber(row, 19, ledger.Value<double?>("RequiredBankForFillCubicMeters"));
-                        SetNumber(row, 20, ledger.Value<double?>("EffectiveNetCubicMeters"));
+                        SetNumber(row, 17, ledger.Value<double?>("LooseFactor"));
+                        SetNumber(row, 18, ledger.Value<double?>("CompactionFactor"));
+                        SetNumber(row, 19, ledger.Value<double?>("HaulVolumeLooseCubicMeters"));
+                        SetNumber(row, 20, ledger.Value<double?>("RequiredBankForFillCubicMeters"));
+                        SetNumber(row, 21, cut - (ledger.Value<double?>("RequiredBankForFillCubicMeters") ?? 0.0));
                     }
 
-                    sheet.Cell(row, 21).Value = string.Join("；",
+                    sheet.Cell(row, 22).Value = string.Join("；",
                         (scheme["Warnings"] as JArray)?.Select(warning => warning.ToString())
                             ?? Enumerable.Empty<string>());
                     if (index % 2 == 1)
@@ -131,22 +135,30 @@ namespace RevitMCP.Core
                         && System.IO.File.Exists(screenshotPath))
                     {
                         sheet.Row(row).Height = 90;
-                        sheet.Column(22).Width = 24;
+                        sheet.Column(23).Width = 24;
                         var picture = sheet.AddPicture(screenshotPath);
-                        picture.MoveTo(sheet.Cell(row, 22), 2, 2);
+                        picture.MoveTo(sheet.Cell(row, 23), 2, 2);
                         picture.WithSize(160, 112);
                     }
                     else if (includeScreenshots)
                     {
-                        sheet.Cell(row, 22).Value = "（尚未建立方案視圖）";
+                        sheet.Cell(row, 23).Value = "（尚未建立方案視圖）";
                     }
                 }
 
                 var used = sheet.Range(1, 1, schemes.Count + 1, headers.Length);
                 used.Style.Border.SetOutsideBorder(ClosedXML.Excel.XLBorderStyleValues.Thin);
                 used.Style.Border.SetInsideBorder(ClosedXML.Excel.XLBorderStyleValues.Thin);
-                sheet.Range(2, 10, schemes.Count + 1, 14).Style.NumberFormat.SetFormat("#,##0.00");
-                sheet.Range(2, 18, schemes.Count + 1, 20).Style.NumberFormat.SetFormat("#,##0.00");
+                sheet.Range(2, 10, schemes.Count + 1, 15).Style.NumberFormat.SetFormat("#,##0.00");
+                sheet.Range(2, 19, schemes.Count + 1, 21).Style.NumberFormat.SetFormat("#,##0.00");
+                sheet.Range(1, 10, schemes.Count + 1, 13).Style.Border.SetOutsideBorder(ClosedXML.Excel.XLBorderStyleValues.Thick);
+                sheet.Range(1, 14, schemes.Count + 1, 16).Style.Border.SetOutsideBorder(ClosedXML.Excel.XLBorderStyleValues.Thick);
+                sheet.Range(1, 19, schemes.Count + 1, 21).Style.Border.SetOutsideBorder(ClosedXML.Excel.XLBorderStyleValues.Thick);
+                for (var row = 2; row <= schemes.Count + 1; row++)
+                {
+                    ApplyNetColor(sheet.Cell(row, 12));
+                    ApplyNetColor(sheet.Cell(row, 21));
+                }
                 sheet.SheetView.FreezeRows(1);
                 sheet.ColumnsUsed().AdjustToContents();
                 workbook.SaveAs(outputPath);
@@ -158,6 +170,23 @@ namespace RevitMCP.Core
                 SchemeCount = schemes.Count,
                 Message = $"整地方案比較表已匯出 {schemes.Count} 筆方案。"
             };
+        }
+
+        private static void ApplyNetColor(ClosedXML.Excel.IXLCell cell)
+        {
+            if (!cell.TryGetValue<double>(out var value))
+            {
+                return;
+            }
+
+            if (value > 0)
+            {
+                cell.Style.Font.SetFontColor(ClosedXML.Excel.XLColor.FromHtml("#0057B8"));
+            }
+            else if (value < 0)
+            {
+                cell.Style.Font.SetFontColor(ClosedXML.Excel.XLColor.FromHtml("#C00000"));
+            }
         }
     }
 }

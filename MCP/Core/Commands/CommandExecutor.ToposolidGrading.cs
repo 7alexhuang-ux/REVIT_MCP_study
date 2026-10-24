@@ -203,7 +203,8 @@ namespace RevitMCP.Core
                                 Warnings = warnings.ToArray(),
                                 ElevationBasis = "專案內部原點起算（公尺）",
                                 Ledger = ledger,
-                                EdgePolicies = BuildEdgePolicySnapshots(floors)
+                                EdgePolicies = BuildEdgePolicySnapshots(floors),
+                                FloorSnapshots = BuildFloorSnapshots(footprints)
                             };
                             adapter.WriteSchemeRecord(
                                 doc, design, JsonConvert.SerializeObject(record), associationId);
@@ -395,6 +396,40 @@ namespace RevitMCP.Core
             }
 
             return snapshots.Count > 0 ? snapshots : null;
+        }
+
+        /// <summary>v5：把方案建立當下的樓板輪廓與板底高程存成快照，供比較圖裁切與方案回顯使用。</summary>
+        private static IReadOnlyList<FloorGeometrySnapshot> BuildFloorSnapshots(
+            IReadOnlyList<FloorFootprint> footprints)
+        {
+            var snapshots = new List<FloorGeometrySnapshot>(footprints.Count);
+            foreach (var footprint in footprints)
+            {
+                var minZ = double.MaxValue;
+                var maxZ = double.MinValue;
+                foreach (var point in footprint.OuterLoop)
+                {
+                    var z = footprint.BottomElevationAt(point.X, point.Y);
+                    minZ = Math.Min(minZ, z);
+                    maxZ = Math.Max(maxZ, z);
+                }
+
+                snapshots.Add(new FloorGeometrySnapshot
+                {
+                    FloorId = footprint.FloorId,
+                    BottomZMinMeters = FeetToMeters(minZ),
+                    BottomZMaxMeters = FeetToMeters(maxZ),
+                    OuterLoopMeters = footprint.OuterLoop
+                        .Select(point => new FloorSnapshotPoint
+                        {
+                            XMeters = FeetToMeters(point.X),
+                            YMeters = FeetToMeters(point.Y)
+                        })
+                        .ToList()
+                });
+            }
+
+            return snapshots;
         }
 
         /// <summary>

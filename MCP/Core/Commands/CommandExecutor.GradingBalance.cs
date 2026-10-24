@@ -91,7 +91,14 @@ namespace RevitMCP.Core
                         adapter.ApplyGrading(doc, original, design, footprints, settings, trialWarnings);
                         doc.Regenerate();
                         var (cut, fill) = adapter.ReadCutFill(design);
-                        return fill - cut;
+                        // 有提供鬆實方係數時，求解目標改用「實質淨土方」(FILL/壓實係數 − CUT)，
+                        // 與登記簿 EarthworkLedger 同一公式；否則沿用自然方淨值 (FILL − CUT)。
+                        // 若不換算，壓實係數 ≠ 1 時解出的「平衡」在料源上並不平衡。
+                        return request.LooseFactor.HasValue
+                            ? EarthworkLedger.Compute(
+                                cut, fill, request.LooseFactor.Value, request.CompactionFactor.Value)
+                                .EffectiveNetCubicMeters
+                            : fill - cut;
                     }
                     catch (Exception exception) when (!(exception is InvalidOperationException
                         && exception.Message.StartsWith("平衡試算於", StringComparison.Ordinal)))
@@ -213,6 +220,8 @@ namespace RevitMCP.Core
                 {
                     SolvedOffsetMeters = solve.SolvedOffset,
                     AchievedNetCubicMeters = solve.AchievedNet,
+                    // 淨土方基準：effective＝實質淨方 (FILL/壓實係數 − CUT)；bank＝自然方淨值 (FILL − CUT)。
+                    NetBasis = request.LooseFactor.HasValue ? "effective" : "bank",
                     solve.Converged,
                     TargetNetCubicMeters = targetNet,
                     ToleranceCubicMeters = toleranceCubicMeters,

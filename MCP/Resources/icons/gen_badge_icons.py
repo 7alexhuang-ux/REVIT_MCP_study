@@ -1,24 +1,37 @@
 # -*- coding: utf-8 -*-
 """生成整地圖說 ribbon 「色磚 Badge」圖示（Alex 選定）。
-高倍取樣(512)再縮 32/16，透明背景 PNG。輸出到 MCP/Resources/icons/。"""
+高倍取樣(512)再縮 32/16，透明背景 PNG。輸出到 MCP/Resources/icons/。
+2026-07-10 Ribbon 整併：主工作流只剩「新整地方案／方案總覽」兩顆核心按鈕（編號 1~2），
+其餘（複製樓板／板高程斜板／邊坡坡率／平衡高程試算）為備板工具不編號。
+整地檢視／六級坡度／比較出圖／各別出圖已併入「方案總覽」清單動作，不再需要獨立圖示。"""
 import os
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 OUT = os.path.join("MCP", "Resources", "icons")
 os.makedirs(OUT, exist_ok=True)
 
 m = 8                      # supersample: 64-grid -> 512px
 GREEN=(110,139,61); BLUE=(62,119,168); TEAL=(62,142,138)
-AMBER=(200,135,59); PURPLE=(122,107,158); WHITE=(255,255,255)
+AMBER=(200,135,59); WHITE=(255,255,255)
+SLATE=(90,107,123); BROWN=(138,106,71)
 
 def blend(bg, a):          # white over bg, pre-composited to opaque
     return tuple(int(bg[i]*(1-a)+255*a) for i in range(3))
 NEW_SEC = blend(GREEN, 0.65)
-VIEW_WAVE = blend(TEAL, 0.70)
-SET_BACK = blend(PURPLE, 0.55)
+EDGE_SOFT = blend(BROWN, 0.45)
+DUPLICATE_BACK = blend(TEAL, 0.55)
 
 def sc(box):  return [v*m for v in box]
 def scp(pl):  return [(x*m, y*m) for x, y in pl]
+
+def xf(pts, dx=0.0, dy=0.0, s=1.0, cx=32.0, cy=32.0):
+    """縮放＋平移一組座標點（繞 cx,cy 縮放後再位移），用來讓既有圖案主體讓出角章位置。"""
+    return [((x-cx)*s+cx+dx, (y-cy)*s+cy+dy) for x, y in pts]
+
+def bx(box, dx=0.0, dy=0.0, s=1.0, cx=32.0, cy=32.0):
+    """同 xf，但作用於 [x0,y0,x1,y1] 框（給 ellipse/rounded_rectangle 用）。"""
+    (nx0,ny0),(nx1,ny1) = xf([(box[0],box[1]),(box[2],box[3])], dx,dy,s,cx,cy)
+    return [nx0,ny0,nx1,ny1]
 
 def stroke(d, pts, color, w):     # polyline with round joints + round caps
     d.line(pts, fill=color, width=w, joint="curve")
@@ -52,41 +65,35 @@ def ic_new():
 
 def ic_overview():
     img,d = canvas(); tile(d, BLUE)
+    # 三行條列主體整組右下移＋略縮，讓出左上角圓章位置。
+    T = dict(dx=6, dy=6, s=0.82, cx=32, cy=32)
     for cy in (22,32,42):
-        d.ellipse(sc([17,cy-3,23,cy+3]), fill=WHITE)
-    d.rounded_rectangle(sc([27,19.5,48,24.5]), radius=2.5*m, fill=WHITE)
-    d.rounded_rectangle(sc([27,29.5,48,34.5]), radius=2.5*m, fill=WHITE)
-    d.rounded_rectangle(sc([27,39.5,42,44.5]), radius=2.5*m, fill=WHITE)
+        d.ellipse(sc(bx([17,cy-3,23,cy+3], **T)), fill=WHITE)
+    d.rounded_rectangle(sc(bx([27,19.5,48,24.5], **T)), radius=2.5*T["s"]*m, fill=WHITE)
+    d.rounded_rectangle(sc(bx([27,29.5,48,34.5], **T)), radius=2.5*T["s"]*m, fill=WHITE)
+    d.rounded_rectangle(sc(bx([27,39.5,42,44.5], **T)), radius=2.5*T["s"]*m, fill=WHITE)
     return img
 
-def ic_view():
+def ic_duplicate():
     img,d = canvas(); tile(d, TEAL)
-    wave = qbez((14,40),(24,33),(32,38)) + qbez((32,38),(40,43),(50,37))
-    stroke(d, scp(wave), VIEW_WAVE, int(4*m))
-    eye = qbez((16,25),(32,13),(48,25)) + qbez((48,25),(32,37),(16,25))
-    d.polygon(scp(eye), fill=WHITE)
-    d.ellipse(sc([26.5,19.5,37.5,30.5]), fill=TEAL)
+    # 複製樓板：後板（半透明白）左上、前板（實白）右下疊出，呼應「複製」意象。
+    d.rounded_rectangle(sc([11,11,41,33]), radius=3*m, fill=DUPLICATE_BACK)
+    d.rounded_rectangle(sc([22,29,53,51]), radius=3*m, fill=WHITE)
+    stroke(d, scp([(27,40),(48,40)]), TEAL, int(2.2*m))
+    stroke(d, scp([(27,46),(42,46)]), TEAL, int(2.2*m))
     return img
 
-def ic_compare():
+def ic_balance():
     img,d = canvas(); tile(d, AMBER)
-    d.rounded_rectangle(sc([17,30,25,46]), radius=1.5*m, fill=WHITE)
-    d.rounded_rectangle(sc([28,20,36,46]), radius=1.5*m, fill=WHITE)
-    d.rounded_rectangle(sc([39,34,47,46]), radius=1.5*m, fill=WHITE)
-    stroke(d, scp([(15,47),(49,47)]), WHITE, int(3*m))
+    # 平衡高程試算：天平——支柱、橫樑、兩端吊線與秤盤，呼應二分法試算挖填平衡的意象。
+    stroke(d, scp([(32,16),(32,48)]), WHITE, int(3.2*m))
+    stroke(d, scp([(16,24),(48,24)]), WHITE, int(3.2*m))
+    d.rounded_rectangle(sc([20,48,44,54]), radius=1.5*m, fill=WHITE)
+    stroke(d, scp([(16,24),(16,36)]), WHITE, int(2.2*m))
+    stroke(d, scp([(48,24),(48,36)]), WHITE, int(2.2*m))
+    d.arc(sc([9,33,23,41]), start=0, end=180, fill=WHITE, width=int(2.4*m))
+    d.arc(sc([41,33,55,41]), start=0, end=180, fill=WHITE, width=int(2.4*m))
     return img
-
-def ic_set():
-    img,d = canvas(); tile(d, PURPLE)
-    d.rounded_rectangle(sc([24,15,48,47]), radius=3*m, fill=SET_BACK)
-    d.rounded_rectangle(sc([16,20,40,52]), radius=3*m, fill=WHITE)
-    stroke(d, scp([(33,20),(33,28),(40,28)]), PURPLE, int(2.5*m))
-    stroke(d, scp([(21,34),(35,34)]), PURPLE, int(3*m))
-    stroke(d, scp([(21,41),(35,41)]), PURPLE, int(3*m))
-    return img
-
-SLATE=(90,107,123); BROWN=(138,106,71)
-EDGE_SOFT = blend(BROWN, 0.45)
 
 def ic_elev():
     img,d = canvas(); tile(d, SLATE)
@@ -106,19 +113,65 @@ def ic_edge():
     stroke(d, scp([(16,40),(32,50)]), WHITE, int(6*m))   # 強調邊
     return img
 
-ICONS = {"new":ic_new, "overview":ic_overview, "view":ic_view,
-         "compare":ic_compare, "set":ic_set, "elev":ic_elev, "edge":ic_edge}
+ICONS = {"new":ic_new, "overview":ic_overview, "duplicate":ic_duplicate,
+         "elev":ic_elev, "edge":ic_edge, "balance":ic_balance}
+
+# 核心入口編號（1~2）；複製樓板／板高程斜板／邊坡坡率／平衡高程試算為備板工具不編號。
+NUMBERED = {"new":(1,GREEN), "overview":(2,BLUE)}
+
+_FONT_CANDIDATES = [
+    r"C:\Windows\Fonts\msjhbd.ttc",
+    r"C:\Windows\Fonts\arialbd.ttf",
+    r"C:\Windows\Fonts\segoeuib.ttf",
+    r"C:\Windows\Fonts\calibrib.ttf",
+]
+_font_cache = {}
+FONT_PATH_USED = None
+
+def load_bold_font(size):
+    global FONT_PATH_USED
+    if size in _font_cache:
+        return _font_cache[size]
+    for path in _FONT_CANDIDATES:
+        if os.path.exists(path):
+            try:
+                font = ImageFont.truetype(path, size)
+                _font_cache[size] = font
+                FONT_PATH_USED = FONT_PATH_USED or path
+                return font
+            except Exception:
+                continue
+    font = ImageFont.load_default()
+    _font_cache[size] = font
+    FONT_PATH_USED = FONT_PATH_USED or "PIL default (no bold TTF found)"
+    return font
+
+def badge(img, d, tile_color, number, cx=18.0, cy=18.0, r=10.2, ring=1.8):
+    """左上角融合式編號圓章：tile 同色細環 + 白色實心圓 + tile 同色粗體數字（textbbox 置中）。"""
+    d.ellipse(sc([cx-r-ring, cy-r-ring, cx+r+ring, cy+r+ring]), fill=tile_color)
+    d.ellipse(sc([cx-r, cy-r, cx+r, cy+r]), fill=WHITE)
+    size = int(r*1.7*m)
+    font = load_bold_font(size)
+    text = str(number)
+    bbox = d.textbbox((0,0), text, font=font)
+    tw, th = bbox[2]-bbox[0], bbox[3]-bbox[1]
+    tx = cx*m - tw/2 - bbox[0]
+    ty = cy*m - th/2 - bbox[1]
+    d.text((tx,ty), text, font=font, fill=tile_color)
 
 rendered = {}
 for key, fn in ICONS.items():
     big = fn()
+    if key in NUMBERED:
+        num, tcolor = NUMBERED[key]
+        badge(big, ImageDraw.Draw(big), tcolor, num)
     rendered[key] = big
     for size in (32, 16):
         small = big.resize((size, size), Image.LANCZOS)
         small.save(os.path.join(OUT, f"{key}_{size}.png"))
 
-# 預覽總圖（給使用者看，不入 DLL）
-order = ["elev","edge","new","overview","view","compare","set"]
+# 預覽總圖（給使用者看，不入 DLL）——按 Ribbon 實際左到右順序排列。
+order = ["new","overview","duplicate","elev","edge","balance"]
 pad, cell = 16, 84
 W = pad + len(order)*(cell+pad)
 H = pad + cell + pad
@@ -132,4 +185,5 @@ for i, key in enumerate(order):
 prev.save(os.path.join(OUT, "PREVIEW.png"))
 
 print("OUT:", os.path.abspath(OUT))
+print("font used:", FONT_PATH_USED)
 print("files:", sorted(os.listdir(OUT)))

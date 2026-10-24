@@ -223,13 +223,19 @@ namespace RevitMCP.Core
 
             colorSettings.SetIntermediateColors(intermediate);
 
-            // 圖例瘦身（2026-07-08 使用者回報圖例擋住模型中央）：步數 6 段對應六級坡、
-            // 不重複顯示資料描述——高度約減半。註：AVF 圖例「位置」Revit API 未開放設定，
-            // 使用者手動拖曳一次後 Revit 會記住該視圖的位置。
+            // 圖例修正（2026-07-09 使用者截圖回報）：AVF 內建圖例在部分模型/PDF 會被放大到
+            // 蓋住模型，且 API 不提供穩定定位；出圖改由圖紙層級標示，視圖內圖例關閉。
             var legendSettings = new AnalysisDisplayLegendSettings
             {
+                ShowLegend = false,
                 NumberOfSteps = 6,
-                ShowDataDescription = false
+                ShowDataDescription = false,
+                ShowDataName = false,
+                ShowUnits = false,
+                ColorRangeWidth = 6,
+                ColorRangeHeight = 36,
+                ScaleHeight = 36,
+                Rounding = 1
             };
 
             var style = new FilteredElementCollector(doc)

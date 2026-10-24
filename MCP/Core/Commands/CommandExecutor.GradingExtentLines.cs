@@ -11,12 +11,13 @@ namespace RevitMCP.Core
     public partial class CommandExecutor
     {
         // 範圍線取樣參數：步距 1 m（超過 4 萬節點時自動放大）、擾動判定門檻 50 mm、
-        // 簡化容差 0.75 步距（把 1 步距階梯斜線收成直線）、最小環面積 4 m²。
+        // 簡化容差 0.35 步距（只收很小的取樣毛邊，保留實際凹口與 L 形轉折）、最小環面積 4 m²。
         // 實機教訓（2026-07-08 新址總驗）：設計副本加點重新三角化會在帶內外留下 2〜20cm 的
         // 表面微差斑點（25 環其中 24 個是斑點），門檻 50mm＋面積過濾雙保險去除；
         // 真實擾動（放坡收尾帶 1:2 時每 10cm 水平即 5cm 高差）不受影響。
         private const double ExtentSampleStepMillimeters = 1000.0;
         private const double ExtentDisturbedToleranceMillimeters = 50.0;
+        private const double ExtentSimplifyToleranceStepFactor = 0.35;
         private const double ExtentMinLoopAreaSquareMeters = 4.0;
         private const int ExtentMaxGridNodes = 40000;
 
@@ -102,11 +103,15 @@ namespace RevitMCP.Core
             var disturbedTolerance = UnitUtils.ConvertToInternalUnits(
                 ExtentDisturbedToleranceMillimeters, UnitTypeId.Millimeters);
 
-            var mask = new bool[countX, countY];
+            // 2026-07-10 D4 使用者裁決：改等值線內插（marching squares）——保留差值場，
+            // 在跨越門檻的網格邊上內插出交點，範圍線貼著地形轉折走、允許斜線段，
+            // 消滅 1m 方格聯集輪廓的階梯鋸齒。NaN＝未取樣（超出地形）＝未擾動。
+            var field = new double[countX, countY];
             for (var ix = 0; ix < countX; ix++)
             {
                 for (var iy = 0; iy < countY; iy++)
                 {
+                    field[ix, iy] = double.NaN;
                     var sample = new Point2D(minX + (ix * step), minY + (iy * step));
                     var originalZ = RevitToposolidGradingAdapter.IntersectTerrainTopZ(
                         originalSolids, sample, rayBottomZ, rayTopZ);
@@ -122,15 +127,18 @@ namespace RevitMCP.Core
                         continue;
                     }
 
-                    mask[ix, iy] = Math.Abs(designZ.Value - originalZ.Value) > disturbedTolerance;
+                    field[ix, iy] = Math.Abs(designZ.Value - originalZ.Value);
                 }
             }
 
             var minLoopArea = UnitUtils.ConvertToInternalUnits(
                 ExtentMinLoopAreaSquareMeters, UnitTypeId.SquareMeters);
-            var loops = DisturbanceContour.ExtractBoundaryLoops(mask, minX, minY, step)
+            // 2026-07-10 二輪：內插後殘餘鋸齒＝門檻附近三角化雜訊的等值線抖動——
+            // 先循環移動平均（±2 點）壓抖動，再放大簡化容差（0.35→0.6 步距）收斂成長直斜段。
+            var loops = DisturbanceContour.ExtractIsoContourLoops(field, disturbedTolerance, minX, minY, step)
                 .Where(loop => Polygon2D.Area(loop) >= minLoopArea) // 去除重新三角化微差斑點環
-                .Select(loop => DisturbanceContour.SimplifyLoop(loop, step * 0.75))
+                .Select(loop => DisturbanceContour.SmoothClosedLoop(loop, 2))
+                .Select(loop => DisturbanceContour.SimplifyLoop(loop, step * 0.6))
                 .Where(loop => loop.Count >= 3)
                 .ToList();
             if (loops.Count == 0)
@@ -219,7 +227,7 @@ namespace RevitMCP.Core
                 LoopCount = loops.Count,
                 CurveCount = curveCount,
                 Message = $"整地範圍線已建立：{loops.Count} 條封閉邊界環、共 {curveCount} 段"
-                    + "（量測原/設計地形差異場，多板聯集自動合併；重跑會先清除舊線）。"
+                    + "（量測原/設計地形差異場，多板聯集自動合併，保留真實凹口；重跑會先清除舊線）。"
             };
         }
 
@@ -268,23 +276,42 @@ namespace RevitMCP.Core
         /// 各整地視圖的範圍線可見性：只顯示 ownDesignId 方案的範圍線子類別，其餘（含舊式無尾碼）
         /// 全部隱藏；ownDesignId=null（原始地形／檢視原地形）時全部隱藏。
         /// 用分類可見性而非逐元素隱藏——之後新畫的線自動遵守，免跨視圖記帳。
+        ///
+        /// 2026-10-05 審查修正：坵塊限建疊圖（CommandExecutor.GradingParcelLimitCheck.cs）的
+        /// 「坵塊限建疊圖」子分類沿用同一套「依方案辨識」機制，一併在這裡處理（而非另開一個
+        /// 平行函式），這樣所有既有呼叫點（GradingView.cs／GradingComparison.cs／GradingViewer.cs）
+        /// 不必逐一改動就能同時管好兩種疊圖的跨方案可見性，範圍線既有行為不受影響。
         /// </summary>
         private static void ApplyExtentLineCategoryVisibility(Document doc, View view, ElementId ownDesignId)
         {
-            var ownName = ownDesignId == null || ownDesignId == ElementId.InvalidElementId
-                ? null
-                : $"{ExtentLineStylePrefix}-{ownDesignId.GetIdValue()}";
+            var hasOwnDesign = ownDesignId != null && ownDesignId != ElementId.InvalidElementId;
+            var ownName = hasOwnDesign ? $"{ExtentLineStylePrefix}-{ownDesignId.GetIdValue()}" : null;
+            var ownParcelLimitNames = hasOwnDesign
+                ? new HashSet<string>
+                {
+                    ParcelLimitLineStyleName(ownDesignId, ParcelRestriction.OpenSpaceOnly),
+                    ParcelLimitLineStyleName(ownDesignId, ParcelRestriction.ExcludedFromOpenSpace),
+                }
+                : null;
+
             var linesCategory = doc.Settings.Categories.get_Item(BuiltInCategory.OST_Lines);
             foreach (Category subCategory in linesCategory.SubCategories)
             {
-                if (!subCategory.Name.StartsWith(ExtentLineStylePrefix, StringComparison.Ordinal))
+                bool isExtentLine = subCategory.Name.StartsWith(ExtentLineStylePrefix, StringComparison.Ordinal);
+                bool isParcelLimitOverlay = !isExtentLine
+                    && subCategory.Name.StartsWith(ParcelLimitLineStylePrefix, StringComparison.Ordinal);
+                if (!isExtentLine && !isParcelLimitOverlay)
                 {
                     continue;
                 }
 
+                var shouldHide = isExtentLine
+                    ? subCategory.Name != ownName
+                    : ownParcelLimitNames == null || !ownParcelLimitNames.Contains(subCategory.Name);
+
                 try
                 {
-                    view.SetCategoryHidden(subCategory.Id, subCategory.Name != ownName);
+                    view.SetCategoryHidden(subCategory.Id, shouldHide);
                 }
                 catch (Autodesk.Revit.Exceptions.ApplicationException)
                 {
@@ -294,7 +321,7 @@ namespace RevitMCP.Core
         }
 
         /// <summary>
-        /// 「整地範圍線-{方案}」專屬線型式（Lines 子類別）：粗線寬＋深藍色，讓範圍在圖面上醒目。
+        /// 「整地範圍線-{方案}」專屬線型式（Lines 子類別）：中粗線寬＋深藍色，讓範圍在圖面上醒目。
         /// 2026-07-08 使用者裁決：①線太細要加粗；②各方案範圍線交疊——模型線全視圖可見，
         /// 改為每方案一個子類別，各視圖以分類可見性只開自己方案的線。冪等——已存在即校正粗細顏色。
         /// </summary>
@@ -319,7 +346,7 @@ namespace RevitMCP.Core
                     subCategory = doc.Settings.Categories.NewSubcategory(linesCategory, styleName);
                 }
 
-                subCategory.SetLineWeight(10, GraphicsStyleType.Projection);
+                subCategory.SetLineWeight(8, GraphicsStyleType.Projection);
                 subCategory.LineColor = new Color(0, 51, 153); // 深藍（2026-07-08 使用者裁決，原深綠）
                 return subCategory.GetGraphicsStyle(GraphicsStyleType.Projection);
             }

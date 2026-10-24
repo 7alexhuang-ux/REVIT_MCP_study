@@ -83,7 +83,7 @@ export const gradingTools: Tool[] = [
     {
         name: "solve_balanced_elevation",
         description:
-            "平衡高程反求：以二分法試算控制樓板的統一升降量，使整地淨土方逼近目標（預設 0＝挖填平衡）。每次試算完整跑整地管線後回滾、不留痕；apply=true 且收斂時把偏移寫入樓板並落成方案（含登記簿）。",
+            "平衡高程反求：以二分法試算控制樓板的統一升降量，使整地淨土方逼近目標（預設 0＝挖填平衡）。提供鬆實方係數時，求解基準自動改為實質淨土方（FILL/壓實係數−CUT）；未提供則為自然方淨值（FILL−CUT），回傳的 netBasis 欄位標明採用哪一種。每次試算完整跑整地管線後回滾、不留痕；apply=true 且收斂時把偏移寫入樓板並落成方案（含登記簿）。",
         inputSchema: {
             type: "object",
             properties: {
@@ -120,7 +120,7 @@ export const gradingTools: Tool[] = [
                 targetNetCubicMeters: {
                     type: "number",
                     default: 0,
-                    description: "目標淨土方（m³，Fill−Cut，負值＝餘土）；預設 0 求挖填平衡",
+                    description: "目標淨土方（m³，負值＝餘土）；預設 0 求挖填平衡。基準依是否提供鬆實方係數而定：有係數＝實質淨方 FILL/壓實係數−CUT，無係數＝自然方淨值 FILL−CUT",
                 },
                 toleranceCubicMeters: {
                     type: "number",
@@ -153,12 +153,12 @@ export const gradingTools: Tool[] = [
                 looseFactor: {
                     type: "number",
                     exclusiveMinimum: 0,
-                    description: "apply=true 時傳遞給落成方案的鬆方係數（與 compactionFactor 成對）",
+                    description: "鬆方係數（與 compactionFactor 成對）。提供後求解基準改為實質淨土方，並傳遞給落成方案；本身只影響運土鬆方帳，不影響平衡解",
                 },
                 compactionFactor: {
                     type: "number",
                     exclusiveMinimum: 0,
-                    description: "apply=true 時傳遞給落成方案的壓實係數（與 looseFactor 成對）",
+                    description: "壓實係數（與 looseFactor 成對）。提供後平衡目標改以 FILL/壓實係數−CUT 計算，並傳遞給落成方案",
                 },
             },
             required: ["toposolidId", "floorIds"],
@@ -196,7 +196,7 @@ export const gradingTools: Tool[] = [
     {
         name: "create_grading_scheme_view",
         description:
-            "為整地方案建立鎖定 3D 視圖：隔離顯示設計地形與控制樓板、鎖定方位（可放 Spot Elevation）、可選匯出 PNG 截圖；視圖 ID 與截圖路徑回寫方案記錄，視圖即方案書籤。",
+            "為整地方案建立鎖定 3D 視圖：保留模型內容，但只顯示本方案設計地形與本方案控制樓板，隱藏原地形、其他方案設計地形與其他方案樓板變體；鎖定方位（可放 Spot Elevation）、可選匯出 PNG 截圖；視圖 ID 與截圖路徑回寫方案記錄，視圖即方案書籤。",
         inputSchema: {
             type: "object",
             properties: {
@@ -361,6 +361,161 @@ export const gradingTools: Tool[] = [
         },
     },
     {
+        name: "get_parcel_contour_layers",
+        description:
+            "坵塊法前置：列出目前平面視圖中各 DWG 圖層的曲線數量，供辨認哪一層是等高線（曲線數多者通常為等高線層）。等高線來源一律為 DWG 圖層。方法見 domain/parcel-slope-analysis.md。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                viewId: {
+                    type: "integer",
+                    description: "目標平面視圖 ID；未提供時使用作用中視圖",
+                },
+            },
+            required: [],
+        },
+    },
+    {
+        name: "preview_parcel_slope",
+        description:
+            "坵塊法平均坡度計算（只算不畫）：依建築技術規則建築設計施工編第261條，劃 ≤25m 正方格坵塊，數等高線與坵塊四邊交點數 n，以 S(%)=n×3.14×h/(8×L)×100 求各格平均坡度，再依第262條分段（>30% 限空地、>55% 不得計入法定空地）。先用本工具確認參數與統計合理，再用 create_parcel_slope_map 繪圖。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                layerName: {
+                    type: "string",
+                    description: "等高線所在的 DWG 圖層名稱（用 get_parcel_contour_layers 查）",
+                },
+                contourIntervalMeters: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    description:
+                        "h：等高線「首曲線」間距（公尺）。公式的關鍵輸入，必須向使用者確認實際圖面值，不得猜測或沿用預設。若首曲線與計曲線同層會多計交點。",
+                },
+                cellSizeMeters: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    maximum: 25,
+                    default: 25,
+                    description:
+                        "L：坵塊單邊邊長（公尺）。法定上限 25m（第261條），超過即拒絕執行。注意 L 是單邊長，不是四邊總和。",
+                },
+                rotationDegrees: {
+                    type: "number",
+                    default: 0,
+                    description:
+                        "坵塊網格旋轉角（度，逆時針為正），用於對齊基地主軸減少破格。旋轉中心為網格範圍中心。不同角度會得到不同逐格坡度，須標註於圖面。",
+                },
+                viewId: {
+                    type: "integer",
+                    description: "目標平面視圖 ID；未提供時使用作用中視圖",
+                },
+            },
+            required: ["layerName", "contourIntervalMeters"],
+        },
+    },
+    {
+        name: "create_parcel_slope_map",
+        description:
+            "產生坵塊圖：執行坵塊法計算並在平面視圖畫出坵塊網格線，每格中央標註編號／交點數 n／平均坡度 S%，受第262條限制者加標示並上色（30~55% 橘、>55% 紅）。注意：工具不自動劃分均質區、不輸出可否開發建築之結論（§262 但書需人工判讀地形）。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                layerName: {
+                    type: "string",
+                    description: "等高線所在的 DWG 圖層名稱",
+                },
+                contourIntervalMeters: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    description: "h：等高線「首曲線」間距（公尺），必須由使用者確認",
+                },
+                cellSizeMeters: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    maximum: 25,
+                    default: 25,
+                    description: "L：坵塊單邊邊長（公尺），法定上限 25m",
+                },
+                rotationDegrees: {
+                    type: "number",
+                    default: 0,
+                    description: "坵塊網格旋轉角（度）",
+                },
+                textSizeMm: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    default: 2,
+                    description: "格內標註文字高度（mm），用於挑選最接近的文字類型",
+                },
+                viewId: {
+                    type: "integer",
+                    description: "目標平面視圖 ID；未提供時使用作用中視圖",
+                },
+            },
+            required: ["layerName", "contourIntervalMeters"],
+        },
+    },
+    {
+        name: "check_grading_parcel_limits",
+        description:
+            "把坵塊法（第261/262條）算出的限建坵塊疊到整地方案的控制樓板上，檢查樓板壓到多少「限空地」（30~55%）與「不得計入法定空地」（>55%）面積。只回幾何事實（哪塊樓板、壓到哪幾格、各多少平方公尺、該格坡度與分級），不輸出可否開發建築之結論（§262 但書需人工判讀地形）。坵塊法每次即時重算（不讀快取），坵塊參數與 preview_parcel_slope／create_parcel_slope_map 同名可沿用。drawOverlay=true 時會在整地方案的 3D 方案視圖畫出被壓到的限建坵塊外框（限空地橘線、不計入空地紅線）並標註面積，重跑會先清除本方案先前的疊圖。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                designToposolidId: {
+                    type: "integer",
+                    description: "整地方案的設計 Toposolid 元素 ID（方案登記簿所在的地形）",
+                },
+                layerName: {
+                    type: "string",
+                    description: "等高線所在的 DWG 圖層名稱（用 get_parcel_contour_layers 查）",
+                },
+                contourIntervalMeters: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    description:
+                        "h：等高線「首曲線」間距（公尺）。公式的關鍵輸入，必須向使用者確認實際圖面值，不得猜測或沿用預設。",
+                },
+                cellSizeMeters: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    maximum: 25,
+                    default: 25,
+                    description: "L：坵塊單邊邊長（公尺），法定上限 25m（第261條）",
+                },
+                rotationDegrees: {
+                    type: "number",
+                    default: 0,
+                    description: "坵塊網格旋轉角（度，逆時針為正），須與坵塊法原次計算一致才能得到可比較的結果",
+                },
+                parcelViewId: {
+                    type: "integer",
+                    description:
+                        "坵塊法讀 DWG 等高線用的平面視圖 ID；選填，未提供時使用作用中平面視圖。應填與呼叫 preview_parcel_slope／create_parcel_slope_map 當次相同的平面視圖，確保讀到同一份等高線。注意：這不是整地方案的 3D 方案視圖（見 viewId）。",
+                },
+                drawOverlay: {
+                    type: "boolean",
+                    default: false,
+                    description:
+                        "true 才在整地方案的 3D 方案視圖畫出被壓到的限建坵塊外框並標註面積；預設 false 只計算不畫。",
+                },
+                viewId: {
+                    type: "integer",
+                    description:
+                        "drawOverlay=true 時的目標 3D 方案視圖 ID；未提供時使用方案登記簿的 SchemeViewId（需先執行 create_grading_scheme_view）。",
+                },
+                labelTextSizeMm: {
+                    type: "number",
+                    exclusiveMinimum: 0,
+                    default: 3,
+                    description: "drawOverlay=true 時的面積標籤文字高度（mm）",
+                },
+            },
+            required: ["designToposolidId", "layerName", "contourIntervalMeters"],
+        },
+    },
+    {
         name: "place_views_on_sheet",
         description:
             "自動排圖：把多個視圖以格狀排上一張圖紙（依圖框可用區計算格位中心）。視圖已在其他圖紙者回報略過。",
@@ -420,7 +575,7 @@ export const gradingTools: Tool[] = [
     {
         name: "create_grading_presentation",
         description:
-            "整地圖說一鍵出圖：對登記簿每個方案建方案視圖＋挖填熱區＋坡度熱區＋範圍線＋標高，排上帶圖框圖紙，批次匯出 PDF。逐方案逐步容錯。需模型已載入圖框。",
+            "整地各別出圖：對登記簿每個方案建方案視圖＋挖填熱區＋坡度熱區＋範圍線＋標高，一案一張排圖，合併匯出 PDF 並匯出 Excel。titleBlockId=-1 代表空白圖紙；未指定時自動找 A0/第一個圖框，找不到也會用空白圖紙，不因缺圖框中止。",
         inputSchema: {
             type: "object",
             properties: {
@@ -431,7 +586,7 @@ export const gradingTools: Tool[] = [
                 },
                 titleBlockId: {
                     type: "integer",
-                    description: "圖框類型 ID；未提供時取模型第一個可用圖框",
+                    description: "圖框類型 ID；-1=無圖框空白圖紙；未提供時取 A0/第一個可用圖框，若無圖框則自動空白",
                 },
                 export: {
                     type: "boolean",
@@ -442,13 +597,17 @@ export const gradingTools: Tool[] = [
                     type: "string",
                     description: "PDF 輸出檔完整路徑；未提供時預設專案目錄＋時間戳檔名",
                 },
+                excelOutputPath: {
+                    type: "string",
+                    description: "Excel 輸出檔完整路徑（.xlsx）；未提供時依 PDF 路徑或專案目錄自動命名",
+                },
             },
         },
     },
     {
         name: "create_grading_comparison_sheet",
         description:
-            "整地方案總比較圖紙（C-00c）：一欄一方案（3D/坡度熱區/正剖面/剖面立體），底部方案比較明細表（挖方/填方/淨土方/挖填總量/最大挖深填高/擾動面積/鬆實方三本帳），A0 圖框單張輸出可匯 PDF。逐方案容錯。",
+            "整地方案總比較圖紙（C-00c）：一欄一方案（3D/坡度熱區/正剖面/剖面立體），底部方案比較明細表（挖方/填方/淨土方/挖填總量/最大挖深填高/擾動面積/鬆實方三本帳），並輸出 PDF 與 Excel。剖面與剖立體優先依方案建立時的樓板幾何快照裁切到樓板及周邊整地變化。titleBlockId=-1 代表空白圖紙；未指定時自動找 A0/第一個圖框，找不到也會用空白圖紙，不因缺圖框中止。",
         inputSchema: {
             type: "object",
             properties: {
@@ -459,7 +618,14 @@ export const gradingTools: Tool[] = [
                 },
                 titleBlockId: {
                     type: "integer",
-                    description: "A0 圖框類型 ID；未提供時自動找名稱含 A0 的圖框",
+                    description: "圖框類型 ID；-1=無圖框空白圖紙；未提供時取 A0/第一個可用圖框，若無圖框則自動空白",
+                },
+                scheduleStyle: {
+                    type: "string",
+                    enum: ["custom", "native"],
+                    default: "custom",
+                    description:
+                        "比較表樣式：custom=自訂排版表格（分組底色/雙線組界/+餘-缺格式）；native=Revit 內建明細表（可於專案內持續編輯）。不論選哪個，內建明細表都會建立並維護。",
                 },
                 export: {
                     type: "boolean",
@@ -469,6 +635,10 @@ export const gradingTools: Tool[] = [
                 outputPath: {
                     type: "string",
                     description: "PDF 輸出檔完整路徑；未提供時預設專案目錄+時間戳檔名",
+                },
+                excelOutputPath: {
+                    type: "string",
+                    description: "Excel 輸出檔完整路徑（.xlsx）；未提供時依 PDF 路徑或專案目錄自動命名",
                 },
             },
         },
@@ -540,6 +710,38 @@ export const gradingTools: Tool[] = [
                 clear: { type: "boolean", description: "true＝清空該板全部邊政策（忽略 x/y/slopeRatio）" },
             },
             required: ["floorId"],
+        },
+    },
+    {
+        name: "generate_grading_analysis",
+        description:
+            "產生分析圖：對單一方案一次備妥各別出圖／比較出圖都需要的視覺內容——方案視圖、挖填熱區、坡度熱區、範圍線、標高標註，另加方案專屬的正剖面＋剖面立體。已建立過就沿用更新，沒有就新建（比照 create_grading_scheme_view 的邏輯）。產生結果的視圖 ID 與時間戳回寫方案記錄（AnalysisGeneratedAt 等），供方案總覽判斷「已產生／尚未產生」狀態。注意：本工具目前不會讓 create_grading_presentation／create_grading_comparison_sheet 自動重用這裡建立的視圖，兩者仍會各自建立自己需要的視圖。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                designToposolidId: {
+                    type: "integer",
+                    description: "方案的設計地形元素 ID",
+                },
+            },
+            required: ["designToposolidId"],
+        },
+    },
+    {
+        name: "duplicate_floor_draft",
+        description:
+            "樓板草稿複製：複製指定樓板，並在目前視圖隱藏原本的樓板（僅該視圖，不影響其他視圖），方便在複製出來的樓板上調整下一個方案的範圍/形狀。這是準備下一版樓板草稿的暫存動作，不寫入整地方案登記簿。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                floorIds: {
+                    type: "array",
+                    minItems: 1,
+                    items: { type: "integer" },
+                    description: "要複製的樓板元素 ID；至少提供一筆",
+                },
+            },
+            required: ["floorIds"],
         },
     },
     {
