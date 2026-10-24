@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -21,13 +22,24 @@ namespace RevitMCP.Core
     {
         private HttpListener _httpListener;
         private WebSocket _webSocket;
+        private readonly object _socketLock = new object();
+        private Guid _activeConnectionId = Guid.Empty;
         private bool _isRunning;
         private readonly ServiceSettings _settings;
         private CancellationTokenSource _cancellationTokenSource;
 
         public event EventHandler<RevitCommandRequest> CommandReceived;
         public bool IsRunning => _isRunning;
-        public bool IsConnected => _webSocket != null && _webSocket.State == WebSocketState.Open;
+        public bool IsConnected
+        {
+            get
+            {
+                lock (_socketLock)
+                {
+                    return _webSocket != null && _webSocket.State == WebSocketState.Open;
+                }
+            }
+        }
 
         public SocketService(ServiceSettings settings)
         {
@@ -37,7 +49,7 @@ namespace RevitMCP.Core
         /// <summary>
         /// 啟動 WebSocket 伺服器
         /// </summary>
-        public async Task StartAsync()
+        public async Task StartAsync(bool showDialogs = true, bool repairPortConflicts = true)
         {
             if (_isRunning)
             {
@@ -52,6 +64,11 @@ namespace RevitMCP.Core
                     var (occupantPid, occupantName) = GetPortOccupant(_settings.Port);
                     if (occupantPid > 0)
                     {
+                        if (!repairPortConflicts)
+                        {
+                            Logger.Error($"Port {_settings.Port} 被 {occupantName} (PID: {occupantPid}) 佔用；自動啟動不修復或終止程序，listener 未啟動。");
+                            return;
+                        }
                         Logger.Info($"Port {_settings.Port} 被 {occupantName} (PID: {occupantPid}) 佔用，嘗試自動修復...");
 
                         if (TryAutoKillPortOccupant(occupantPid, occupantName))
@@ -75,7 +92,7 @@ namespace RevitMCP.Core
                                 : $"Port {_settings.Port} 被 {occupantName} (PID: {occupantPid}) 佔用，且無法自動修復。\n\n"
                                   + "請手動關閉該程式後重試。";
                             Logger.Error(hint);
-                            TaskDialog.Show("Revit MCP Plugin - Port 衝突", hint);
+                            if (showDialogs) TaskDialog.Show("Revit MCP Plugin - Port 衝突", hint);
                             return;
                         }
                     }
@@ -100,13 +117,13 @@ namespace RevitMCP.Core
                 // 在背景執行緒中等待連線
                 _ = Task.Run(async () => await AcceptConnectionsAsync(_cancellationTokenSource.Token));
 
-                TaskDialog.Show("MCP 服務", $"WebSocket 伺服器已啟動\n監聽: {_settings.Host}:{_settings.Port}");
+                if (showDialogs) TaskDialog.Show("MCP 服務", $"WebSocket 伺服器已啟動\n監聽: {_settings.Host}:{_settings.Port}");
             }
             catch (Exception ex)
             {
                 _isRunning = false;
                 Logger.Error("啟動 WebSocket 伺服器失敗", ex);
-                TaskDialog.Show("錯誤", $"啟動 WebSocket 伺服器失敗: {ex.Message}");
+                if (showDialogs) TaskDialog.Show("錯誤", $"啟動 WebSocket 伺服器失敗: {ex.Message}");
                 throw;
             }
         }
@@ -125,12 +142,31 @@ namespace RevitMCP.Core
                     if (context.Request.IsWebSocketRequest)
                     {
                         var wsContext = await context.AcceptWebSocketAsync(null);
-                        _webSocket = wsContext.WebSocket;
+                        var acceptedSocket = wsContext.WebSocket;
+                        var connectionId = Guid.NewGuid();
+                        WebSocket previousSocket = null;
+                        Guid previousConnectionId = Guid.Empty;
+                        lock (_socketLock)
+                        {
+                            previousSocket = _webSocket;
+                            previousConnectionId = _activeConnectionId;
+                            _webSocket = acceptedSocket;
+                            _activeConnectionId = connectionId;
+                        }
 
-                        Logger.Info("[Socket] MCP Server 已連線");
+                        if (previousSocket != null && previousSocket.State == WebSocketState.Open)
+                        {
+                            Logger.Info($"[Socket] 新 MCP Server 連線已接手，關閉舊連線 {previousConnectionId}");
+                            _ = Task.Run(async () => await CloseSocketQuietlyAsync(
+                                previousSocket,
+                                WebSocketCloseStatus.NormalClosure,
+                                "新的 MCP 連線已接手"));
+                        }
+
+                        Logger.Info($"[Socket] MCP Server 已連線 ({connectionId})");
 
                         // 在獨立任務中處理訊息，不要阻塞接受連線的迴圈
-                        _ = Task.Run(async () => await ReceiveMessagesAsync(wsContext.WebSocket, cancellationToken));
+                        _ = Task.Run(async () => await ReceiveMessagesAsync(acceptedSocket, connectionId, cancellationToken));
                     }
                     else
                     {
@@ -151,7 +187,7 @@ namespace RevitMCP.Core
         /// <summary>
         /// 接收訊息
         /// </summary>
-        private async Task ReceiveMessagesAsync(WebSocket socket, CancellationToken cancellationToken)
+        private async Task ReceiveMessagesAsync(WebSocket socket, Guid connectionId, CancellationToken cancellationToken)
         {
             var buffer = new byte[4096];
 
@@ -159,19 +195,43 @@ namespace RevitMCP.Core
             {
                 while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
                 {
-                    var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+                    using (var messageStream = new MemoryStream())
+                    {
+                        WebSocketReceiveResult result;
+                        do
+                        {
+                            result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
 
-                    if (result.MessageType == WebSocketMessageType.Text)
-                    {
-                        string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                            if (result.MessageType == WebSocketMessageType.Close)
+                            {
+                                await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cancellationToken);
+                                Logger.Info($"[Socket] MCP Server 已斷線 ({connectionId})");
+                                return;
+                            }
+
+                            if (result.MessageType != WebSocketMessageType.Text)
+                            {
+                                continue;
+                            }
+
+                            messageStream.Write(buffer, 0, result.Count);
+                        }
+                        while (!result.EndOfMessage);
+
+                        if (result.MessageType != WebSocketMessageType.Text)
+                        {
+                            continue;
+                        }
+
+                        string message = Encoding.UTF8.GetString(messageStream.ToArray());
                         Logger.Debug($"[Socket] 接收到訊息: {message}");
-                        HandleMessage(message);
-                    }
-                    else if (result.MessageType == WebSocketMessageType.Close)
-                    {
-                        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cancellationToken);
-                        Logger.Info("[Socket] MCP Server 已斷線");
-                        break;
+                        if (!IsActiveConnection(socket, connectionId))
+                        {
+                            Logger.Info($"[Socket] 忽略舊連線命令 ({connectionId})");
+                            continue;
+                        }
+
+                        HandleMessage(message, connectionId);
                     }
                 }
             }
@@ -184,16 +244,28 @@ namespace RevitMCP.Core
             {
                 Logger.Error("[Socket] 接收訊息錯誤", ex);
             }
+            finally
+            {
+                lock (_socketLock)
+                {
+                    if (ReferenceEquals(_webSocket, socket) && _activeConnectionId == connectionId)
+                    {
+                        _webSocket = null;
+                        _activeConnectionId = Guid.Empty;
+                    }
+                }
+            }
         }
 
         /// <summary>
         /// 處理接收到的訊息
         /// </summary>
-        private void HandleMessage(string message)
+        private void HandleMessage(string message, Guid connectionId)
         {
             try
             {
                 var request = JsonConvert.DeserializeObject<RevitCommandRequest>(message);
+                request.ConnectionId = connectionId;
                 Logger.Info($"[Socket] 處理命令: {request.CommandName} (RequestId: {request.RequestId})");
                 CommandReceived?.Invoke(this, request);
             }
@@ -206,24 +278,68 @@ namespace RevitMCP.Core
         /// <summary>
         /// 發送回應
         /// </summary>
-        public async Task SendResponseAsync(RevitCommandResponse response)
+        public async Task SendResponseAsync(RevitCommandResponse response, Guid connectionId)
         {
-            if (!IsConnected)
+            WebSocket socket;
+            lock (_socketLock)
             {
-                throw new InvalidOperationException("WebSocket 未連線");
+                if (_webSocket == null || _webSocket.State != WebSocketState.Open)
+                {
+                    throw new InvalidOperationException("WebSocket 未連線");
+                }
+
+                if (_activeConnectionId != connectionId)
+                {
+                    Logger.Info($"[Socket] 捨棄舊連線回應 (RequestId: {response.RequestId}, ConnectionId: {connectionId})");
+                    return;
+                }
+
+                socket = _webSocket;
             }
 
             try
             {
                 string json = JsonConvert.SerializeObject(response);
                 byte[] bytes = Encoding.UTF8.GetBytes(json);
-                await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
+                await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
                 Logger.Debug($"[Socket] 已發送回應 (RequestId: {response.RequestId})");
             }
             catch (Exception ex)
             {
                 Logger.Error($"[Socket] 發送回應失敗 (RequestId: {response.RequestId})", ex);
                 throw;
+            }
+        }
+
+        private bool IsActiveConnection(WebSocket socket, Guid connectionId)
+        {
+            lock (_socketLock)
+            {
+                return ReferenceEquals(_webSocket, socket)
+                    && _activeConnectionId == connectionId
+                    && _webSocket.State == WebSocketState.Open;
+            }
+        }
+
+        private static async Task CloseSocketQuietlyAsync(WebSocket socket, WebSocketCloseStatus status, string description)
+        {
+            try
+            {
+                using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2)))
+                {
+                    if (socket.State == WebSocketState.Open)
+                    {
+                        await socket.CloseAsync(status, description, cts.Token);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"WebSocket 關閉失敗（可忽略）: {ex.Message}");
+            }
+            finally
+            {
+                socket.Dispose();
             }
         }
 
@@ -245,8 +361,13 @@ namespace RevitMCP.Core
                 // 處理 WebSocket 關閉 (不阻塞 UI 執行緒)
                 if (_webSocket != null)
                 {
-                    var ws = _webSocket;
-                    _webSocket = null; // 先斷開引用
+                    WebSocket ws;
+                    lock (_socketLock)
+                    {
+                        ws = _webSocket;
+                        _webSocket = null; // 先斷開引用
+                        _activeConnectionId = Guid.Empty;
+                    }
 
                     Task.Run(async () =>
                     {

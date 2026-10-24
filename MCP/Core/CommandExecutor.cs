@@ -154,10 +154,6 @@ namespace RevitMCP.Core
                         result = GetAllViews(parameters);
                         break;
                     
-                    case "export_web_compare":
-                        result = ExportWebCompare(parameters);
-                        break;
-
                     case "get_active_view":
                         result = GetActiveView();
                         break;
@@ -493,6 +489,23 @@ namespace RevitMCP.Core
                         result = ExportEarthworkGridsheet(parameters);
                         break;
 
+                    // === 坵塊法平均坡度（建築技術規則施工編 §261/§262）===
+                    case "get_parcel_contour_layers":
+                        result = GetParcelContourLayers(parameters);
+                        break;
+
+                    case "preview_parcel_slope":
+                        result = PreviewParcelSlope(parameters);
+                        break;
+
+                    case "create_parcel_slope_map":
+                        result = CreateParcelSlopeMap(parameters);
+                        break;
+
+                    case "check_grading_parcel_limits":
+                        result = CheckGradingParcelLimits(parameters);
+                        break;
+
                     case "create_grading_comparison_sheet":
                         result = CreateGradingComparisonSheet(parameters);
                         break;
@@ -512,7 +525,80 @@ namespace RevitMCP.Core
                     case "set_floor_edge_slope":
                         result = SetFloorEdgeSlope(parameters);
                         break;
+
+                    case "duplicate_floor_draft":
+                        result = DuplicateFloorDraft(parameters);
+                        break;
+
+                    case "generate_grading_analysis":
+                        result = GenerateGradingAnalysis(parameters);
+                        break;
 #endif
+
+                    // 走動展示交付包（CommandExecutor.Walkthrough.cs；契約 viewer/walkthrough/CONTRACT.md）
+                    case "get_camera_stations":
+                        result = GetCameraStations(parameters);
+                        break;
+
+                    case "export_walkthrough_package":
+                        result = ExportWalkthroughPackage(parameters);
+                        break;
+
+                    case "export_walkthrough_frames":
+                        result = ExportWalkthroughFrames(parameters);
+                        break;
+
+                    case "export_model_gltf":
+                        result = ExportModelGltf(parameters);
+                        break;
+
+                    case "list_design_options":
+                        result = ListDesignOptions(parameters);
+                        break;
+
+                    case "export_design_options":
+                        result = ExportDesignOptions(parameters);
+                        break;
+
+                    case "export_named_views":
+                        result = ExportNamedViews(parameters);
+                        break;
+
+                    case "open_document":
+                        result = OpenDocument(parameters);
+                        break;
+
+                    case "list_open_documents":
+                        result = ListOpenDocuments(parameters);
+                        break;
+
+                    case "close_document":
+                        result = CloseDocument(parameters);
+                        break;
+
+                    case "list_links":
+                        result = ListLinks(parameters);
+                        break;
+
+                    case "reload_links":
+                        result = ReloadLinks(parameters);
+                        break;
+
+                    case "export_web_compare":
+                        result = ExportWebCompare(parameters);
+                        break;
+
+                    case "apply_camera_stations":
+                        result = ApplyCameraStations(parameters);
+                        break;
+
+                    case "export_walkthrough_depth":
+                        result = ExportWalkthroughDepth(parameters);
+                        break;
+
+                    case "create_camera_stations":
+                        result = CreateCameraStations(parameters);
+                        break;
 
                     default:
                         throw new NotImplementedException($"未實作的命令: {request.CommandName}");

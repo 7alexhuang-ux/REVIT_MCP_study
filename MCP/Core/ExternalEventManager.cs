@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Autodesk.Revit.UI;
 
 namespace RevitMCP.Core
@@ -41,7 +42,7 @@ namespace RevitMCP.Core
         /// </summary>
         public void ExecuteCommand(Action<UIApplication> action)
         {
-            _eventHandler.SetAction(action);
+            _eventHandler.Enqueue(action);
             _externalEvent.Raise();
         }
 
@@ -50,22 +51,44 @@ namespace RevitMCP.Core
         /// </summary>
         private class CommandEventHandler : IExternalEventHandler
         {
-            private Action<UIApplication> _action;
+            private readonly object _queueLock = new object();
+            private readonly Queue<Action<UIApplication>> _actions = new Queue<Action<UIApplication>>();
 
-            public void SetAction(Action<UIApplication> action)
+            public void Enqueue(Action<UIApplication> action)
             {
-                _action = action;
+                if (action == null) { return; }
+                lock (_queueLock)
+                {
+                    _actions.Enqueue(action);
+                }
             }
 
             public void Execute(UIApplication app)
             {
-                try
+                while (true)
                 {
-                    _action?.Invoke(app);
-                }
-                catch (Exception ex)
-                {
-                    TaskDialog.Show("命令執行錯誤", ex.Message);
+                    Action<UIApplication> action = null;
+                    lock (_queueLock)
+                    {
+                        if (_actions.Count > 0)
+                        {
+                            action = _actions.Dequeue();
+                        }
+                    }
+
+                    if (action == null)
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        action.Invoke(app);
+                    }
+                    catch (Exception ex)
+                    {
+                        TaskDialog.Show("命令執行錯誤", ex.Message);
+                    }
                 }
             }
 

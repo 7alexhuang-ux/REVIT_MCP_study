@@ -19,6 +19,13 @@
 - 2026-10-24 實機重跑後再補四類 noGeometry 放行規則：零尺寸帷幕嵌板（System Panel 寬高皆 0）、嵌入牆嵌板（`Panel.FindHostPanel()` 指向已匯出幾何的本選項 Wall）、無分類 SketchPlane（含 1F Level）、無分類且名稱以 Wall Profile 開頭的 Family／Element。`ignoredNoGeometry` 每筆新增 `basis`。判斷輸入改為純資料 `NoGeometryFacts`／`DesignOptionNoGeometryPolicy.Evaluate`，NUnit 288→314；有尺寸 Glazed、找不到宿主牆的 Wall 嵌板、其他無分類 Element 仍算失敗。未連 Revit，待實機重跑驗證。
 - 僅建置與離線驗證；尚未部署、未改 Add-ins、未建立 marker、未取得 AR_CPC 實機結果。
 
+### 🔧 修正 — 指令與工具註冊補齊、通訊層強化（2026-10-25 提交）
+
+- **死碼接線**：先前 commit `742efaf` 的 `list_design_options`／`export_design_options`／`export_named_views`／`open_document`／`list_open_documents`／`close_document`／`list_links`／`reload_links` 只有實作、沒有註冊，現已在 `CommandExecutor.cs` 加入分派，並在 `tools/index.ts` 把 `documentTools` 加入 full／architect／mep／structural／fire-safety 五個 profile。整地（坵塊法、限建核對、`generate_grading_analysis`、`duplicate_floor_draft`）與走動展示指令的分派、`walkthroughTools` 註冊也在此批次一併落地。
+- **MCP-Server `socket.ts`**：連線去重與逾時、不再無限自動重連、斷線時一併拒絕待處理請求、依指令分級逾時（預設 300 s，長指令 600 s，`REVIT_MCP_COMMAND_TIMEOUT_MS` 可覆寫；`export_design_options`／`open_document`／`reload_links` 列入長指令）、完成後清 timer、同步送出失敗也清理 pending；新增 `socket.test.ts`、`socket-design-options.test.ts`、`design-option-tools.test.ts`。`npm test` 納入 `tools/*.test.mjs`。
+- **Revit 端**：`ExternalEventManager` 由單一 action 改為佇列（避免連續請求互相覆蓋）、`RevitCommandRequest.ConnectionId`（重連後舊請求不回送新連線）、`SocketService` 連線加鎖、新連線接手時關閉舊連線並以 connectionId 區分、WebSocket 分片訊息組裝完整再處理；`StartAsync(showDialogs, repairPortConflicts)` 供自動啟動模式不彈對話框、不修 port；`Application.cs` 加 opt-in marker（`~/.revit-mcp/autostart`）單次 Idling 自動啟動與 `REVIT_MCP_PORT` 覆寫。
+- 僅建置與離線驗證（R24 建置 0 錯誤、dotnet test 314、npm test 38＋10）；未部署、未連 Revit，自動啟動與佇列行為待實機驗證。
+
 ### 🆕 新增 — 整地工作流後續批次（2026-07-08 ～ 2026-10-05，既有 staged 批次整批提交）
 
 > 本段依既有 staged 批次的檔案內容與 `log/2026-07.md` 歸納；本批次原作者未留 CHANGELOG，提交者未逐項重跑實機，僅驗證建置與離線測試。

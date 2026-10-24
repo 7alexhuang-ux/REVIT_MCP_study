@@ -20,6 +20,8 @@ export interface RevitResponse {
 
 // 預設 port 為 8964，可透過環境變數 REVIT_MCP_PORT 覆寫
 const DEFAULT_PORT = 8964;
+const DEFAULT_COMMAND_TIMEOUT_MS = 300000;
+const LONG_COMMAND_TIMEOUT_MS = 600000;
 
 function getConfiguredPort(): number {
     const envPort = process.env.REVIT_MCP_PORT;
@@ -37,8 +39,10 @@ export class RevitSocketClient {
     private ws: WebSocket | null = null;
     private host: string = 'localhost';
     private port: number = DEFAULT_PORT;
-    private reconnectInterval: number = 5000; // 5 seconds
     private responseHandlers: Map<string, (response: RevitResponse) => void> = new Map();
+    private responseRejecters: Map<string, (error: Error) => void> = new Map();
+    private connectPromise: Promise<void> | null = null;
+    private intentionalDisconnect: boolean = false;
 
     constructor(host: string = 'localhost', port?: number) {
         this.host = host;
@@ -49,18 +53,40 @@ export class RevitSocketClient {
      * Connect to Revit Plugin
      */
     async connect(): Promise<void> {
-        return new Promise((resolve, reject) => {
+        if (this.isConnected()) {
+            return;
+        }
+
+        if (this.connectPromise) {
+            return this.connectPromise;
+        }
+
+        this.intentionalDisconnect = false;
+        this.connectPromise = new Promise((resolve, reject) => {
             const wsUrl = `ws://${this.host}:${this.port}`;
             console.error(`[Socket] Connecting to Revit: ${wsUrl}`);
 
-            this.ws = new WebSocket(wsUrl);
+            const socket = new WebSocket(wsUrl);
+            this.ws = socket;
+            let settled = false;
+            const connectionTimeout = setTimeout(() => {
+                if (!settled && socket.readyState !== WebSocket.OPEN) {
+                    settled = true;
+                    this.connectPromise = null;
+                    try { socket.terminate(); } catch { /* ignore */ }
+                    reject(new Error('Connection Timeout: Please ensure Revit Plugin is running and MCP server is enabled'));
+                }
+            }, 10000);
 
-            this.ws.on('open', () => {
+            socket.on('open', () => {
                 console.error('[Socket] Connected to Revit Plugin');
+                settled = true;
+                clearTimeout(connectionTimeout);
+                this.connectPromise = null;
                 resolve();
             });
 
-            this.ws.on('message', (data: WebSocket.Data) => {
+            socket.on('message', (data: WebSocket.Data) => {
                 try {
                     const rawResponse = JSON.parse(data.toString());
                     // Map PascalCase from C# to camelCase for internal use
@@ -78,6 +104,9 @@ export class RevitSocketClient {
                         if (handler) {
                             handler(response);
                             this.responseHandlers.delete(response.requestId);
+                            this.responseRejecters.delete(response.requestId);
+                        } else {
+                            console.error(`[Socket] Received stale or unknown response: ${response.requestId}`);
                         }
                     }
                 } catch (error) {
@@ -85,31 +114,34 @@ export class RevitSocketClient {
                 }
             });
 
-            this.ws.on('error', (error) => {
+            socket.on('error', (error) => {
                 console.error('[Socket] WebSocket Error:', error);
-                reject(error);
-            });
-
-            this.ws.on('close', () => {
-                console.error('[Socket] Connection closed');
-                this.ws = null;
-
-                // Reconnect logic
-                setTimeout(() => {
-                    console.error('[Socket] Attempting to reconnect...');
-                    this.connect().catch(err => {
-                        console.error('[Socket] Reconnection failed:', err);
-                    });
-                }, this.reconnectInterval);
-            });
-
-            // Connection Timeout
-            setTimeout(() => {
-                if (this.ws?.readyState !== WebSocket.OPEN) {
-                    reject(new Error('Connection Timeout: Please ensure Revit Plugin is running and MCP server is enabled'));
+                if (!settled) {
+                    settled = true;
+                    clearTimeout(connectionTimeout);
+                    this.connectPromise = null;
+                    reject(error);
                 }
-            }, 10000);
+            });
+
+            socket.on('close', () => {
+                console.error('[Socket] Connection closed');
+                if (this.ws === socket) {
+                    this.ws = null;
+                }
+                if (!settled) {
+                    settled = true;
+                    clearTimeout(connectionTimeout);
+                    this.connectPromise = null;
+                    reject(new Error('Connection closed before opening'));
+                }
+                if (!this.intentionalDisconnect) {
+                    this.rejectPendingResponses(new Error('Connection closed before command response'));
+                }
+            });
         });
+
+        return this.connectPromise;
     }
 
     /**
@@ -130,25 +162,44 @@ export class RevitSocketClient {
         console.error(`[Socket] Sending command: ${commandName}`, parameters);
 
         return new Promise((resolve, reject) => {
-            // Register response handler
+            // 已完成的命令要清掉 timer，命令列工具才不會空等十分鐘。
+            let timeout: ReturnType<typeof setTimeout> | undefined;
             this.responseHandlers.set(requestId, (response: RevitResponse) => {
+                clearTimeout(timeout);
                 if (response.success) {
                     resolve(response);
                 } else {
                     reject(new Error(response.error || 'Command failed'));
                 }
             });
+            this.responseRejecters.set(requestId, (error) => {
+                clearTimeout(timeout);
+                reject(error);
+            });
 
-            // Send command
-            this.ws?.send(JSON.stringify(command));
-
-            // Request Timeout
-            setTimeout(() => {
+            // 先安裝 timeout，再送出；同步送出失敗也要清理 pending。
+            timeout = setTimeout(() => {
                 if (this.responseHandlers.has(requestId)) {
                     this.responseHandlers.delete(requestId);
-                    reject(new Error('Command timed out'));
+                    this.responseRejecters.delete(requestId);
+                    reject(new Error(`Command timed out after ${this.getCommandTimeout(commandName)} ms: ${commandName}`));
                 }
-            }, 30000); // 30 seconds timeout
+            }, this.getCommandTimeout(commandName));
+            try {
+                this.ws!.send(JSON.stringify(command), (error) => {
+                    if (error) {
+                        clearTimeout(timeout);
+                        this.responseHandlers.delete(requestId);
+                        this.responseRejecters.delete(requestId);
+                        reject(error);
+                    }
+                });
+            } catch (error) {
+                clearTimeout(timeout);
+                this.responseHandlers.delete(requestId);
+                this.responseRejecters.delete(requestId);
+                reject(error);
+            }
         });
     }
 
@@ -163,6 +214,8 @@ export class RevitSocketClient {
      * Disconnect
      */
     disconnect(): void {
+        this.intentionalDisconnect = true;
+        this.rejectPendingResponses(new Error('Disconnected before command response'));
         if (this.ws) {
             this.ws.close();
             this.ws = null;
@@ -174,5 +227,37 @@ export class RevitSocketClient {
      */
     private generateRequestId(): string {
         return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+
+    getCommandTimeout(commandName: string): number {
+        const envTimeout = Number.parseInt(process.env.REVIT_MCP_COMMAND_TIMEOUT_MS ?? '', 10);
+        const defaultTimeout = Number.isFinite(envTimeout) && envTimeout > 0
+            ? envTimeout
+            : DEFAULT_COMMAND_TIMEOUT_MS;
+        const longCommands = new Set([
+            'create_grading_comparison_sheet',
+            'create_grading_presentation',
+            'grade_toposolid_to_floors',
+            'create_slope_heatmap',
+            'create_cutfill_heatmap',
+            'export_sheets_pdf',
+            'export_walkthrough_package',
+            'export_walkthrough_frames',
+            'export_model_gltf',
+            'export_web_compare',
+            'export_design_options',
+            'open_document',
+            'reload_links',
+            'export_walkthrough_depth',
+        ]);
+        return longCommands.has(commandName) ? Math.max(defaultTimeout, LONG_COMMAND_TIMEOUT_MS) : defaultTimeout;
+    }
+
+    private rejectPendingResponses(error: Error): void {
+        for (const [requestId, reject] of this.responseRejecters.entries()) {
+            this.responseHandlers.delete(requestId);
+            this.responseRejecters.delete(requestId);
+            reject(error);
+        }
     }
 }

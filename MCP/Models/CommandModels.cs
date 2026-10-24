@@ -1,4 +1,5 @@
 using System;
+using Newtonsoft.Json;
 
 namespace RevitMCP.Models
 {
@@ -22,6 +23,12 @@ namespace RevitMCP.Models
         /// 請求 ID（用於追蹤回應）
         /// </summary>
         public string RequestId { get; set; }
+
+        /// <summary>
+        /// 內部使用：此請求來自哪一條 WebSocket 連線。避免重連後舊請求回應送到新 client。
+        /// </summary>
+        [JsonIgnore]
+        public Guid ConnectionId { get; set; }
     }
 
     /// <summary>
