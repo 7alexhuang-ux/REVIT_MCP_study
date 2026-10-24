@@ -436,6 +436,63 @@ if (Test-Path $sourceWorker) {
     }
 }
 
+# 複製走動展示深度圖渲染腳本（bridge/node/walkthrough → %APPDATA%\RevitMCP\bridge\node\walkthrough，排除 node_modules）
+# CommandExecutor.FindWalkDepthScript 會在 dll 同層 → 開發樹 → %APPDATA%\RevitMCP 依序尋找；
+# 部署版的 dll 在 Add-ins 目錄，故腳本須落在 %APPDATA%\RevitMCP 才找得到。export_walkthrough_depth 另需本機安裝 Node.js 與 Chrome。
+$sourceDepthScript = Join-Path $projectRoot "bridge\node\walkthrough"
+if (Test-Path $sourceDepthScript) {
+    $depthScriptDest = Join-Path $appDataPath "RevitMCP\bridge\node\walkthrough"
+    try {
+        if (Test-Path $depthScriptDest) { Remove-Item -Path $depthScriptDest -Recurse -Force -ErrorAction Stop }
+        New-Item -ItemType Directory -Path $depthScriptDest -Force | Out-Null
+        $depthScriptFiles = Get-ChildItem -Path $sourceDepthScript -Recurse -File | Where-Object {
+            $rel = $_.FullName.Substring($sourceDepthScript.Length).TrimStart('\', '/')
+            -not ($rel -match '^(node_modules|\.git)[\\/]')
+        }
+        foreach ($f in $depthScriptFiles) {
+            $rel = $f.FullName.Substring($sourceDepthScript.Length).TrimStart('\', '/')
+            $dest = Join-Path $depthScriptDest $rel
+            $destDir = Split-Path $dest -Parent
+            if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+            Copy-Item -Path $f.FullName -Destination $dest -Force -ErrorAction Stop
+        }
+        Write-Host "✓ 已部署走動展示深度圖渲染腳本（$($depthScriptFiles.Count) 檔）到 $depthScriptDest" -ForegroundColor Green
+        Write-Host "  （export_walkthrough_depth 需系統 Node.js + Chrome，不含在本安裝程序內）" -ForegroundColor Gray
+    }
+    catch {
+        Write-Host "⚠️  警告：無法部署走動展示深度圖渲染腳本（export_walkthrough_depth 將無法使用，非關鍵）" -ForegroundColor Yellow
+    }
+}
+
+# 複製走動展示網頁 viewer 模板（viewer/walkthrough → %APPDATA%\RevitMCP\viewer\walkthrough）
+# CommandExecutor.FindWalkViewerTemplate 會在 dll 同層 → 開發樹 → %APPDATA%\RevitMCP 依序尋找，
+# export_walkthrough_package 會把模板複製進每個交付包。開發用檔案（dev/、測試、打包腳本、契約文件）不部署。
+$sourceViewer = Join-Path $projectRoot "viewer\walkthrough"
+if (Test-Path (Join-Path $sourceViewer "index.html")) {
+    $viewerDest = Join-Path $appDataPath "RevitMCP\viewer\walkthrough"
+    try {
+        if (Test-Path $viewerDest) { Remove-Item -Path $viewerDest -Recurse -Force -ErrorAction Stop }
+        New-Item -ItemType Directory -Path $viewerDest -Force | Out-Null
+        $viewerFiles = Get-ChildItem -Path $sourceViewer -Recurse -File | Where-Object {
+            $rel = $_.FullName.Substring($sourceViewer.Length).TrimStart('\', '/')
+            -not ($rel -match '^(dev|node_modules)[\\/]') -and
+            $_.Name -notin @('CONTRACT.md', 'build-vendor.mjs', 'package.json', 'package-lock.json') -and
+            $_.Name -notlike '*.test.cjs' -and $_.Name -notlike '*.test.js'
+        }
+        foreach ($f in $viewerFiles) {
+            $rel = $f.FullName.Substring($sourceViewer.Length).TrimStart('\', '/')
+            $dest = Join-Path $viewerDest $rel
+            $destDir = Split-Path $dest -Parent
+            if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+            Copy-Item -Path $f.FullName -Destination $dest -Force -ErrorAction Stop
+        }
+        Write-Host "✓ 已部署走動展示 viewer（$($viewerFiles.Count) 檔）到 $viewerDest" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "⚠️  警告：無法部署走動展示 viewer（export_walkthrough_package 將缺少 index.html，非關鍵）" -ForegroundColor Yellow
+    }
+}
+
 Write-Host ""
 
 # ============================================================================

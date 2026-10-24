@@ -12,6 +12,7 @@ import { RevitSocketClient } from "../socket.js";
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { gradingTools } from "./grading-tools.js";
 import { registerRevitTools as registerProfileTools } from "./index.js";
+import { runBatchedFrames, WalkthroughFrameBatchResponse } from "./walkthrough-batch.js";
 
 /**
  * 依 Profile 註冊工具，並將 Toposolid 整地限制於建築與結構相關 Profile。
@@ -39,6 +40,17 @@ export async function executeRevitTool(
     // 將工具名稱轉換為 Revit 命令名稱
     // 如果是 query_elements_with_filter，映射到 C# 的 query_elements
     const commandName = toolName === "query_elements_with_filter" ? "query_elements" : toolName;
+
+    // export_walkthrough_frames：exportAll !== false（含未指定）時，MCP server 自動分批續跑直到完成
+    if (toolName === "export_walkthrough_frames" && args.exportAll !== false) {
+        return runBatchedFrames(async (batchArgs) => {
+            const response = await client.sendCommand("export_walkthrough_frames", batchArgs);
+            if (!response.success) {
+                throw new Error(response.error || "命令執行失敗");
+            }
+            return response.data as WalkthroughFrameBatchResponse;
+        }, args as { packageDir: string; exportAll?: boolean; [key: string]: unknown });
+    }
 
     // 發送命令到 Revit
     const response = await client.sendCommand(commandName, args);

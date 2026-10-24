@@ -57,6 +57,8 @@
 
 配套：`domain/walkthrough-package.md` SOP、`viewer/walkthrough/` 離線四視窗 viewer 與 `CONTRACT.md` 資料契約、`bridge/node/walkthrough/render-depth.mjs` 深度渲染器、`MCP/Core/Walkthrough/CameraPathMath.cs`（含 NUnit round-trip 測試）。
 
+- 2026-10-25 本批次檔案（`CommandExecutor.Walkthrough.cs`、viewer、深度渲染 bridge、`walkthrough-tools.ts`／`walkthrough-batch.ts` 自動分批與測試、`install-addon.ps1` 的 viewer／bridge 部署步驟、`domain/walkthrough-package.md`、設計檔）整批 commit；指令分派註冊在後續「通訊層強化與指令／工具註冊」commit。`log/2026-09.md` 一併入庫。viewer 離線測試 `viewer/walkthrough/pathmath.test.cjs` 20 通過（不在 `npm test` 內，需手動 `node --test`）。
+
 ### 🐛 Bug 修正 — 走動展示（2026-09-21 實機發現）
 
 - **影格全白**：`create_camera_stations` 把相機座標系的裁剪框 Min/Max 寫進 `Transform.Identity` 的新 `BoundingBoxXYZ`，與讀取端經 `crop.Transform.Inverse` 反推眼點的約定不一致，導致匯出的 73 張影格全是空白。改為沿用 `view.CropBox` 既有 Transform（`SetOrientation` 後即相機框）就地替換 Min/Max。此修正同時解釋了先前被誤判為誤報的「裁剪區域未置中於視線」警告。

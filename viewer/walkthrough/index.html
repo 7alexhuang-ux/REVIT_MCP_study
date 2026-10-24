@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Revit 走查瀏覽器 / Walkthrough Viewer</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="warning-banner"></div>
+
+<div id="toolbar">
+  <span id="project-title">Revit 走查瀏覽器</span>
+  <label style="display:flex;align-items:center;gap:4px;">
+    版本
+    <select id="variant-select"></select>
+  </label>
+  <button id="warnings-toggle-btn" style="display:none;">警告</button>
+  <button id="calib-toggle-btn" title="按 C 切換校準模式">校準模式 (C)</button>
+  <button id="freecam-toggle-btn" title="3D 自由視角">自由視角</button>
+  <button id="station-panel-toggle-btn" title="顯示/收合站點面板">站點面板</button>
+  <button id="edit-toggle-btn" title="按 E 切換編輯模式">編輯站點 (E)</button>
+</div>
+
+<div id="warnings-detail"></div>
+
+<div id="grid">
+  <div class="pane" id="pane-frames">
+    <div class="pane-header"><span>影格 Frames</span><span id="frame-readout"></span></div>
+    <div class="pane-body">
+      <img id="frame-img" alt="frame" />
+      <div id="frame-placeholder"><div>影格缺失</div><div id="frame-placeholder-name"></div></div>
+      <canvas id="calib-scene3d-canvas"></canvas>
+      <div id="frame-stale-banner">影格為舊站點算出，需回 Revit 重出</div>
+    </div>
+  </div>
+
+  <div class="pane" id="pane-plan">
+    <div class="pane-header"><span>平面 Plan</span></div>
+    <div class="pane-body"><canvas id="plan-canvas"></canvas></div>
+  </div>
+
+  <div class="pane" id="pane-section">
+    <div class="pane-header"><span>剖面 Section</span></div>
+    <div class="pane-body"><canvas id="section-canvas"></canvas></div>
+  </div>
+
+  <div class="pane" id="pane-scene3d">
+    <div class="pane-header"><span>3D 模型</span><span id="scene3d-readout"></span></div>
+    <div class="pane-body">
+      <canvas id="scene3d-canvas"></canvas>
+    </div>
+  </div>
+</div>
+
+<div id="calib-panel">
+  <div style="font-weight:600;">校準模式（疊在影格窗）</div>
+  <label>垂直視角 fovY <span id="calib-fovy-value"></span>
+    <input type="range" id="calib-fovy" min="20" max="100" step="0.5" />
+  </label>
+  <label>疊圖透明度 <span id="calib-opacity-value"></span>
+    <input type="range" id="calib-opacity" min="0" max="100" step="1" />
+  </label>
+  <div class="row">
+    <button id="calib-save-btn">儲存</button>
+    <button id="calib-download-btn">下載校準後 manifest.json</button>
+  </div>
+  <div id="calib-status"></div>
+</div>
+
+<div id="station-panel">
+  <div id="station-panel-header">
+    <span>站點 Stations</span>
+    <span id="station-dirty-badge"></span>
+    <button id="station-panel-close-btn" title="收合站點面板">收合</button>
+  </div>
+  <div id="station-panel-body">
+    <div id="station-table-wrap">
+      <table id="station-table">
+        <thead>
+          <tr>
+            <th>站名</th><th>X (m)</th><th>Y (m)</th><th>眼高 (m)</th><th>朝向 (°)</th><th>fovY</th>
+          </tr>
+        </thead>
+        <tbody id="station-table-body"></tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--text-dim);">朝向：以正北 (+Y) 為 0°，順時針，正東 (+X) = 90°。點列可跳到該站。</div>
+
+    <div id="station-edit-area" class="hidden">
+      <div class="station-edit-row">
+        <strong id="station-edit-name"></strong>
+        <button id="station-reset-btn">重設本站</button>
+      </div>
+      <label class="station-slider-label">
+        眼高 <span id="edit-eye-height-label"></span>
+        <input type="number" id="edit-eye-height" min="0.5" max="3.0" step="0.01" />
+        <input type="range" id="edit-eye-height-range" min="0.5" max="3.0" step="0.01" />
+      </label>
+      <label class="station-slider-label">
+        朝向 <span id="edit-heading-label"></span>
+        <input type="number" id="edit-heading" min="-180" max="180" step="0.1" />
+        <input type="range" id="edit-heading-range" min="-180" max="180" step="0.1" />
+      </label>
+      <div class="station-batch-row">
+        <label>統一眼高
+          <input type="number" id="batch-eye-height" min="0.5" max="3.0" step="0.01" value="1.6" />
+        </label>
+        <button id="batch-eye-height-btn">套用全部</button>
+        <button id="batch-eye-plus-btn">全部 +0.05m</button>
+        <button id="batch-eye-minus-btn">全部 -0.05m</button>
+        <button id="station-reset-all-btn">全部重設</button>
+      </div>
+    </div>
+
+    <div id="station-export-area">
+      <label><input type="checkbox" id="export-all-checkbox" /> 輸出全部站點（未勾選僅輸出有變更的站）</label>
+      <button id="export-stations-btn">下載 stations.json</button>
+      <div id="export-hint"></div>
+    </div>
+  </div>
+</div>
+
+<div id="timeline-bar">
+  <button id="play-btn">播放</button>
+  <div id="timeline-track" tabindex="0" role="slider" aria-label="走動路徑位置">
+    <div id="timeline-strip"></div>
+    <div id="timeline-stations"></div>
+    <div id="timeline-playhead"></div>
+    <div id="timeline-hover">
+      <img id="timeline-hover-img" alt="" />
+      <span id="timeline-hover-label"></span>
+    </div>
+  </div>
+  <input type="range" id="timeline-range" class="visually-hidden" min="0" max="1" step="0.0001" value="0" />
+  <span class="readout" id="timeline-readout"></span>
+</div>
+
+<!-- vendor -> data -> pathmath -> panes -> app. Classic scripts only (no type="module": file:// blocks ES modules). -->
+<script src="vendor/three-bundle.js"></script>
+<script src="data.js"></script>
+<script src="pathmath.js"></script>
+<script src="plan.js"></script>
+<script src="section.js"></script>
+<script src="frames.js"></script>
+<script src="scene3d.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

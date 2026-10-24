@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>walkthrough depth render page</title></head>
+<body style="margin:0;background:#000;">
+<canvas id="rd-canvas"></canvas>
+<script src="__THREE_BUNDLE_URL__"></script>
+<script>
+// Offscreen depth/normal renderer for render-depth.mjs. Loads the SAME
+// vendor/three-bundle.js the viewer ships (path substituted by the caller),
+// and the package's own model.glb, then exposes window.DR with render
+// functions the Node side drives via Puppeteer page.evaluate().
+//
+// Depth math: a single custom ShaderMaterial is installed as scene.overrideMaterial
+// so every mesh in the GLB is rendered with it, no per-material bookkeeping needed.
+// The fragment shader computes view-space z distance (-vViewPos.z, i.e. distance
+// along the camera's look axis, NOT euclidean distance) and, depending on uMode,
+// either:
+//   0 (stats)   packs raw distance/uAssumedMax (0..1) into RGB as a 24-bit value
+//               (classic fract-based RGB depth packing) for cheap, low-res,
+//               full-precision percentile statistics read back into Node.
+//   1 (gray8)   writes the near-white/far-black normalized intensity directly
+//               into R (=G=B), for an 8-bit-per-channel readback.
+//   2 (gray16)  writes hi/lo bytes of a 16-bit intensity value into R/G so a
+//               true 16-bit grayscale PNG can be assembled from the 8-bit
+//               WebGL readback (no float render targets needed -> works even
+//               under software/SwiftShader rendering).
+//   3 (normals) writes world-space normal * 0.5 + 0.5 into RGB.
+// Background (no geometry hit) keeps the renderer's clear color (0,0,0,0):
+// mode 0 treats alpha<128 as "no hit" (skip); modes 1/2 naturally decode to
+// black/0 (matches the "no-hit = black" convention); mode 3 decodes as a
+// harmless (-1,-1,-1) placeholder normal.
+(function () {
+  'use strict';
+
+  var THREE, GLTFLoader;
+  var renderer, scene, camera, material;
+  var statsTarget, finalTarget;
+  var statsW = 0, statsH = 0, finalW = 0, finalH = 0;
+
+  var CRC_TABLE = (function () {
+    var t = new Uint32Array(256);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+
+  function crc32(buf) {
+    var c = 0xffffffff;
+    for (var i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+
+  function concatBytes(arrs) {
+    var total = 0;
+    for (var i = 0; i < arrs.length; i++) total += arrs[i].length;
+    var out = new Uint8Array(total);
+    var off = 0;
+    for (i = 0; i < arrs.length; i++) { out.set(arrs[i], off); off += arrs[i].length; }
+    return out;
+  }
+
+  function u32be(n) {
+    return new Uint8Array([(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]);
+  }
+
+  function pngChunk(type, data) {
+    var typeBytes = new Uint8Array(type.length);
+    for (var i = 0; i < type.length; i++) typeBytes[i] = type.charCodeAt(i);
+    var body = concatBytes([typeBytes, data]);
+    return concatBytes([u32be(data.length), body, u32be(crc32(body))]);
+  }
+
+  // Deflates via the browser's native CompressionStream('deflate') — produces
+  // a zlib-wrapped deflate stream, exactly what PNG's IDAT chunk expects
+  // (same container Node's zlib.deflateSync default produces).
+  async function deflate(bytes) {
+    var cs = new CompressionStream('deflate');
+    var writer = cs.writable.getWriter();
+    writer.write(bytes);
+    writer.close();
+    var reader = cs.readable.getReader();
+    var chunks = [];
+    for (;;) {
+      var r = await reader.read();
+      if (r.done) break;
+      chunks.push(r.value);
+    }
+    return concatBytes(chunks);
+  }
+
+  // width/height: image size. bytesPerPixel/bitDepth/colorType: PNG sample
+  // layout (colorType 0 = grayscale, 2 = truecolor RGB). pixelBytes must
+  // already be top-to-bottom, packed per bytesPerPixel, no filter bytes.
+  async function encodePNG(width, height, bytesPerPixel, pixelBytes, bitDepth, colorType) {
+    var stride = width * bytesPerPixel;
+    var raw = new Uint8Array((stride + 1) * height);
+    for (var y = 0; y < height; y++) {
+      raw[y * (stride + 1)] = 0; // filter type 0 (None) for every row
+      raw.set(pixelBytes.subarray(y * stride, y * stride + stride), y * (stride + 1) + 1);
+    }
+    var idatData = await deflate(raw);
+    var sig = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+    var ihdr = new Uint8Array(13);
+    var dv = new DataView(ihdr.buffer);
+    dv.setUint32(0, width);
+    dv.setUint32(4, height);
+    ihdr[8] = bitDepth;
+    ihdr[9] = colorType;
+    ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+    return concatBytes([sig, pngChunk('IHDR', ihdr), pngChunk('IDAT', idatData), pngChunk('IEND', new Uint8Array(0))]);
+  }
+
+  function bytesToBase64(bytes) {
+    var binary = '';
+    var chunkSize = 0x8000;
+    for (var i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  function buildMaterial() {
+    var vert = [
+      'varying vec3 vViewPos;',
+      'varying vec3 vWorldNormal;',
+      'void main() {',
+      '  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);',
+      '  vViewPos = mvPosition.xyz;',
+      '  vWorldNormal = normalize(mat3(modelMatrix) * normal);',
+      '  gl_Position = projectionMatrix * mvPosition;',
+      '}',
+    ].join('\n');
+    var frag = [
+      'precision highp float;',
+      'varying vec3 vViewPos;',
+      'varying vec3 vWorldNormal;',
+      'uniform float uMode;', // 0 stats, 1 gray8, 2 gray16, 3 normals
+      'uniform float uAssumedMax;',
+      'uniform float uNearMeters;',
+      'uniform float uFarMeters;',
+      'vec3 packFloatToRGB(float v) {',
+      '  vec3 bitSh = vec3(65536.0, 256.0, 1.0);',
+      '  vec3 bitMsk = vec3(0.0, 1.0/256.0, 1.0/256.0);',
+      '  vec3 comp = fract(v * bitSh);',
+      '  comp -= comp.xxy * bitMsk;',
+      '  return comp;',
+      '}',
+      'void main() {',
+      '  float dist = -vViewPos.z;',
+      '  if (uMode < 0.5) {',
+      '    float vNorm = clamp(dist / uAssumedMax, 0.0, 0.999999);',
+      '    gl_FragColor = vec4(packFloatToRGB(vNorm), 1.0);',
+      '  } else if (uMode < 1.5) {',
+      '    float norm = clamp((dist - uNearMeters) / (uFarMeters - uNearMeters), 0.0, 1.0);',
+      '    float intensity = 1.0 - norm;',
+      '    gl_FragColor = vec4(vec3(intensity), 1.0);',
+      '  } else if (uMode < 2.5) {',
+      '    float norm = clamp((dist - uNearMeters) / (uFarMeters - uNearMeters), 0.0, 1.0);',
+      '    float intensity = 1.0 - norm;',
+      '    float v16 = floor(intensity * 65535.0 + 0.5);',
+      '    float hi = floor(v16 / 256.0);',
+      '    float lo = v16 - hi * 256.0;',
+      '    gl_FragColor = vec4(hi / 255.0, lo / 255.0, 0.0, 1.0);',
+      '  } else {',
+      '    gl_FragColor = vec4(vWorldNormal * 0.5 + 0.5, 1.0);',
+      '  }',
+      '}',
+    ].join('\n');
+    return new THREE.ShaderMaterial({
+      uniforms: { uMode: { value: 0 }, uAssumedMax: { value: 1000 }, uNearMeters: { value: 0.1 }, uFarMeters: { value: 100 } },
+      vertexShader: vert,
+      fragmentShader: frag,
+    });
+  }
+
+  function setPose(px, py, pz, ux, uy, uz, lx, ly, lz) {
+    camera.position.set(px, py, pz);
+    camera.up.set(ux, uy, uz);
+    camera.lookAt(lx, ly, lz);
+  }
+
+  // Flips WebGL's bottom-up row order to PNG's top-down order while copying
+  // only the channels a given mode needs out of the RGBA readback.
+  function flipAndPack(raw, w, h, bytesPerPixel, channelCount) {
+    var out = new Uint8Array(w * h * bytesPerPixel);
+    for (var y = 0; y < h; y++) {
+      var srcY = h - 1 - y;
+      for (var x = 0; x < w; x++) {
+        var si = (srcY * w + x) * 4;
+        var di = (y * w + x) * bytesPerPixel;
+        for (var c = 0; c < channelCount; c++) out[di + c] = raw[si + c];
+      }
+    }
+    return out;
+  }
+
+  window.DR = {
+    init: function (glbBase64) {
+      var bundle = window.THREE_BUNDLE;
+      THREE = bundle.THREE;
+      GLTFLoader = bundle.GLTFLoader;
+      var canvas = document.getElementById('rd-canvas');
+      renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false, preserveDrawingBuffer: false });
+      scene = new THREE.Scene();
+      material = buildMaterial();
+      scene.overrideMaterial = material;
+      camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
+      return new Promise(function (resolve, reject) {
+        if (!glbBase64) { resolve(); return; }
+        var binary = atob(glbBase64);
+        var bytes = new Uint8Array(binary.length);
+        for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        new GLTFLoader().parse(bytes.buffer, '', function (gltf) {
+          scene.add(gltf.scene);
+          resolve();
+        }, reject);
+      });
+    },
+
+    configure: function (finalWArg, finalHArg, statsWArg, statsHArg, fovYDeg, aspect, camNear, camFar) {
+      finalW = finalWArg; finalH = finalHArg; statsW = statsWArg; statsH = statsHArg;
+      camera.fov = fovYDeg;
+      camera.aspect = aspect;
+      camera.near = camNear;
+      camera.far = camFar;
+      camera.updateProjectionMatrix();
+      renderer.setSize(Math.max(finalW, statsW), Math.max(finalH, statsH), false);
+      statsTarget = new THREE.WebGLRenderTarget(statsW, statsH, { format: THREE.RGBAFormat, type: THREE.UnsignedByteType });
+      finalTarget = new THREE.WebGLRenderTarget(finalW, finalH, { format: THREE.RGBAFormat, type: THREE.UnsignedByteType });
+    },
+
+    rendererInfo: function () {
+      var gl = renderer.getContext();
+      var ext = gl.getExtension('WEBGL_debug_renderer_info');
+      if (!ext) return gl.getParameter(gl.RENDERER) || 'unknown';
+      return gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+    },
+
+    renderStats: function (px, py, pz, ux, uy, uz, lx, ly, lz, assumedMax) {
+      material.uniforms.uMode.value = 0;
+      material.uniforms.uAssumedMax.value = assumedMax;
+      renderer.setRenderTarget(statsTarget);
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear(true, true, true);
+      setPose(px, py, pz, ux, uy, uz, lx, ly, lz);
+      renderer.render(scene, camera);
+      var buf = new Uint8Array(statsW * statsH * 4);
+      renderer.readRenderTargetPixels(statsTarget, 0, 0, statsW, statsH, buf);
+      renderer.setRenderTarget(null);
+      return bytesToBase64(buf);
+    },
+
+    renderFinal: async function (px, py, pz, ux, uy, uz, lx, ly, lz, nearMeters, farMeters, mode) {
+      material.uniforms.uMode.value = mode; // 1 = gray8, 2 = gray16
+      material.uniforms.uNearMeters.value = nearMeters;
+      material.uniforms.uFarMeters.value = farMeters;
+      renderer.setRenderTarget(finalTarget);
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear(true, true, true);
+      setPose(px, py, pz, ux, uy, uz, lx, ly, lz);
+      renderer.render(scene, camera);
+      var raw = new Uint8Array(finalW * finalH * 4);
+      renderer.readRenderTargetPixels(finalTarget, 0, 0, finalW, finalH, raw);
+      renderer.setRenderTarget(null);
+      var bpp = mode === 2 ? 2 : 1;
+      var pixelBytes = flipAndPack(raw, finalW, finalH, bpp, bpp);
+      var png = await encodePNG(finalW, finalH, bpp, pixelBytes, mode === 2 ? 16 : 8, 0);
+      return bytesToBase64(png);
+    },
+
+    renderNormals: async function (px, py, pz, ux, uy, uz, lx, ly, lz) {
+      material.uniforms.uMode.value = 3;
+      renderer.setRenderTarget(finalTarget);
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear(true, true, true);
+      setPose(px, py, pz, ux, uy, uz, lx, ly, lz);
+      renderer.render(scene, camera);
+      var raw = new Uint8Array(finalW * finalH * 4);
+      renderer.readRenderTargetPixels(finalTarget, 0, 0, finalW, finalH, raw);
+      renderer.setRenderTarget(null);
+      var pixelBytes = flipAndPack(raw, finalW, finalH, 3, 3);
+      var png = await encodePNG(finalW, finalH, 3, pixelBytes, 8, 2);
+      return bytesToBase64(png);
+    },
+  };
+})();
+</script>
+</body>
+</html>
