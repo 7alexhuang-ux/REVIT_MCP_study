@@ -32,10 +32,12 @@
 | `wall-check.md` | wall-orientation-check | 牆壁方向、內外側 |
 | `dependent-view-crop-workflow.md` | dependent-view-crop | 從屬視圖、分區出圖 |
 
-### 不需要成為 Skill 的 Domain（11 個，含 README）
+### 不需要成為 Skill 的 Domain（12 個，含 README）
 
 | Domain 文件 | 類型 | 不成為 Skill 的原因 |
 |------------|------|-------------------|
+| `hillside-site-review.md` | 總流程 SOP | 統整坵塊法、坡度熱區、土方平衡、方格法四份子 domain 的順序與交接，是子 domain 的目錄與交通規則，不是獨立觸發的工作流程，不需另包 Skill |
+| `walkthrough-package.md` | 交付流程 SOP | 由 4 個 MCP 工具（`get_camera_stations` 等）逐步驅動，觸發關鍵字已在 CLAUDE.md 直接對應 domain 文件，不需另包 Skill 編排 |
 | `lessons.md` | 經驗規則庫 | 知識參考文件，由 `/lessons` 指令維護，供其他 Skill 引用，不直接觸發 |
 | `room-boundary.md` | 技術概念文件 | 說明 Room 邊界處理的兩種方案（Area Scheme / Offset），是 `building-compliance` Skill 的背景知識，非獨立工作流程 |
 | `session-context-guard.md` | AI 內部守衛 | 定義 AI 互動安全等級（L1-L3），是所有 Skill 的通用行為規範，不由使用者觸發 |

@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Domain 索引（45 個 SOP）· BIM_MCP</title>
-<meta property="og:title" content="BIM_MCP Domain SOP Index — 43 個知識層檔案">
+<title>Domain 索引（52 個 SOP）· BIM_MCP</title>
+<meta property="og:title" content="BIM_MCP Domain SOP Index — 50 個知識層檔案">
 <meta property="og:description" content="依 domain/*.md 整理的 BIM compliance 與 workflow SOP 索引。五分類各自彩色，含觸發關鍵字、反查 Skill、5 個重點 domain 抽屜摘要。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -72,10 +72,10 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">DOMAIN INDEX <span class="accent">45 個 SOP / 5 分類</span></div>
+  <div class="bim-hero-eyebrow">DOMAIN INDEX <span class="accent">52 個 SOP / 5 分類</span></div>
   <h1 class="bim-hero-title">Domain · <span class="accent">知識層</span><br>方法寫一次，多個 Skill 共用</h1>
-  <p class="bim-hero-sub">Domain 是<strong>知識本身</strong>——法規條文、SOP、公式、例外。Skill 是<strong>編排</strong>（22 個）。Tool 是<strong>原子執行</strong>（96 個）。<strong>知識不應該重複在每個 Skill 裡</strong>——這是本專案核心架構原則。本頁列 45 個 <code>domain/*.md</code>，依五大類彩色標示，每張 card 含觸發關鍵字與反查 Skill。</p>
-  <figure class="bim-hero-figure"><img src="../images/domain__hero__45-grains.svg" alt="45 個 domain SOP，依五大類彩色方塊排列" width="1200" height="900"></figure>
+  <p class="bim-hero-sub">Domain 是<strong>知識本身</strong>——法規條文、SOP、公式、例外。Skill 是<strong>編排</strong>（24 個）。Tool 是<strong>原子執行</strong>（137 個）。<strong>知識不應該重複在每個 Skill 裡</strong>——這是本專案核心架構原則。本頁列 52 個 <code>domain/*.md</code>，依五大類彩色標示，每張 card 含觸發關鍵字與反查 Skill。</p>
+  <figure class="bim-hero-figure"><img src="../images/domain__hero__45-grains.svg" alt="52 個 domain SOP，依五大類彩色方塊排列" width="1200" height="900"></figure>
 </header>
 
 <section data-collapse class="bim-section bim-anchor" data-cat="frame" id="frame">
@@ -102,9 +102,9 @@
   </div>
 
   <div class="bim-grid bim-grid-3">
-    <div class="bim-card"><h4>Tool（96）</h4><p style="font-size:13px;">執行 Revit 查詢、建立、修改。<strong>所有具體資料</strong>必須來自工具回傳。</p></div>
-    <div class="bim-card bim-card-accent"><h4>Domain（45）</h4><p style="font-size:13px;">保存 SOP、公式、例外與判斷流程。<strong>方法的單一來源</strong>。</p></div>
-    <div class="bim-card"><h4><a href="skills-index.html" style="border-bottom:1px solid var(--accent-border);">Skill（22）</a></h4><p style="font-size:13px;">把 Domain 與工具串成工作流。<strong>不藏方法在 Skill body</strong>。</p></div>
+    <div class="bim-card"><h4>Tool（137）</h4><p style="font-size:13px;">執行 Revit 查詢、建立、修改。<strong>所有具體資料</strong>必須來自工具回傳。</p></div>
+    <div class="bim-card bim-card-accent"><h4>Domain（50）</h4><p style="font-size:13px;">保存 SOP、公式、例外與判斷流程。<strong>方法的單一來源</strong>。</p></div>
+    <div class="bim-card"><h4><a href="skills-index.html" style="border-bottom:1px solid var(--accent-border);">Skill（23）</a></h4><p style="font-size:13px;">把 Domain 與工具串成工作流。<strong>不藏方法在 Skill body</strong>。</p></div>
   </div>
 
   <div class="empathy-quote">
@@ -379,6 +379,17 @@
       </div>
     </div>
 
+    <div id="parcel-slope-analysis" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">parcel-slope-analysis.md</div>
+        <div class="domain-desc">坵塊法平均坡度：依建築技術規則施工編 §261 劃 ≤25m 正方格坵塊、數等高線與四邊交點求平均坡度，再依 §262 判定開發與法定空地限制。等高線來源為 DWG 圖層。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">坵塊法</span><span class="domain-trigger">平均坡度</span><span class="domain-trigger">山坡地開發</span><span class="domain-trigger">法定空地坡度</span>
+        <a href="skills-index.html#hillside-site-review" class="domain-skill">↔ /hillside-site-review</a>
+      </div>
+    </div>
+
     <div id="parking-auto-numbering" class="bim-card domain-card">
       <div>
         <div class="domain-name">parking-auto-numbering.md</div>
@@ -420,6 +431,42 @@
       <div class="domain-meta">
         <span class="domain-trigger">floor slope</span><span class="domain-trigger">排水坡度</span><span class="domain-trigger">洩水</span>
         <a href="skills-index.html#skills" class="domain-skill">↔ analyze_floor_slopes</a>
+      </div>
+    </div>
+
+    <div id="earthwork-balance" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">earthwork-balance.md</div>
+        <div class="domain-desc">整地土方平衡反求——二分法求樓板統一升降量使淨土方（FILL−CUT）逼近目標，含試算回滾紀律與鬆實方三本帳。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">土方平衡</span><span class="domain-trigger">挖填平衡</span><span class="domain-trigger">淨土方</span><span class="domain-trigger">平衡高程</span>
+        <a href="skills-index.html#skills" class="domain-skill">↔ solve_balanced_elevation</a>
+        <a href="skills-index.html#hillside-site-review" class="domain-skill">↔ /hillside-site-review</a>
+      </div>
+    </div>
+
+    <div id="grading-slope-classification" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">grading-slope-classification.md</div>
+        <div class="domain-desc">整地坡度分級——以水土保持技術規範六級坡為設計地形著色，坡度由設計面法線計算，僅視覺化定位不取代水保計算書。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">六級坡</span><span class="domain-trigger">坡度分級</span><span class="domain-trigger">宜林地</span><span class="domain-trigger">水保坡度</span>
+        <a href="skills-index.html#skills" class="domain-skill">↔ create_slope_heatmap</a>
+        <a href="skills-index.html#hillside-site-review" class="domain-skill">↔ /hillside-site-review</a>
+      </div>
+    </div>
+
+    <div id="earthwork-gridsheet" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">earthwork-gridsheet.md</div>
+        <div class="domain-desc">方格法土方計算書——格中心雙射線取樣、挖填深矩陣與 Excel 輸出，方格法為呈現值、正式量以 Revit CUT/FILL 為準。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">方格法</span><span class="domain-trigger">土方計算書</span><span class="domain-trigger">挖填深</span><span class="domain-trigger">格徑</span>
+        <a href="skills-index.html#skills" class="domain-skill">↔ export_earthwork_gridsheet</a>
+        <a href="skills-index.html#hillside-site-review" class="domain-skill">↔ /hillside-site-review</a>
       </div>
     </div>
 
@@ -472,6 +519,17 @@
       <div class="domain-meta">
         <span class="domain-trigger">族群整理</span><span class="domain-trigger">類型盤點</span><span class="domain-trigger">未使用類型</span><span class="domain-trigger">重複類型</span><span class="domain-trigger">purge</span>
         <a href="skills-index.html#skills" class="domain-skill" onclick="event.stopPropagation()">↔ /family-inventory-cleanup</a>
+      </div>
+    </div>
+
+    <div id="walkthrough-package" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">walkthrough-package.md</div>
+        <div class="domain-desc">建築走動展示交付包——Revit 排相機站點，逐格匯出影格／平面／剖面（像素對位）與 glTF，產出離線四視窗連動網頁。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">走動展示</span><span class="domain-trigger">漫遊</span><span class="domain-trigger">相機路徑</span><span class="domain-trigger">glTF</span>
+        <a href="skills-index.html#skills" class="domain-skill" onclick="event.stopPropagation()">↔ export_walkthrough_package</a>
       </div>
     </div>
 
@@ -551,6 +609,28 @@
       <div class="domain-meta">
         <span class="domain-trigger">frontmatter</span><span class="domain-trigger">YAML 標頭</span>
         <a href="contributor-template.html" class="domain-skill">↔ Contributor Template</a>
+      </div>
+    </div>
+
+    <div id="domain-flow-visualization" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">domain-flow-visualization.md</div>
+        <div class="domain-desc">把 domain 的流程邏輯轉成 Mermaid 圖的方法論：依 SOP 形狀挑圖表型態、用健檢清單抓迴圈／死路／缺口，產出 GitHub 原生可渲染的圖並回嵌 domain。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">流程圖像化</span><span class="domain-trigger">mermaid</span><span class="domain-trigger">流程健檢</span>
+        <a href="skills-index.html#domain-diagram" class="domain-skill">↔ /domain-diagram</a>
+      </div>
+    </div>
+
+    <div id="hillside-site-review" class="bim-card domain-card">
+      <div>
+        <div class="domain-name">hillside-site-review.md</div>
+        <div class="domain-desc">山坡地基地檢討總流程：統整坵塊法（原地形限建判定）→整地方案→限建範圍核對→坡度熱區（設計後視覺化）→土方平衡→方格法計算書六階段的順序與交接，不新增知識、只講四份子 domain 該先讀哪個。</div>
+      </div>
+      <div class="domain-meta">
+        <span class="domain-trigger">山坡地</span><span class="domain-trigger">整地總流程</span><span class="domain-trigger">限建範圍核對</span>
+        <a href="skills-index.html#hillside-site-review" class="domain-skill">↔ /hillside-site-review</a>
       </div>
     </div>
 
@@ -920,7 +1000,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / domain-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-05-18 · 43 個 domain SOP 完整索引，五分類彩色標示，5 個重點 domain 含抽屜摘要。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">最後更新 2026-05-18 · 51 個 domain SOP 完整索引，五分類彩色標示，5 個重點 domain 含抽屜摘要。</p>
 </footer>
 
 <script src="../shared.js"></script><script>initAll();</script>

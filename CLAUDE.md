@@ -33,9 +33,9 @@ These counts must be derived from source, not copied by memory.
 
 | Item | Current Count | Source of Truth |
 |---|---:|---|
-| Runtime MCP tools | 96 | `registerRevitTools()` from `MCP-Server/src/tools/index.ts` |
-| Domain SOP files | 47 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
-| Claude skills | 23 | `.claude/skills/*/SKILL.md` |
+| Runtime MCP tools | 137 | `registerRevitTools()` from `MCP-Server/src/tools/revit-tools.ts` |
+| Domain SOP files | 52 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
+| Claude skills | 24 | `.claude/skills/*/SKILL.md` |
 
 When these numbers change, update `CLAUDE.md`, `README.md`, `README.en.md`, `docs/DOCUMENT_AUDIENCE_INVENTORY.md`, and any public site copy that makes grand-total claims. Then run `scripts/verify-qaqc.ps1 -SkipBuild -SkipDeploy`.
 
@@ -137,7 +137,10 @@ Deploy with `scripts/install-addon.ps1` or the `/deploy-addon` skill. Do not rel
 | `MCP-Server/src/socket.ts` | WebSocket client to Revit |
 | `MCP-Server/src/tools/index.ts` | Tool module registry and `MCP_PROFILE` filtering |
 | `MCP-Server/src/tools/revit-tools.ts` | Execution bridge from tool name to Revit command |
+| `MCP/Core/Commands/CommandExecutor.Walkthrough.cs` | Walkthrough presentation package commands: camera station discovery, frame/plan/section export, glTF model export, depth map export (external Node/Chrome subprocess) |
+| `viewer/walkthrough/` | Offline four-pane walkthrough viewer template (frames/plan/section/3D synced by path position); data contract in `viewer/walkthrough/CONTRACT.md`; deployed to `%APPDATA%\RevitMCP\viewer\walkthrough` by `install-addon.ps1` |
 | `bridge/python/skills/ezdxf_worker.py` | Optional Python subprocess (spawned by `DwgColumnExecutor`) that reads DXF/DWG text for column-number mapping (`dwg-column-import` mode C). Needs system Python + `ezdxf`; DWG additionally needs ODA File Converter. Deployed to `%APPDATA%\RevitMCP` by `install-addon.ps1`. |
+| `bridge/node/walkthrough/render-depth.mjs` | Optional Node.js subprocess (spawned by `export_walkthrough_depth`) that uses headless Chrome + three.js to offline-render per-frame depth maps from a walkthrough package's `model.glb` and camera path. Needs system Node.js + Chrome. Deployed to `%APPDATA%\RevitMCP\bridge\node\walkthrough` by `install-addon.ps1`. |
 | `scripts/verify-qaqc.ps1` | Repository QA/QC gate |
 | `docs/DOCUMENT_AUDIENCE_INVENTORY.md` | Canonical AI/human/shared document classification |
 | `.claude-plugin/marketplace.json` | Plugin marketplace manifest — packages shareable skills (currently `hj-pr-proposal`) as installable plugins for `/plugin marketplace add` → `/plugin install`. |
@@ -276,10 +279,14 @@ Read the matching file before applying a workflow or calculation.
 | floor area, FAR review, gross floor area | `domain/floor-area-review.md` |
 | floor slope, drainage slope, slab slope, 樓板坡度, 排水坡度, 洩水 | `domain/floor-slope-analysis.md` |
 | grading slope, slope class, 六級坡, 坡度分級, 坡度熱區, 宜林地, 加強保育地, 水保坡度 | `domain/grading-slope-classification.md` |
+| earthwork balance, cut fill balance, 土方平衡, 挖填平衡, 淨土方, 餘土, 進土, 平衡高程, 二分法試算, 鬆方, 壓實方 | `domain/earthwork-balance.md` |
+| earthwork gridsheet, 方格法, 土方計算書, 格網計算, 挖填深, 原GL, 設計GL, 格徑, 送審土方表 | `domain/earthwork-gridsheet.md` |
+| hillside site review, 山坡地基地檢討, 山坡地總流程, 整地總流程, 坵塊與整地, 限建範圍核對, 限建坵塊, check_grading_parcel_limits | `domain/hillside-site-review.md` |
 | IFC, structural sync, imported structural framing | `domain/ifc-structural-sync.md` |
 | mechanical part, assembly, BIP, mechanical documentation | `domain/mechanical-part-doc.md` |
 | MEP clash, CSA clash, penetration, beam penetration | `domain/mep-csa-clash-detection.md` |
 | MEP extension, pyRevit MEP guide | `domain/mep-extension-guide.md` |
+| parcel slope, 坵塊, 坵塊圖, 坵塊法, 平均坡度, 交點數, 山坡地開發, 不得開發建築, 法定空地坡度, 261條, 262條 | `domain/parcel-slope-analysis.md` |
 | parking numbering, auto parking numbering | `domain/parking-auto-numbering.md` |
 | parking clearance, vehicle clearance, 210cm | `domain/parking-clearance-check.md` |
 | parking count, parking space review | `domain/parking-space-review.md` |
@@ -296,6 +303,7 @@ Read the matching file before applying a workflow or calculation.
 | stair compliance, stair headroom, stair check | `domain/stair-compliance-check.md` |
 | stair hidden line, stair graphics | `domain/stair-hidden-line-workflow.md` |
 | wall orientation, wall check | `domain/wall-check.md` |
+| walkthrough, 走動展示, 漫遊, camera path, 相機路徑, 四視窗連動, 影格匯出, glTF export | `domain/walkthrough-package.md` |
 
 Meta and governance domain files:
 
@@ -330,6 +338,7 @@ Available Claude skills:
 - `/facade-generation`
 - `/family-inventory-cleanup`
 - `/fire-safety-check`
+- `/hillside-site-review`
 - `/hj-pr-proposal`
 - `/parking-check`
 - `/qa-review`

@@ -15,9 +15,9 @@ This inventory defines which project documents are for AI agents, human readers,
 
 | Item | Count | Source |
 |---|---:|---|
-| Runtime MCP tools | 96 | `registerRevitTools()` |
-| Domain SOP files | 47 | `domain/*.md` except README, plus `domain/references/*.md` |
-| Claude skills | 23 | `.claude/skills/*/SKILL.md` |
+| Runtime MCP tools | 137 | `registerRevitTools()` in `MCP-Server/src/tools/revit-tools.ts` (`MCP_PROFILE=full`) |
+| Domain SOP files | 52 | `domain/*.md` except README, plus `domain/references/*.md` |
+| Claude skills | 24 | `.claude/skills/*/SKILL.md` |
 
 ## AI-Only Documents
 
@@ -34,6 +34,7 @@ These should be English-first.
 | `.mcp.json` | machine config | Project-level MCP server config |
 | `.vscode/mcp.json` | machine config | VS Code MCP server config |
 | `templates/personal-vault/VAULT-CLAUDE.md` | local-only template | Personal vault schema; Fixed Core copied verbatim by users' agents, never loaded by this repo's agents |
+| `viewer/walkthrough/CONTRACT.md` | AI/developer-only | Data contract (manifest.json fields, coordinate conventions) for the offline walkthrough viewer template |
 
 ## Shared Human + AI Documents
 
@@ -60,6 +61,7 @@ These must remain understandable by both sides.
 | `docs/BIM_MCP/**` | public knowledge site | Teaching and visual explanations |
 | `docs/troubleshoot-first-install.md` | users | First-install troubleshooting |
 | `docs/PROJECT_INTRO.md` | community readers | Community-facing project introduction (zh-TW, two-tier: overview + full technical detail, mermaid diagrams); update when features/counts change |
+| `docs/WEB_COMPARE_EXPORT.md` | maintainers and issue-manager developers | `export_web_compare` usage, output files, camera.json coordinate mapping (zh-TW) |
 | `docs/slides.md` | presenters | Slide index |
 | `Antigravity_MCP_Complete_Guide.md` | Antigravity users | Manual MCP setup for Antigravity client |
 | `docs/UPDATE-PULL-GUIDE.md`, `docs/branch-index.md` | users and maintainers | Update flow and branch overview |

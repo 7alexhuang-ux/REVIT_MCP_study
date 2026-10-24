@@ -172,13 +172,17 @@ $excludedFiles = @(
     "Recent_Update_Review.md",
     ".claude/commands/qaqc.md",        # /qaqc 命令定義本身列舉「禁止檔名」
     "domain/qa-checklist.md",          # QA checklist intentionally lists forbidden legacy paths
+    "references/qa-checklist.md",      # 同上的打包副本：CLAUDE.md 要求 skill 自我包含，故 .claude/.agents 下各有一份
     "domain/lessons.md",                # 開發經驗檔，保留 legacy 教訓作為前車之鑑
     "domain/path-maintenance-qa.md",    # 路徑維護 QA，引用舊 nested dir 作為歷史修正紀錄
     "docs/0328的課程討論.md"            # 歷史教材，保留當時上下文
 )
 
+# Worktrees are other branches' checkouts of this same repo — their contents belong to
+# those branches, not to this tree, so scanning them reports problems nobody here can fix
+# (same rationale as the node_modules exclusion).
 $mdFiles = Get-ChildItem -Path $projectRoot -Filter "*.md" -Recurse -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -notmatch "node_modules|\.claude[\\/]plugins|docs[\\/]_archive" }
+    Where-Object { $_.FullName -notmatch "node_modules|\.claude[\\/]plugins|docs[\\/]_archive|[\\/]\.worktrees[\\/]|\.claude[\\/]worktrees[\\/]" }
 
 $staleFound = $false
 foreach ($pattern in $stalePatterns) {
@@ -513,19 +517,20 @@ Write-Host "──────────────────────�
 
 # Helpers — single source of truth for counts
 function Get-ToolCount {
-    $nodeScript = "import('./MCP-Server/build/tools/index.js').then(m=>{console.log(m.registerRevitTools().length)}).catch(()=>process.exit(2))"
+    # 使用實際 stdio server 的相容層入口；index.js 只含 Profile 模組，會漏算整地工具。
+    # 子程序固定 full，避免呼叫端 MCP_PROFILE 讓公開總數隨執行環境變動。
+    $nodeScript = "process.env.MCP_PROFILE='full'; import('./MCP-Server/build/tools/revit-tools.js').then(m=>{console.log(m.registerRevitTools().length)}).catch(()=>process.exit(2))"
     Push-Location $projectRoot
-    $result = & node --input-type=module -e $nodeScript 2>$null
-    $exit = $LASTEXITCODE
-    Pop-Location
+    try {
+        $result = & node --input-type=module -e $nodeScript 2>$null
+        $exit = $LASTEXITCODE
+    }
+    finally { Pop-Location }
     if ($exit -eq 0 -and $result -match '^\d+$') {
         return [int]$result
     }
 
-    Write-Warn "Runtime tool registry count unavailable" "Falling back to source regex count. Run npm run build if this is unexpected."
-    $hits = Select-String -Path "$projectRoot\MCP-Server\src\tools\*.ts" `
-        -Pattern '^\s+name:\s*[''"]' -ErrorAction SilentlyContinue
-    return $hits.Count
+    throw "Runtime full-profile tool count unavailable from MCP-Server/build/tools/revit-tools.js. Run npm run build in MCP-Server, then retry QA/QC; source regex is not a runtime registry."
 }
 
 function Get-DomainCount {
@@ -562,7 +567,7 @@ Write-Host ""
 Write-Host "  7-0. Source-of-truth counts:" -ForegroundColor Cyan
 Write-Host "    Skills  = $skillCount  (.claude/skills/*/SKILL.md)" -ForegroundColor Gray
 Write-Host "    Domain  = $domainCount  (domain/*.md ex README + domain/references/*.md)" -ForegroundColor Gray
-Write-Host "    Tools   = $toolCount  (runtime registerRevitTools())" -ForegroundColor Gray
+Write-Host "    Tools   = $toolCount  (revit-tools.js registerRevitTools(), MCP_PROFILE=full)" -ForegroundColor Gray
 
 # Exclude: archived snapshots, log files, immutable date-prefixed snapshot HTMLs, external bundled mirrors
 # Snapshot policy: every docs/MMDD-*.html is an immutable event snapshot — its numbers reflect

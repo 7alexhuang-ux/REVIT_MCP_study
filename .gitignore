@@ -33,6 +33,7 @@ npm-debug.log*
 *.tmp
 *.temp
 ~$*
+/tmp/
 
 # Package files
 *.nupkg

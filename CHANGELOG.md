@@ -38,7 +38,7 @@
 - **開發日誌**：`log/2026-07.md` 補入 2026-07-08 ～ 07-11 的整地實機驗證與逐輪修正紀錄。
 - 註冊與通訊層見同批次後續 commit（`CommandExecutor.cs` 指令分派、`tools/index.ts`）；單獨此 commit 不含分派註冊。
 
-> ⚠️ **本節所列全部尚未 commit。** 截至 2026-09-21，工作目錄有 100 個未提交檔案，分支 `grading-workflow-v2`（停在 2026-07-09）落後 `main` 192 個 commit、領先 42 個。整併前請先處理分支分歧，見 [ROADMAP.md](ROADMAP.md) R-01。
+> ✅ **2026-10-25 更新**：上方各節與下方走動展示、整地 Ribbon 等節的檔案已分批 commit（見 `docs/commit_handoff_2026-10-25.md`）。分支 `grading-workflow-v2` 與 `main` 的分歧未處理：2026-10-25 實測 `git rev-list --left-right --count main...HEAD` 為落後 230、領先 51（原 2026-09-21 記載為 192／42），整併前請先處理，見 [ROADMAP.md](ROADMAP.md) R-01。已追蹤的 `MCP/bin/Release/*`、`MCP/obj/Release/*` 建置產物未納入這些 commit。
 
 ### 🆕 新增 — `export_web_compare`：網頁檢視器 × Revit 顯示模式比對包（2026-10-17）
 
