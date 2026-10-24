@@ -36,5 +36,6 @@
     <Compile Include="..\MCP\Core\Walkthrough\GltfBuilder.cs" Link="Core\Walkthrough\GltfBuilder.cs" />
     <Compile Include="..\MCP\Core\Walkthrough\MeshSimplifier.cs" Link="Core\Walkthrough\MeshSimplifier.cs" />
     <Compile Include="..\MCP\Core\Walkthrough\WebCompareMath.cs" Link="Core\Walkthrough\WebCompareMath.cs" />
+    <Compile Include="..\MCP\Core\Walkthrough\DesignOptionNoGeometryPolicy.cs" Link="Core\Walkthrough\DesignOptionNoGeometryPolicy.cs" />
   </ItemGroup>
 </Project>

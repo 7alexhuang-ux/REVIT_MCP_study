@@ -15,6 +15,8 @@
 - opt-in marker 單次 Idling 自動啟動；新增 open/list/close documents、list/reload links。預設detach開檔，髒文件關閉需明示捨棄；auto不彈啟動對話框、不修port、不殺程序。連結reload會清Undo，整批先驗證。
 - 可重跑 JSON 請求、正式 bridge 命令列工具與 GLB inspector；長任務 timeout、完成 timer 清理及錯誤紀錄。詳 docs/WEB_COMPARE_EXPORT.md、docs/adr/D-010-design-options-and-named-views.md。
 - 2026-10-24 補強：list_design_options 加 `mainModelElementCount`；export_design_options 報告頂層加 `textureProblems`（找不到貼圖的檔名與原路徑）；新增一鍵驗收 `tools/verify-design-options.mjs`（含離線測試）。
+- 2026-10-24 設計選項「無幾何」判定：新增已知非幾何白名單（空嵌板 Empty_Panel、帷幕格線、標註、參考平面、草圖線、開口切割、約束、Level／Sketch）不計失敗但逐筆列 `ignoredNoGeometry`；帷幕牆本體且面板豎框皆在選項內視為容器；其餘 0 面元素以實例幾何／Medium／Coarse 重試，取得者列 `recoveredGeometry`。Glazed／Wall／Aluminium 等實體類仍算失敗。新增 DesignOptionNoGeometryPolicy 與 26 個 NUnit 案例；未連 Revit，重試與容器規則待實機驗證。
+- 2026-10-24 實機重跑後再補四類 noGeometry 放行規則：零尺寸帷幕嵌板（System Panel 寬高皆 0）、嵌入牆嵌板（`Panel.FindHostPanel()` 指向已匯出幾何的本選項 Wall）、無分類 SketchPlane（含 1F Level）、無分類且名稱以 Wall Profile 開頭的 Family／Element。`ignoredNoGeometry` 每筆新增 `basis`。判斷輸入改為純資料 `NoGeometryFacts`／`DesignOptionNoGeometryPolicy.Evaluate`，NUnit 288→314；有尺寸 Glazed、找不到宿主牆的 Wall 嵌板、其他無分類 Element 仍算失敗。未連 Revit，待實機重跑驗證。
 - 僅建置與離線驗證；尚未部署、未改 Add-ins、未建立 marker、未取得 AR_CPC 實機結果。
 
 

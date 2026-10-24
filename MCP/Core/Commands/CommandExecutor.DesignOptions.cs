@@ -211,6 +211,13 @@ namespace RevitMCP.Core
                 ["sets"] = sets, ["generatedAt"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture), ["revitDoc"] = doc.Title
             };
             WriteDesignOptionJson(Path.Combine(outputDir, "design_options.json"), manifest);
+            var totalIgnored = parts.OfType<JObject>().Sum(p => p["ignoredNoGeometryCount"]?.Value<int>() ?? 0);
+            var totalRecovered = parts.OfType<JObject>().Sum(p => (p["recoveredGeometry"] as JArray)?.Count ?? 0);
+            if (totalIgnored > 0)
+                warnings.Add("已知非幾何成員 " + totalIgnored.ToString(CultureInfo.InvariantCulture) + " 筆（空嵌板、零尺寸帷幕嵌板、嵌入牆嵌板、帷幕格線、標註、參考平面、草圖線、開口切割、約束、Level／Sketch／SketchPlane、牆輪廓定義）不計入失敗，逐筆列在各分件 ignoredNoGeometry（含 reason 與 basis）；有尺寸的 Glazed、找不到已匯出宿主牆的 Wall 嵌板、牆等實體類無幾何仍算失敗。");
+            if (totalRecovered > 0)
+                warnings.Add("有 " + totalRecovered.ToString(CultureInfo.InvariantCulture) + " 筆 0 面元素改用實例幾何或較低細緻度取得，列在各分件 recoveredGeometry；需人工比對。");
+            report["ignoredNoGeometryCount"] = totalIgnored;
             report["complete"] = complete;
             report["state"] = complete ? "complete" : "incomplete";
             report["elapsedMs"] = timer.ElapsedMilliseconds;
@@ -231,6 +238,11 @@ namespace RevitMCP.Core
             var exported = new JArray();
             var excluded = new JArray();
             var noGeometry = new JArray();
+            var ignored = new JArray();
+            var recovered = new JArray();
+            // 嵌入牆嵌板需等宿主牆匯出結果，延後到迴圈結束再判定。
+            var pendingHostPanels = new List<PendingHostPanel>();
+            var exportedTriangles = new Dictionary<long, int>();
             var containers = new JArray();
             var failed = new JArray();
             var diagnostics = new JArray();
@@ -268,9 +280,58 @@ namespace RevitMCP.Core
                     var sourceTriangles = builder.CurrentElementTriangles;
                     if (sourceTriangles == 0)
                     {
-                        noGeometry.Add(new JObject { ["elementId"] = info.ElementId, ["uniqueId"] = info.UniqueId, ["name"] = info.Name, ["category"] = info.Category });
-                        builder.DiscardElement();
-                        continue;
+                        var builtInName = DesignOptionBuiltInCategoryName(element);
+                        var className = element.GetType().Name;
+                        var entry = new JObject
+                        {
+                            ["elementId"] = info.ElementId, ["uniqueId"] = info.UniqueId, ["name"] = info.Name, ["category"] = info.Category,
+                            ["builtInCategory"] = builtInName, ["class"] = className
+                        };
+                        // 1) 已知非幾何白名單：放行，但逐筆留在 ignoredNoGeometry（不消失）。實體類（Glazed／Wall／Aluminium…）不在名單內。
+                        var facts = BuildNoGeometryFacts(doc, element, info.Category, builtInName, className, info.Name, memberIds);
+                        var decision = DesignOptionNoGeometryPolicy.Evaluate(facts);
+                        if (decision != null)
+                        {
+                            entry["reason"] = decision.Reason;
+                            entry["basis"] = decision.Basis;
+                            ignored.Add(entry);
+                            builder.DiscardElement();
+                            continue;
+                        }
+                        // 1b) 嵌入牆嵌板：宿主牆可能還沒處理，先記下，迴圈結束後依宿主牆實際匯出三角面判定。
+                        if (facts.HostWallId.HasValue)
+                        {
+                            pendingHostPanels.Add(new PendingHostPanel { Entry = entry, Facts = facts });
+                            builder.DiscardElement();
+                            continue;
+                        }
+                        // 2) 帷幕牆本體自身無幾何、全部面板與豎框都在本選項內（各自獨立匯出）：與 Group 容器同概念，不重複匯出。
+                        //    面板自己的 0 面仍會各自計為 noGeometry，所以不會掩蓋缺漏。
+                        if (IsCurtainWallHostWithAllMembers(element, memberIds, out var gridMemberCount))
+                        {
+                            containers.Add(new JObject
+                            {
+                                ["uniqueId"] = element.UniqueId, ["name"] = info.Name,
+                                ["reason"] = "curtain wall host; grid panels and mullions exported individually",
+                                ["gridMemberCount"] = gridMemberCount
+                            });
+                            builder.DiscardElement();
+                            continue;
+                        }
+                        // 3) 其他 0 面元素：換 Options／實例幾何重試；有取得才算數，並標示取得方式，仍為 0 則照舊算失敗。
+                        var retryDiagnostics = new JArray();
+                        var via = RetryDesignOptionGeometry(doc, element, builder, materials, offset, maxTriangles, retryDiagnostics);
+                        if (via == null)
+                        {
+                            noGeometry.Add(entry);
+                            builder.DiscardElement();
+                            continue;
+                        }
+                        foreach (var d in retryDiagnostics) diagnostics.Add(d);
+                        sourceTriangles = builder.CurrentElementTriangles;
+                        entry["recoveredBy"] = via;
+                        entry["triangles"] = sourceTriangles;
+                        recovered.Add(entry);
                     }
                     if (maxElementTriangles > 0 && sourceTriangles > maxElementTriangles)
                     {
@@ -287,6 +348,7 @@ namespace RevitMCP.Core
                     }
                     exported.Add(new JObject { ["uniqueId"] = info.UniqueId, ["elementId"] = info.ElementId,
                         ["sourceTriangles"] = sourceTriangles, ["triangles"] = builder.CurrentElementTriangles });
+                    exportedTriangles[(long)info.ElementId] = builder.CurrentElementTriangles;
                     builder.EndElement();
                 }
                 catch (Exception ex)
@@ -296,11 +358,35 @@ namespace RevitMCP.Core
                     if (ex is DesignOptionBudgetException) { budgetExceeded = true; break; }
                 }
             }
+            // 嵌入牆嵌板：宿主牆已匯出（triangles>0）才放行；否則算失敗，維持原本的 noGeometry 揭露。
+            foreach (var pending in pendingHostPanels)
+            {
+                var hostId = pending.Facts.HostWallId.Value;
+                pending.Facts.HostWallExported = exportedTriangles.TryGetValue(hostId, out var hostTriangles) && hostTriangles > 0;
+                pending.Facts.HostWallTriangles = pending.Facts.HostWallExported ? hostTriangles : 0;
+                var decision = DesignOptionNoGeometryPolicy.Evaluate(pending.Facts);
+                if (decision != null)
+                {
+                    pending.Entry["reason"] = decision.Reason;
+                    pending.Entry["basis"] = decision.Basis;
+                    ignored.Add(pending.Entry);
+                }
+                else
+                {
+                    pending.Entry["hostWallId"] = hostId;
+                    pending.Entry["hostWallExported"] = false;
+                    noGeometry.Add(pending.Entry);
+                }
+            }
             var file = "option_" + option.UniqueId + ".glb";
             var path = Path.Combine(outputDir, file);
             File.WriteAllBytes(path, builder.BuildGlb());
             // 沒有輸出幾何的成員逐筆揭露，不能把只有 metadata 的選項判成完整成功。
+            // 只有白名單（ignoredNoGeometry）與已證實的帷幕牆容器不計入失敗；其餘 noGeometry 仍使整份選項 ok=false。
             var ok = !budgetExceeded && failed.Count == 0 && diagnostics.Count == 0 && noGeometry.Count == 0;
+            var ignoredSummary = new JObject();
+            foreach (var reasonGroup in ignored.OfType<JObject>().GroupBy(i => i["reason"].Value<string>()).OrderBy(g => g.Key, StringComparer.Ordinal))
+                ignoredSummary[reasonGroup.Key] = reasonGroup.Count();
             return new JObject
             {
                 ["kind"] = "option", ["file"] = file, ["path"] = path, ["optionKey"] = option.UniqueId,
@@ -308,8 +394,63 @@ namespace RevitMCP.Core
                 ["ok"] = ok, ["geometryMode"] = "elementGeometry", ["candidateCount"] = members.Count,
                 ["elementNodeCount"] = builder.ElementNodeCount, ["triangleCount"] = builder.TriangleCount,
                 ["exported"] = exported, ["excluded"] = excluded, ["noGeometry"] = noGeometry, ["containers"] = containers,
+                ["ignoredNoGeometry"] = ignored, ["ignoredNoGeometryCount"] = ignored.Count, ["ignoredNoGeometrySummary"] = ignoredSummary,
+                ["recoveredGeometry"] = recovered,
                 ["failed"] = failed, ["diagnostics"] = diagnostics, ["budgetExceeded"] = budgetExceeded
             };
+        }
+
+        private sealed class PendingHostPanel
+        {
+            public JObject Entry;
+            public NoGeometryFacts Facts;
+        }
+
+        /// <summary>
+        /// 收集無幾何判斷所需的事實（純資料）：系統嵌板的寬高（先讀 CURTAIN_WALL_PANELS_WIDTH／HEIGHT 實例，再讀類型；
+        /// 都讀不到才以 bounding box 為空視為 0×0）與 Panel.FindHostPanel() 指向的、屬於本選項成員的 Wall。
+        /// 注意：FindHostPanel 是 Panel 的方法（回傳嵌入牆 ElementId），不是 Wall 的方法。
+        /// </summary>
+        private static NoGeometryFacts BuildNoGeometryFacts(Document doc, Element element, string category, string builtIn,
+            string className, string name, HashSet<long> memberIds)
+        {
+            var facts = new NoGeometryFacts { CategoryName = category, BuiltInCategory = builtIn, ClassName = className, Name = name };
+            var panel = element as Panel;
+            if (panel == null) return facts;
+            try
+            {
+                double? ReadFeet(BuiltInParameter bip)
+                {
+                    var p = element.get_Parameter(bip);
+                    if (p == null || !p.HasValue || p.StorageType != StorageType.Double)
+                        p = (doc.GetElement(element.GetTypeId()) as ElementType)?.get_Parameter(bip);
+                    return p != null && p.HasValue && p.StorageType == StorageType.Double ? p.AsDouble() : (double?)null;
+                }
+                facts.PanelWidthFeet = ReadFeet(BuiltInParameter.CURTAIN_WALL_PANELS_WIDTH);
+                facts.PanelHeightFeet = ReadFeet(BuiltInParameter.CURTAIN_WALL_PANELS_HEIGHT);
+                facts.PanelSizeSource = "parameter";
+                if (!facts.PanelWidthFeet.HasValue || !facts.PanelHeightFeet.HasValue)
+                {
+                    facts.PanelWidthFeet = null;
+                    facts.PanelHeightFeet = null;
+                    if (element.get_BoundingBox(null) == null)
+                    {
+                        facts.PanelWidthFeet = 0;
+                        facts.PanelHeightFeet = 0;
+                        facts.PanelSizeSource = "boundingBox-empty";
+                    }
+                }
+            }
+            catch (Exception) { facts.PanelWidthFeet = null; facts.PanelHeightFeet = null; }
+            try
+            {
+                var hostId = panel.FindHostPanel();
+                if (hostId != null && hostId != ElementId.InvalidElementId && memberIds.Contains((long)hostId.GetIdValue())
+                    && doc.GetElement(hostId) is Wall)
+                    facts.HostWallId = (long)hostId.GetIdValue();
+            }
+            catch (Exception) { facts.HostWallId = null; }
+            return facts;
         }
 
         private sealed class DesignOptionBudgetException : Exception
@@ -317,13 +458,75 @@ namespace RevitMCP.Core
             public DesignOptionBudgetException() : base("選項三角面超過 maxTriangles；目前元件已捨棄，未處理的後續成員未匯出。") { }
         }
 
-        private static void AddDesignOptionGeometry(Document doc, GeometryElement geometry, Transform transform, GltfBuilder builder,
+        /// <summary>BuiltInCategory 的 Enum 名稱（語系無關）；無分類或非內建分類回 null。</summary>
+        private static string DesignOptionBuiltInCategoryName(Element element)
+        {
+            try
+            {
+                var category = element.Category;
+                if (category == null) return null;
+                var value = (long)category.Id.GetIdValue();
+                if (value < int.MinValue || value > int.MaxValue || !Enum.IsDefined(typeof(BuiltInCategory), (int)value)) return null;
+                return ((BuiltInCategory)(int)value).ToString();
+            }
+            catch (Exception) { return null; }
+        }
+
+        /// <summary>帷幕牆本體：有 CurtainGrid、面板＋豎框至少一個，且全部都在本選項成員內（各自獨立匯出）。</summary>
+        private static bool IsCurtainWallHostWithAllMembers(Element element, HashSet<long> memberIds, out int gridMemberCount)
+        {
+            gridMemberCount = 0;
+            try
+            {
+                var wall = element as Wall;
+                var grid = wall?.CurtainGrid;
+                if (grid == null) return false;
+                var ids = new HashSet<long>();
+                foreach (var id in grid.GetPanelIds()) ids.Add((long)id.GetIdValue());
+                foreach (var id in grid.GetMullionIds()) ids.Add((long)id.GetIdValue());
+                gridMemberCount = ids.Count;
+                return ids.Count > 0 && ids.All(memberIds.Contains);
+            }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>
+        /// 0 面元素的後備取幾何：依序改用實例幾何（GetInstanceGeometry，含實例參數）、Medium、Coarse 細緻度。
+        /// 不開 IncludeNonVisibleObjects，避免把隱藏子類別（空腔、參考線）混進模型。回傳取得幾何的方式；仍為 0 回 null。
+        /// 沒有 Revit 實機驗證前，不得宣稱這些後備能救回 Glazed／Wall 嵌板。
+        /// </summary>
+        private static string RetryDesignOptionGeometry(Document doc, Element element, GltfBuilder builder,
             Dictionary<long, int> materials, Vec3 offset, int budget, JArray diagnostics)
+        {
+            var names = new[] { "fine-instanceGeometry", "medium-symbolGeometry", "coarse-symbolGeometry" };
+            var levels = new[] { ViewDetailLevel.Fine, ViewDetailLevel.Medium, ViewDetailLevel.Coarse };
+            for (var i = 0; i < names.Length; i++)
+            {
+                try
+                {
+                    var geometry = element.get_Geometry(new Options { DetailLevel = levels[i], IncludeNonVisibleObjects = false });
+                    if (geometry != null) AddDesignOptionGeometry(doc, geometry, Transform.Identity, builder, materials, offset, budget, diagnostics, i == 0);
+                }
+                catch (DesignOptionBudgetException) { throw; }
+                catch (Exception) { continue; }
+                if (builder.CurrentElementTriangles > 0) return names[i];
+            }
+            return null;
+        }
+
+        private static void AddDesignOptionGeometry(Document doc, GeometryElement geometry, Transform transform, GltfBuilder builder,
+            Dictionary<long, int> materials, Vec3 offset, int budget, JArray diagnostics, bool instanceGeometry = false)
         {
             foreach (var obj in geometry)
             {
                 if (obj is GeometryInstance instance)
-                    AddDesignOptionGeometry(doc, instance.GetSymbolGeometry(), transform.Multiply(instance.Transform), builder, materials, offset, budget, diagnostics);
+                {
+                    // GetInstanceGeometry 已含實例變換；GetSymbolGeometry 是類型座標，需再乘 instance.Transform。
+                    if (instanceGeometry)
+                        AddDesignOptionGeometry(doc, instance.GetInstanceGeometry(), transform, builder, materials, offset, budget, diagnostics, true);
+                    else
+                        AddDesignOptionGeometry(doc, instance.GetSymbolGeometry(), transform.Multiply(instance.Transform), builder, materials, offset, budget, diagnostics);
+                }
                 else if (obj is Solid solid)
                 {
                     foreach (Face face in solid.Faces)
