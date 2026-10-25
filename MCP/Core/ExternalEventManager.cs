@@ -42,8 +42,17 @@ namespace RevitMCP.Core
         /// </summary>
         public void ExecuteCommand(Action<UIApplication> action)
         {
+            TryExecuteCommand(action);
+        }
+
+        /// <summary>
+        /// 同 <see cref="ExecuteCommand"/>，但回傳 <c>ExternalEvent.Raise()</c> 的結果，讓呼叫端能發現要求被拒絕
+        /// （Accepted／Pending 以外）。工作仍已進入佇列；呼叫端若放棄，要自行讓工作變成不執行。
+        /// </summary>
+        public ExternalEventRequest TryExecuteCommand(Action<UIApplication> action)
+        {
             _eventHandler.Enqueue(action);
-            _externalEvent.Raise();
+            return _externalEvent.Raise();
         }
 
         /// <summary>

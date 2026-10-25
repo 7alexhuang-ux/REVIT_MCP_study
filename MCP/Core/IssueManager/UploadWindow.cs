@@ -27,6 +27,11 @@ namespace RevitMCP.Core.IssueManager
         public Func<UploadFlow> CreateFlow { get; set; }
         public Action<string> OpenUrl { get; set; }
         public Action<string> Log { get; set; }
+        /// <summary>
+        /// 關閉視窗時還有可重試的上傳（伺服器端 bundle 與本機暫存檔都還在）：詢問是否放棄並清除。
+        /// 回傳 false＝不關視窗。null＝不詢問，直接放棄並清除。
+        /// </summary>
+        public Func<bool> ConfirmDiscardOnClose { get; set; }
     }
 
     /// <summary>
@@ -41,6 +46,7 @@ namespace RevitMCP.Core.IssueManager
         private UploadFlow _flow;
         private CancellationTokenSource _cts;
         private bool _running;
+        private bool _loggingIn;
         private int _runGeneration;
 
         private readonly TextBlock _accountText = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
@@ -89,6 +95,8 @@ namespace RevitMCP.Core.IssueManager
         public Button LoginButton { get { return _loginButton; } }
         public Button RetryButton { get { return _retryButton; } }
         public Button CancelButton { get { return _cancelButton; } }
+        public Button LogoutButton { get { return _logoutButton; } }
+        public Button SwitchAccountButton { get { return _switchButton; } }
         public TextBlock ResultText { get { return _resultText; } }
         public TextBlock SummaryText { get { return _summaryText; } }
         public TextBlock WarningText { get { return _warningText; } }
@@ -261,7 +269,7 @@ namespace RevitMCP.Core.IssueManager
             _uploadButton.Click += async (s, e) => await UploadAsync();
             _retryButton.Click += async (s, e) => await RetryAsync();
             _cancelButton.Click += (s, e) => CancelOrClose();
-            Closing += (s, e) => { if (_running && _cts != null) _cts.Cancel(); };
+            Closing += OnClosing;
             Loaded += async (s, e) => await InitialLoadAsync();
         }
 
@@ -302,6 +310,14 @@ namespace RevitMCP.Core.IssueManager
         private void SetStatus(string text)
         {
             _statusText.Text = text ?? string.Empty;
+        }
+
+        /// <summary>
+        /// 這一輪流程已有結果：之後才到達的舊進度回報（BeginInvoke 排在結果之前、執行在結果之後）不能蓋掉最後的狀態文字。
+        /// </summary>
+        private void InvalidateProgress()
+        {
+            _runGeneration++;
         }
 
         /// <summary>
@@ -350,20 +366,34 @@ namespace RevitMCP.Core.IssueManager
             {
                 Ui(() =>
                 {
+                    _loggingIn = true;
                     SetBusy(true);
                     _vm.SetProjects(new AddinProject[0]);
                     SetStatus("已開啟瀏覽器，請在瀏覽器中登入並按「授權」（最多等待 2 分鐘）…");
                     _cts = new CancellationTokenSource();
                     token = _cts.Token;
                 });
-                if (switchAccount) await _services.Auth.LogoutAsync(CancellationToken.None);
+                var revokeFailed = false;
+                if (switchAccount)
+                    revokeFailed = await _services.Auth.LogoutAsync(CancellationToken.None) == LogoutOutcome.ServerRevokeFailed;
                 await _services.Auth.LoginAsync(_services.Browser, TimeSpan.FromSeconds(120), token);
                 Ui(() =>
                 {
                     SetBusy(false);
                     RefreshAccount();
+                    // 換帳號時舊帳號的伺服器端撤銷沒成功：登入完成後也要讓使用者看到。
+                    _resultText.Text = revokeFailed ? Strings.SwitchRevokeFailed : string.Empty;
                 });
                 await LoadProjectsAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                Ui(() =>
+                {
+                    SetBusy(false);
+                    SetStatus(Strings.LoginCancelled);
+                    RefreshAccount();
+                });
             }
             catch (Exception ex)
             {
@@ -381,11 +411,13 @@ namespace RevitMCP.Core.IssueManager
             try
             {
                 Ui(() => SetBusy(true));
-                await _services.Auth.LogoutAsync(CancellationToken.None);
+                var outcome = await _services.Auth.LogoutAsync(CancellationToken.None);
                 Ui(() =>
                 {
                     _vm.SetProjects(new AddinProject[0]);
-                    SetStatus("已登出，本機的登入資料已刪除。");
+                    _resultText.Text = string.Empty;
+                    // 伺服器端撤銷沒成功時如實告知（本機資料不論如何都已刪除），並指引到網站手動撤銷。
+                    SetStatus(outcome == LogoutOutcome.ServerRevokeFailed ? Strings.LoggedOutRevokeFailed : Strings.LoggedOut);
                 });
             }
             catch (Exception ex)
@@ -427,17 +459,18 @@ namespace RevitMCP.Core.IssueManager
             SetBusy(true);
             try
             {
-                var result = await flow.RunAsync(request, new WindowExportProgress(this), new WindowFlowProgress(this, generation), token);
-                Ui(() => ShowSuccess(result));
+                var result = await flow.RunAsync(request, new WindowExportProgress(this, generation), new WindowFlowProgress(this, generation), token);
+                Ui(() => { InvalidateProgress(); ShowSuccess(result); });
             }
             catch (OperationCanceledException)
             {
-                Ui(() => SetStatus("已取消，沒有建立任何版本（伺服器端暫存已清除）。"));
+                Ui(() => { InvalidateProgress(); SetStatus("已取消，沒有建立任何版本（伺服器端暫存已清除）。"); });
             }
             catch (Exception ex)
             {
                 Ui(() =>
                 {
+                    InvalidateProgress();
                     ShowError(ex);
                     _retryButton.Visibility = flow.CanResume ? WpfVisibility.Visible : WpfVisibility.Collapsed;
                 });
@@ -464,16 +497,17 @@ namespace RevitMCP.Core.IssueManager
             try
             {
                 var result = await flow.ResumeAsync(new WindowFlowProgress(this, generation), token);
-                Ui(() => ShowSuccess(result));
+                Ui(() => { InvalidateProgress(); ShowSuccess(result); });
             }
             catch (OperationCanceledException)
             {
-                Ui(() => SetStatus("已取消，沒有建立任何版本（伺服器端暫存已清除）。"));
+                Ui(() => { InvalidateProgress(); SetStatus("已取消，沒有建立任何版本（伺服器端暫存已清除）。"); });
             }
             catch (Exception ex)
             {
                 Ui(() =>
                 {
+                    InvalidateProgress();
                     ShowError(ex);
                     _retryButton.Visibility = flow.CanResume ? WpfVisibility.Visible : WpfVisibility.Collapsed;
                 });
@@ -496,16 +530,48 @@ namespace RevitMCP.Core.IssueManager
                 SetStatus("正在取消…（目前的步驟結束後就會停止；3D 模型匯出無法中途取消）");
                 return;
             }
-            if (_flow != null && _flow.CanResume)
+            Close(); // 還有待重試的上傳時，由 OnClosing 詢問並清除（按 X 與按「關閉」走同一條路）
+        }
+
+        /// <summary>
+        /// 關閉視窗（含右上角 X）：進行中就送出取消，由流程自己清伺服器與本機暫存；
+        /// 閒置但還有待重試的上傳 → 詢問「放棄這次上傳並清除？」，同意就通知伺服器刪除並刪本機檔，不同意就留在視窗。
+        /// </summary>
+        private void OnClosing(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            if (_running)
             {
-                var ignored = _flow.DiscardAsync();
+                if (_cts != null) _cts.Cancel();
+                return;
             }
-            Close();
+            var flow = _flow;
+            if (flow == null || !flow.CanResume) return;
+            var confirm = _services.ConfirmDiscardOnClose;
+            if (confirm != null && !confirm())
+            {
+                e.Cancel = true;
+                return;
+            }
+            _retryButton.Visibility = WpfVisibility.Collapsed;
+            var ignored = DiscardQuietlyAsync(flow); // 本機檔同步刪除；伺服器 DELETE 在背景盡力而為
+        }
+
+        private async Task DiscardQuietlyAsync(UploadFlow flow)
+        {
+            try
+            {
+                await flow.DiscardAsync();
+            }
+            catch (Exception ex)
+            {
+                if (_services.Log != null) _services.Log("放棄上傳時清除暫存失敗：" + ex.GetType().Name);
+            }
         }
 
         private void SetBusy(bool busy)
         {
             _running = busy;
+            if (!busy) _loggingIn = false;
             _vm.IsBusy = busy;
             _progress.Visibility = busy ? WpfVisibility.Visible : WpfVisibility.Collapsed;
             _progress.IsIndeterminate = busy;
@@ -518,7 +584,7 @@ namespace RevitMCP.Core.IssueManager
             _loginButton.IsEnabled = !busy;
             _logoutButton.IsEnabled = !busy;
             _switchButton.IsEnabled = !busy;
-            _cancelButton.Content = busy ? "取消上傳" : "關閉";
+            _cancelButton.Content = busy ? (_loggingIn ? "取消登入" : "取消上傳") : "關閉";
             RefreshSummary();
         }
 
@@ -568,18 +634,21 @@ namespace RevitMCP.Core.IssueManager
         private sealed class WindowExportProgress : IExportProgress
         {
             private readonly IssueManagerUploadWindow _window;
-            public WindowExportProgress(IssueManagerUploadWindow window) { _window = window; }
+            private readonly int _generation;
+            public WindowExportProgress(IssueManagerUploadWindow window, int generation) { _window = window; _generation = generation; }
 
+            // 匯出的每個 Revit 步驟各自是一次 ExternalEvent，進度從背景執行緒回報：一律排進視窗的 Dispatcher，
+            // 不在 API 呼叫中途跑巢狀訊息迴圈。
             public void Report(string text, int step, int totalSteps)
             {
-                _window._statusText.Text = "[" + step + "/" + totalSteps + "] " + text + "\n匯出期間 Revit 無法操作，請勿切換文件或編輯模型。";
-                _window._progress.IsIndeterminate = false;
-                _window._progress.Value = totalSteps <= 0 ? 0 : 100.0 * (step - 1) / totalSteps;
-            }
-
-            public void Pump()
-            {
-                _window.Dispatcher.Invoke(DispatcherPriority.Background, new Action(() => { }));
+                _window.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (!_window._running || _window._runGeneration != _generation) return;
+                    _window._statusText.Text = "[" + step + "/" + totalSteps + "] " + text
+                        + "\n匯出進行中：請勿切換文件、編輯模型或關閉專案，直到匯出完成。";
+                    _window._progress.IsIndeterminate = false;
+                    _window._progress.Value = totalSteps <= 0 ? 0 : 100.0 * (step - 1) / totalSteps;
+                }));
             }
         }
 

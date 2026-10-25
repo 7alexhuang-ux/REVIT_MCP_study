@@ -19,7 +19,15 @@ namespace RevitMCP.Tests.IssueManager
         public List<string> Calls = new List<string>();
         public Action<string> OnCall = name => { };
         public double[] Origin = { 12.5, 0, -3.25 };
-        public byte[] PdfBytes = Encoding.ASCII.GetBytes("%PDF-1.7\n1 0 obj << /Type /Page >> endobj\n2 0 obj << /Type /Page >> endobj\n");
+        /// <summary>null＝依傳入的圖紙數產生同頁數的假 PDF（頁數檢查要求頁數＝圖紙數）；要測壞檔或頁數不符時才明確指定。</summary>
+        public byte[] PdfBytes;
+
+        public static byte[] PdfWithPages(int pages)
+        {
+            var text = new StringBuilder("%PDF-1.7\n");
+            for (var i = 0; i < pages; i++) text.Append((i + 1) + " 0 obj << /Type /Page >> endobj\n");
+            return Encoding.ASCII.GetBytes(text.ToString());
+        }
         public byte[] GlbBytes = Encoding.ASCII.GetBytes("glTF-fake-glb-bytes-0123456789");
         public Exception ThrowInModel;
         public IReadOnlyList<SheetItem> LastPdfSheets;
@@ -31,7 +39,7 @@ namespace RevitMCP.Tests.IssueManager
 
         public void ExportPdf(IReadOnlyList<SheetItem> sheetsInOrder, string outputPath)
         {
-            Calls.Add("pdf"); LastPdfSheets = sheetsInOrder; File.WriteAllBytes(outputPath, PdfBytes); OnCall("pdf");
+            Calls.Add("pdf"); LastPdfSheets = sheetsInOrder; File.WriteAllBytes(outputPath, PdfBytes ?? PdfWithPages(sheetsInOrder.Count)); OnCall("pdf");
         }
 
         public ModelExportResult ExportModel(bool includeDesignOptions, string workDirectory, string outputGlbPath)
@@ -52,8 +60,12 @@ namespace RevitMCP.Tests.IssueManager
 
     public sealed class InlineRunner : IApiThreadRunner
     {
-        public Task<T> RunAsync<T>(Func<T> work)
+        public int Calls;
+
+        public Task<T> RunAsync<T>(Func<T> work, CancellationToken ct)
         {
+            Calls++;
+            if (ct.IsCancellationRequested) { var cancelled = new TaskCompletionSource<T>(); cancelled.SetCanceled(); return cancelled.Task; }
             try { return Task.FromResult(work()); }
             catch (OperationCanceledException) { var tcs = new TaskCompletionSource<T>(); tcs.SetCanceled(); return tcs.Task; }
             catch (Exception ex) { var tcs = new TaskCompletionSource<T>(); tcs.SetException(ex); return tcs.Task; }
@@ -63,9 +75,7 @@ namespace RevitMCP.Tests.IssueManager
     public sealed class RecordingExportProgress : IExportProgress
     {
         public List<string> Steps = new List<string>();
-        public int Pumps;
         public void Report(string text, int step, int totalSteps) { Steps.Add(step + "/" + totalSteps + " " + text); }
-        public void Pump() { Pumps++; }
     }
 
     public static class RequestFactory
@@ -120,7 +130,7 @@ namespace RevitMCP.Tests.IssueManager
             CollectionAssert.Contains(manifest["warnings"].Select(w => (string)w).ToList(), "2 個材質的貼圖檔找不到，已退回材質顏色。");
             Assert.AreEqual(5, progress.Steps.Count);
             StringAssert.StartsWith("1/5", progress.Steps[0]);
-            Assert.GreaterOrEqual(progress.Pumps, 5, "每個步驟之間都讓視窗處理訊息");
+
         }
 
         [Test]
@@ -167,7 +177,7 @@ namespace RevitMCP.Tests.IssueManager
             using (var cts = new CancellationTokenSource())
             {
                 steps.OnCall = name => { if (name == "pdf") cts.Cancel(); };
-                Assert.Throws<OperationCanceledException>(() =>
+                Assert.Catch<OperationCanceledException>(() =>
                     new BundleExporter().Export(RequestFactory.Full(), steps, Path.Combine(_dir, "b"), null, cts.Token));
             }
             CollectionAssert.AreEqual(new[] { "doc", "pdf" }, steps.Calls, "PDF 之後就停，不得進入 GLB");
@@ -181,7 +191,7 @@ namespace RevitMCP.Tests.IssueManager
             using (var cts = new CancellationTokenSource())
             {
                 steps.OnCall = name => { if (name == "glb") cts.Cancel(); };
-                Assert.Throws<OperationCanceledException>(() =>
+                Assert.Catch<OperationCanceledException>(() =>
                     new BundleExporter().Export(RequestFactory.Full(), steps, Path.Combine(_dir, "b"), null, cts.Token));
             }
             CollectionAssert.AreEqual(new[] { "doc", "pdf", "glb" }, steps.Calls);
@@ -200,13 +210,16 @@ namespace RevitMCP.Tests.IssueManager
         }
 
         [Test]
-        public void PdfPageCountMismatchBecomesAWarningNotAFailure()
+        public void PdfPageCountMismatchAbortsTheExportInsteadOfJustWarning()
         {
-            var steps = new FakeSteps(); // 假 PDF 有 2 頁
+            var steps = new FakeSteps { PdfBytes = FakeSteps.PdfWithPages(2) }; // 假 PDF 有 2 頁（沒有物件串流＝頁數可信）
             var request = RequestFactory.Full();
             request.Sheets.Add(Samples.Sheet("sheet-a11", "A-11", "第三張"));
-            var bundle = new BundleExporter().Export(request, steps, Path.Combine(_dir, "b"), null, CancellationToken.None);
-            Assert.IsTrue(bundle.Manifest["warnings"].Any(w => ((string)w).Contains("頁數")));
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                new BundleExporter().Export(request, steps, Path.Combine(_dir, "b"), null, CancellationToken.None));
+            StringAssert.Contains("PDF 頁數（2）與勾選的圖紙數（3）不同", ex.Message);
+            StringAssert.Contains("已中止", ex.Message);
+            Assert.IsFalse(File.Exists(Path.Combine(_dir, "b", "manifest.json")), "中止後不產生 manifest");
         }
 
         [Test]

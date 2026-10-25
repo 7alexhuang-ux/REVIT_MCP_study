@@ -18,45 +18,125 @@ namespace RevitMCP.Core.IssueManager
         public const string ScriptName = "merge-option-glbs.mjs";
         private static readonly TimeSpan Timeout = TimeSpan.FromMinutes(10);
 
-        /// <summary>腳本搜尋順序：dll 同層 → %APPDATA%\RevitMCP\bridge\node\bundle → 往上找開發樹的 tools\。</summary>
-        public static string FindScript(string assemblyDirectory)
+        /// <summary>設成 "1" 才會讓 <see cref="FindScript"/> 往上找開發樹的 tools\（正式安裝版預設關閉）。</summary>
+        public const string DevToolsEnvironmentVariable = "REVITMCP_DEV_TOOLS";
+
+        public static bool DevToolsEnabled
+        {
+            get { return string.Equals(Environment.GetEnvironmentVariable(DevToolsEnvironmentVariable), "1", StringComparison.Ordinal); }
+        }
+
+        /// <summary>
+        /// 腳本搜尋順序：dll 同層 → %APPDATA%\RevitMCP\bridge\node\bundle →（僅開發旗標開啟時）往上找開發樹的 tools\。
+        /// 正式安裝版不往上層目錄找：專案資料夾或使用者可寫的上層目錄放一份同名腳本就會被 node 執行。
+        /// </summary>
+        public static string FindScript(string assemblyDirectory, bool? allowDevTools = null)
         {
             var candidates = new List<string>();
             if (!string.IsNullOrEmpty(assemblyDirectory)) candidates.Add(Path.Combine(assemblyDirectory, ScriptName));
             candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "RevitMCP", "bridge", "node", "bundle", ScriptName));
-            try
+            if (allowDevTools ?? DevToolsEnabled)
             {
-                var dir = string.IsNullOrEmpty(assemblyDirectory) ? null : new DirectoryInfo(assemblyDirectory);
-                for (var depth = 0; dir != null && depth < 8; depth++, dir = dir.Parent)
+                try
                 {
-                    candidates.Add(Path.Combine(dir.FullName, "tools", ScriptName));
+                    var dir = string.IsNullOrEmpty(assemblyDirectory) ? null : new DirectoryInfo(assemblyDirectory);
+                    for (var depth = 0; dir != null && depth < 8; depth++, dir = dir.Parent)
+                    {
+                        candidates.Add(Path.Combine(dir.FullName, "tools", ScriptName));
+                    }
                 }
+                catch (Exception) { }
             }
-            catch (Exception) { }
             return candidates.FirstOrDefault(File.Exists);
         }
 
-        public static string FindNode()
+        /// <summary>
+        /// 找 node.exe，只回傳「絕對路徑且檔案存在」的結果，絕不使用裸名 "node"：
+        /// UseShellExecute=false 時 Windows 會先在目前工作目錄找，專案資料夾放一個 node.exe 就會被執行。
+        /// 順序：標準安裝位置 → PATH 內的各目錄。PATH 內相對路徑、空項目、位於目前工作目錄或
+        /// <paramref name="untrustedRoots"/>（例如開啟中專案所在的資料夾）之下的目錄一律略過。
+        /// </summary>
+        public static string FindNode(IEnumerable<string> untrustedRoots = null)
         {
-            if (CanRun("node")) return "node";
-            var candidates = new List<string>
+            return FindNode(untrustedRoots, Environment.GetEnvironmentVariable("PATH"), KnownNodeLocations(), CanRun);
+        }
+
+        public static string FindNode(IEnumerable<string> untrustedRoots, string pathVariable, IEnumerable<string> knownLocations,
+            Func<string, bool> canRun)
+        {
+            var distrusted = new List<string>();
+            try { distrusted.Add(Environment.CurrentDirectory); } catch (Exception) { }
+            if (untrustedRoots != null) distrusted.AddRange(untrustedRoots.Where(r => !string.IsNullOrWhiteSpace(r)));
+
+            var candidates = new List<string>();
+            foreach (var known in knownLocations ?? Enumerable.Empty<string>()) candidates.Add(known);
+            foreach (var entry in (pathVariable ?? string.Empty).Split(Path.PathSeparator))
+            {
+                var directory = entry.Trim().Trim('"');
+                if (!IsFullyQualified(directory)) continue;
+                candidates.Add(Path.Combine(directory, "node.exe"));
+            }
+
+            foreach (var candidate in candidates)
+            {
+                string full;
+                try
+                {
+                    if (!IsFullyQualified(candidate)) continue;
+                    full = Path.GetFullPath(candidate);
+                }
+                catch (Exception) { continue; }
+                if (!string.Equals(Path.GetFileName(full), "node.exe", StringComparison.OrdinalIgnoreCase)) continue;
+                if (distrusted.Any(root => IsUnder(full, root))) continue;
+                if (!File.Exists(full)) continue;
+                if (canRun(full)) return full;
+            }
+            return null;
+        }
+
+        private static IEnumerable<string> KnownNodeLocations()
+        {
+            return new[]
             {
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "nodejs", "node.exe"),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "nodejs", "node.exe"),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "nvs", "default", "node.exe"),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "nvm", "node.exe")
             };
-            return candidates.FirstOrDefault(File.Exists);
         }
 
-        private static bool CanRun(string fileName)
+        /// <summary>完整的絕對路徑（磁碟機代號加反斜線，或 UNC）；排除 "C:foo"（相對於該磁碟機目前目錄）與 "\foo" 這類半相對寫法。</summary>
+        private static bool IsFullyQualified(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || path.Length < 3) return false;
+            if (char.IsLetter(path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) return true;
+            return path.StartsWith("\\\\", StringComparison.Ordinal);
+        }
+
+        /// <summary>path 是否在 root 資料夾之下（含 root 本身）；不分大小寫，兩邊都先轉成完整路徑。</summary>
+        public static bool IsUnder(string path, string root)
+        {
+            try
+            {
+                var fullRoot = Path.GetFullPath(root).TrimEnd('\\', '/') + "\\";
+                var fullPath = Path.GetFullPath(path);
+                return fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception)
+            {
+                return true; // 無法判斷時當成不可信
+            }
+        }
+
+        private static bool CanRun(string absoluteNodePath)
         {
             try
             {
                 var psi = new ProcessStartInfo
                 {
-                    FileName = fileName, Arguments = "--version", UseShellExecute = false,
+                    FileName = absoluteNodePath, Arguments = "--version", UseShellExecute = false,
+                    WorkingDirectory = Path.GetDirectoryName(absoluteNodePath),
                     RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true
                 };
                 using (var process = Process.Start(psi))
@@ -71,9 +151,9 @@ namespace RevitMCP.Core.IssueManager
         }
 
         /// <summary>合併 reportPath（design_options_export.json）指向的分件到 outputGlbPath。失敗丟 InvalidOperationException（白話）。</summary>
-        public static void Merge(string assemblyDirectory, string reportPath, string outputGlbPath)
+        public static void Merge(string assemblyDirectory, string reportPath, string outputGlbPath, IEnumerable<string> untrustedRoots = null)
         {
-            var node = FindNode();
+            var node = FindNode(untrustedRoots);
             if (node == null)
                 throw new InvalidOperationException("找不到 Node.js。含設計選項的模型需要 Node.js 合併 GLB 分件；請安裝 Node.js，或取消勾選「含設計選項」。");
             var script = FindScript(assemblyDirectory);
@@ -83,6 +163,7 @@ namespace RevitMCP.Core.IssueManager
             var psi = new ProcessStartInfo
             {
                 FileName = node,
+                WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(outputGlbPath)), // 自己的匯出資料夾，不是專案資料夾
                 Arguments = Quote(script) + " " + Quote(reportPath) + " " + Quote(outputGlbPath),
                 UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
                 StandardErrorEncoding = Encoding.UTF8, StandardOutputEncoding = Encoding.UTF8

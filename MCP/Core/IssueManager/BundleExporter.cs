@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -34,17 +35,19 @@ namespace RevitMCP.Core.IssueManager
         void ExportNamedViews(IReadOnlyList<string> viewUniqueIds, double[] originOffsetMeters, string workDirectory, string outputPath);
     }
 
-    /// <summary>視窗用的進度回報。Pump 讓視窗在步驟之間重繪、處理「取消」按鈕（Revit 單執行緒，匯出期間視窗只能靠這個更新）。</summary>
+    /// <summary>
+    /// 視窗用的進度回報。匯出流程的每個 Revit 步驟各自是一次 ExternalEvent，步驟之間回到訊息迴圈，
+    /// 所以視窗照一般 WPF 方式更新與處理「取消」，不再需要在 API 呼叫中途跑巢狀訊息迴圈。
+    /// Report 可能在背景執行緒被呼叫，實作要自行切回 UI 執行緒。
+    /// </summary>
     public interface IExportProgress
     {
         void Report(string text, int step, int totalSteps);
-        void Pump();
     }
 
     public sealed class NullExportProgress : IExportProgress
     {
         public void Report(string text, int step, int totalSteps) { }
-        public void Pump() { }
     }
 
     public sealed class ExportedBundle
@@ -58,7 +61,9 @@ namespace RevitMCP.Core.IssueManager
 
     /// <summary>
     /// 匯出流程步驟 2～5（revit-addin-export.md §3）：PDF → GLB → 命名視圖 → manifest。
-    /// 每個步驟之間檢查取消旗標並讓視窗處理訊息；GLB 匯出本身是單一長呼叫，無法中途取消。
+    /// 每個 Revit 步驟各自經 <see cref="IApiThreadRunner"/> 排成一次 ExternalEvent 執行，步驟之間（在呼叫端執行緒上）
+    /// 檢查取消旗標並回報進度；檔案雜湊、manifest 等不需要 Revit API 的工作不佔用 Revit 執行緒。
+    /// GLB 匯出本身是單一長呼叫，無法中途取消。
     /// </summary>
     public sealed class BundleExporter
     {
@@ -74,11 +79,19 @@ namespace RevitMCP.Core.IssueManager
             _now = now ?? (() => DateTimeOffset.UtcNow);
         }
 
+        /// <summary>同步版本（測試與沒有 Revit 的情境）：步驟直接在目前執行緒執行。</summary>
         public ExportedBundle Export(ExportRequest request, IBundleExportSteps steps, string bundleDirectory,
             IExportProgress progress, CancellationToken ct)
         {
+            return ExportAsync(request, steps, new InlineApiThreadRunner(), bundleDirectory, progress, ct).GetAwaiter().GetResult();
+        }
+
+        public async Task<ExportedBundle> ExportAsync(ExportRequest request, IBundleExportSteps steps, IApiThreadRunner runner,
+            string bundleDirectory, IExportProgress progress, CancellationToken ct)
+        {
             if (request == null) throw new ArgumentNullException("request");
             if (steps == null) throw new ArgumentNullException("steps");
+            if (runner == null) throw new ArgumentNullException("runner");
             progress = progress ?? new NullExportProgress();
             System.IO.Directory.CreateDirectory(bundleDirectory);
             var workDirectory = Path.Combine(bundleDirectory, "work");
@@ -94,29 +107,35 @@ namespace RevitMCP.Core.IssueManager
             var files = new List<BundleFile>();
             var origin = new double[] { 0, 0, 0 };
 
-            Checkpoint(progress, ct);
+            ct.ThrowIfCancellationRequested();
             progress.Report("讀取文件資訊", ++step, total);
-            var doc = steps.GetDocInfo();
+            var doc = await runner.RunAsync(() => steps.GetDocInfo(), ct).ConfigureAwait(false);
 
             if (doExportPdf)
             {
-                Checkpoint(progress, ct);
+                ct.ThrowIfCancellationRequested();
                 progress.Report("匯出圖紙 PDF（" + request.Sheets.Count + " 張）", ++step, total);
                 var pdfPath = Path.Combine(bundleDirectory, PdfName);
-                steps.ExportPdf(request.Sheets, pdfPath);
+                await runner.RunAsync(() => { steps.ExportPdf(request.Sheets, pdfPath); return 0; }, ct).ConfigureAwait(false);
                 RequireHeader(pdfPath, Encoding.ASCII.GetBytes("%PDF-"), "PDF 匯出沒有產生有效的 PDF 檔。");
-                var pages = PdfInspector.TryCountPages(pdfPath);
-                if (pages.HasValue && pages.Value != request.Sheets.Count)
-                    warnings.Add("PDF 頁數（" + pages.Value + "）與勾選的圖紙數（" + request.Sheets.Count + "）不同，頁序對應請人工檢查。");
+                var inspection = PdfInspector.Inspect(pdfPath);
+                if (inspection.PageObjects.HasValue && inspection.PageObjects.Value != request.Sheets.Count)
+                {
+                    var message = "PDF 頁數（" + inspection.PageObjects.Value + "）與勾選的圖紙數（" + request.Sheets.Count + "）不同";
+                    // 頁數多於圖紙數一定是錯的；少於圖紙數時，若 PDF 把頁面物件壓進物件串流，估計會偏低，只能警告。
+                    if (inspection.PageObjects.Value > request.Sheets.Count || inspection.CountIsReliable)
+                        throw new InvalidOperationException(message + "，為避免網站上的圖紙和頁面對錯，已中止。請確認 Revit 的 PDF 匯出設定（合併成單一檔案、每張圖紙一頁）後重試。");
+                    warnings.Add(message + "（此 PDF 的頁面物件有壓縮，頁數只是估計），頁序對應請人工檢查。");
+                }
                 files.Add(Describe(BundleFile.Pdf, PdfName, pdfPath));
             }
 
             if (doExportModel)
             {
-                Checkpoint(progress, ct);
+                ct.ThrowIfCancellationRequested();
                 progress.Report("匯出 3D 模型 GLB（大模型可能需要十幾分鐘，期間無法取消）", ++step, total);
                 var glbPath = Path.Combine(bundleDirectory, GlbName);
-                var model = steps.ExportModel(request.IncludeDesignOptions, workDirectory, glbPath);
+                var model = await runner.RunAsync(() => steps.ExportModel(request.IncludeDesignOptions, workDirectory, glbPath), ct).ConfigureAwait(false);
                 RequireHeader(glbPath, Encoding.ASCII.GetBytes("glTF"), "模型匯出沒有產生有效的 GLB 檔。");
                 if (model.OriginOffsetMeters == null || model.OriginOffsetMeters.Length != 3)
                     throw new InvalidOperationException("模型匯出沒有回報共用原點。");
@@ -131,21 +150,22 @@ namespace RevitMCP.Core.IssueManager
 
             if (doExportNamedViews)
             {
-                Checkpoint(progress, ct);
+                ct.ThrowIfCancellationRequested();
                 progress.Report("匯出 3D 視角（" + threeD.Count + " 個）", ++step, total);
                 var namedPath = Path.Combine(bundleDirectory, NamedViewsName);
-                steps.ExportNamedViews(threeD, origin, workDirectory, namedPath);
+                var capturedOrigin = origin;
+                await runner.RunAsync(() => { steps.ExportNamedViews(threeD, capturedOrigin, workDirectory, namedPath); return 0; }, ct).ConfigureAwait(false);
                 RequireJsonObject(namedPath, "3D 視角匯出沒有產生有效的 JSON 檔。");
                 files.Add(Describe(BundleFile.NamedViews, NamedViewsName, namedPath));
             }
 
-            Checkpoint(progress, ct);
+            ct.ThrowIfCancellationRequested();
             progress.Report("產生版本包清單 manifest.json", ++step, total);
             var manifest = ManifestBuilder.Build(request, doc, _now(), origin, files, warnings);
             var manifestPath = Path.Combine(bundleDirectory, ManifestName);
             File.WriteAllText(manifestPath, manifest.ToString(Formatting.Indented), new UTF8Encoding(false));
             TryDeleteDirectory(workDirectory); // 匯出的中間檔（分件 GLB 等）不再需要，上傳前先釋放磁碟空間
-            Checkpoint(progress, ct);
+            ct.ThrowIfCancellationRequested();
 
             return new ExportedBundle { Directory = bundleDirectory, ManifestPath = manifestPath, Manifest = manifest, Files = files };
         }
@@ -158,12 +178,6 @@ namespace RevitMCP.Core.IssueManager
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
-        }
-
-        private static void Checkpoint(IExportProgress progress, CancellationToken ct)
-        {
-            progress.Pump();
-            ct.ThrowIfCancellationRequested();
         }
 
         public static BundleFile Describe(string kind, string name, string path)
@@ -209,22 +223,63 @@ namespace RevitMCP.Core.IssueManager
         }
     }
 
-    /// <summary>PDF 頁數估計（只用來提醒，不當作判斷依據）：數 /Type /Page 物件。壓縮在物件串流裡的 PDF 會數不到，回 null。</summary>
+    /// <summary>PDF 頁數估計的結果。</summary>
+    public sealed class PdfInspection
+    {
+        /// <summary>數到的 /Type /Page 物件數；一個都沒數到（頁面物件全壓縮在物件串流裡）時為 null。</summary>
+        public int? PageObjects { get; set; }
+        /// <summary>檔案內沒有物件串流（/ObjStm）：數到的頁數可信。有物件串流時，部分頁面物件可能數不到，數字只會偏低。</summary>
+        public bool CountIsReliable { get; set; }
+    }
+
+    /// <summary>
+    /// PDF 頁數估計：串流掃描 /Type /Page 物件（每次只讀 1 MB，不把整份 PDF 讀進記憶體；大圖紙集的 PDF 可達數百 MB）。
+    /// 壓縮在物件串流裡的 PDF 會數不到或偏低，所以同時回報可信度。
+    /// </summary>
     public static class PdfInspector
     {
         private static readonly Regex PageObject = new Regex(@"/Type\s*/Page(?![A-Za-z])", RegexOptions.Compiled);
+        private const int ChunkBytes = 1 << 20;
+        /// <summary>跨區塊保留的字元數：必須大於 pattern 長度（含兩段之間的空白）。</summary>
+        private const int OverlapChars = 128;
+        private const string ObjectStreamMarker = "/ObjStm";
 
         public static int? TryCountPages(string path)
         {
+            return Inspect(path).PageObjects;
+        }
+
+        public static PdfInspection Inspect(string path)
+        {
             try
             {
-                var text = Encoding.GetEncoding("ISO-8859-1").GetString(File.ReadAllBytes(path));
-                var count = PageObject.Matches(text).Count;
-                return count > 0 ? (int?)count : null;
+                var latin1 = Encoding.GetEncoding("ISO-8859-1");
+                var buffer = new byte[ChunkBytes];
+                var count = 0;
+                var sawObjectStream = false;
+                var carry = string.Empty;
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16))
+                {
+                    int read;
+                    while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        var text = carry + latin1.GetString(buffer, 0, read);
+                        var last = stream.Position >= stream.Length;
+                        // 只計入起點在「已決定區」內的比對；尾端 OverlapChars 個字元留到下一輪（那時後面的字元也讀進來了）。
+                        var decidedEnd = last ? text.Length : Math.Max(0, text.Length - OverlapChars);
+                        foreach (Match match in PageObject.Matches(text))
+                        {
+                            if (match.Index < decidedEnd) count++;
+                        }
+                        if (!sawObjectStream && text.IndexOf(ObjectStreamMarker, StringComparison.Ordinal) >= 0) sawObjectStream = true;
+                        carry = text.Substring(decidedEnd);
+                    }
+                }
+                return new PdfInspection { PageObjects = count > 0 ? (int?)count : null, CountIsReliable = !sawObjectStream };
             }
             catch (Exception)
             {
-                return null;
+                return new PdfInspection { PageObjects = null, CountIsReliable = false };
             }
         }
     }

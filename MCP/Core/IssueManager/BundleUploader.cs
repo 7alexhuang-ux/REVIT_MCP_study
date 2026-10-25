@@ -25,6 +25,9 @@ namespace RevitMCP.Core.IssueManager
     public sealed class UploadState
     {
         public string BundleId { get; set; }
+        /// <summary>狀態是從先前的檔案載入的（＝這是重試／續傳，不是第一次上傳）。不寫入檔案。</summary>
+        [JsonIgnore]
+        public bool IsResume { get; private set; }
         public Dictionary<string, FileUploadState> Files { get; set; } = new Dictionary<string, FileUploadState>(StringComparer.Ordinal);
 
         public static UploadState LoadOrCreate(string path, string bundleId)
@@ -34,7 +37,11 @@ namespace RevitMCP.Core.IssueManager
                 if (File.Exists(path))
                 {
                     var state = JsonConvert.DeserializeObject<UploadState>(File.ReadAllText(path, Encoding.UTF8));
-                    if (state != null && state.BundleId == bundleId) return state;
+                    if (state != null && state.BundleId == bundleId)
+                    {
+                        state.IsResume = true;
+                        return state;
+                    }
                 }
             }
             catch (Exception)
@@ -118,6 +125,10 @@ namespace RevitMCP.Core.IssueManager
                     continue;
                 }
 
+                // 重試時重新計算磁碟上的 sha256：匯出當下算的雜湊只代表那一刻的檔案；
+                // 如果檔案之後被改過／被截斷，續傳會把新舊內容混在同一個物件裡，finalize 才發現雜湊不符。
+                if (state.IsResume) VerifyFileUnchanged(file);
+
                 using (var stream = new FileStream(file.Path, FileMode.Open, FileAccess.Read, FileShare.Read))
                 {
                     for (var part = fileState.PartsDone; part < partCount; part++)
@@ -139,6 +150,14 @@ namespace RevitMCP.Core.IssueManager
                 fileState.Completed = true;
                 state.Save(statePath);
             }
+        }
+
+        private static void VerifyFileUnchanged(BundleFile file)
+        {
+            var changed = !File.Exists(file.Path) || new FileInfo(file.Path).Length != file.Bytes
+                || !string.Equals(BundleExporter.Sha256Hex(file.Path), file.Sha256, StringComparison.OrdinalIgnoreCase);
+            if (changed)
+                throw new InvalidOperationException("本機的「" + file.Name + "」檔案和匯出時不一樣了（被改動或損毀），無法接續上傳。請放棄這次上傳後重新匯出。");
         }
 
         private async Task PutWithRetryAsync(string url, byte[] buffer, CancellationToken ct)

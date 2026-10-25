@@ -25,19 +25,21 @@ namespace RevitMCP.Core.IssueManager
     public sealed class LoopbackCallbackListener : IDisposable
     {
         private const int MaxRequestBytes = 8192;
-        private static readonly TimeSpan ConnectionReadTimeout = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan DefaultConnectionReadTimeout = TimeSpan.FromSeconds(5);
 
         private readonly TcpListener _listener;
         private readonly string _expectedState;
+        private readonly TimeSpan _connectionReadTimeout;
         private readonly TaskCompletionSource<CallbackResult> _result =
             new TaskCompletionSource<CallbackResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly CancellationTokenSource _stop = new CancellationTokenSource();
         private int _disposed;
 
-        private LoopbackCallbackListener(TcpListener listener, string expectedState)
+        private LoopbackCallbackListener(TcpListener listener, string expectedState, TimeSpan connectionReadTimeout)
         {
             _listener = listener;
             _expectedState = expectedState;
+            _connectionReadTimeout = connectionReadTimeout;
         }
 
         public int Port { get; private set; }
@@ -45,12 +47,14 @@ namespace RevitMCP.Core.IssueManager
         /// <summary>實際綁定的位址（測試用，必為 127.0.0.1）。</summary>
         public IPAddress LocalAddress { get { return ((IPEndPoint)_listener.LocalEndpoint).Address; } }
 
-        public static LoopbackCallbackListener Start(string expectedState)
+        /// <param name="connectionReadTimeout">單一連線讀完請求標頭的上限（預設 5 秒）；只連線不送資料的程式不能一直佔住連線。</param>
+        public static LoopbackCallbackListener Start(string expectedState, TimeSpan? connectionReadTimeout = null)
         {
             if (string.IsNullOrEmpty(expectedState)) throw new ArgumentException("state 不可為空。");
             var tcp = new TcpListener(IPAddress.Loopback, 0);
+            tcp.ExclusiveAddressUse = true; // 別的程式不能用 SO_REUSEADDR 搶綁同一個埠、攔截授權碼
             tcp.Start();
-            var instance = new LoopbackCallbackListener(tcp, expectedState)
+            var instance = new LoopbackCallbackListener(tcp, expectedState, connectionReadTimeout ?? DefaultConnectionReadTimeout)
             {
                 Port = ((IPEndPoint)tcp.LocalEndpoint).Port
             };
@@ -107,16 +111,13 @@ namespace RevitMCP.Core.IssueManager
             {
                 try
                 {
-                    using (var timeout = new CancellationTokenSource(ConnectionReadTimeout))
-                    {
-                        var stream = client.GetStream();
-                        var head = await ReadHeadAsync(stream, timeout.Token).ConfigureAwait(false);
-                        int status;
-                        string body;
-                        var outcome = Evaluate(head, out status, out body);
-                        await WriteResponseAsync(stream, status, body).ConfigureAwait(false);
-                        if (outcome != null) _result.TrySetResult(outcome);
-                    }
+                    var stream = client.GetStream();
+                    var head = await ReadHeadAsync(stream, client, _connectionReadTimeout).ConfigureAwait(false);
+                    int status;
+                    string body;
+                    var outcome = Evaluate(head, out status, out body);
+                    await WriteResponseAsync(stream, status, body).ConfigureAwait(false);
+                    if (outcome != null) _result.TrySetResult(outcome);
                 }
                 catch (Exception)
                 {
@@ -125,13 +126,28 @@ namespace RevitMCP.Core.IssueManager
             }
         }
 
-        private static async Task<string> ReadHeadAsync(NetworkStream stream, CancellationToken token)
+        /// <summary>
+        /// 讀請求標頭，整段不得超過 timeout。.NET Framework 4.8 的 NetworkStream.ReadAsync 不理會 CancellationToken，
+        /// 所以用 Task.WhenAny 搭配 Task.Delay 實作逾時，逾時就關閉連線（讓卡住的 ReadAsync 以例外結束）。
+        /// </summary>
+        private static async Task<string> ReadHeadAsync(NetworkStream stream, TcpClient client, TimeSpan timeout)
         {
             var buffer = new byte[MaxRequestBytes];
             var used = 0;
+            var deadline = DateTime.UtcNow + timeout;
             while (used < buffer.Length)
             {
-                var read = await stream.ReadAsync(buffer, used, buffer.Length - used, token).ConfigureAwait(false);
+                var remaining = deadline - DateTime.UtcNow;
+                if (remaining <= TimeSpan.Zero) throw new TimeoutException("讀取回呼請求逾時。");
+                var readTask = stream.ReadAsync(buffer, used, buffer.Length - used);
+                var finished = await Task.WhenAny(readTask, Task.Delay(remaining)).ConfigureAwait(false);
+                if (finished != readTask)
+                {
+                    try { client.Close(); } catch (Exception) { }
+                    var ignored = readTask.ContinueWith(t => { var observed = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+                    throw new TimeoutException("讀取回呼請求逾時。");
+                }
+                var read = await readTask.ConfigureAwait(false);
                 if (read <= 0) break;
                 used += read;
                 var text = Encoding.ASCII.GetString(buffer, 0, used);

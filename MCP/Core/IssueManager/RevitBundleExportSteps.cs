@@ -92,7 +92,7 @@ namespace RevitMCP.Core.IssueManager
                 Directory.CreateDirectory(mergedDir);
                 var merged = Path.Combine(mergedDir, "model.glb");
                 GlbMergeRunner.Merge(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
-                    Path.Combine(exportDir, "design_options_export.json"), merged);
+                    Path.Combine(exportDir, "design_options_export.json"), merged, UntrustedRoots());
                 File.Copy(merged, outputGlbPath, true);
             }
 
@@ -119,6 +119,17 @@ namespace RevitMCP.Core.IssueManager
             var produced = Path.Combine(dir, "named_views.json");
             if (!File.Exists(produced)) throw new InvalidOperationException("3D 視角匯出完成但找不到輸出檔。");
             File.Copy(produced, outputPath, true);
+        }
+
+        /// <summary>尋找 node.exe 時不可信任的資料夾：開啟中專案所在的資料夾（裡面的 node.exe 不是使用者安裝的 Node.js）。</summary>
+        private IEnumerable<string> UntrustedRoots()
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(_expectedPath)) return new[] { Path.GetDirectoryName(_expectedPath) };
+            }
+            catch (ArgumentException) { }
+            return new string[0];
         }
 
         private static double[] ReadOrigin(JObject report)
@@ -152,28 +163,25 @@ namespace RevitMCP.Core.IssueManager
         }
     }
 
-    /// <summary>把工作排進 ExternalEventManager 佇列，在 Revit API 執行緒執行（與 MCP 指令共用同一條佇列，不會互相打斷）。</summary>
+    /// <summary>
+    /// 把工作排進 ExternalEventManager 佇列，在 Revit API 執行緒執行（與 MCP 指令共用同一條佇列，不會互相打斷）。
+    /// 排隊取消、Raise() 被拒、開始執行前的逾時都由 <see cref="QueuedApiThreadRunner"/> 處理（可單元測試）；
+    /// 這裡只負責把工作交給 ExternalEvent 並回報 Raise() 是否被接受。
+    /// </summary>
     internal sealed class RevitApiThreadRunner : IApiThreadRunner
     {
-        public Task<T> RunAsync<T>(Func<T> work)
+        private readonly QueuedApiThreadRunner _inner = new QueuedApiThreadRunner(Post);
+
+        public Task<T> RunAsync<T>(Func<T> work, System.Threading.CancellationToken ct)
         {
-            var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-            ExternalEventManager.Instance.ExecuteCommand(app =>
-            {
-                try
-                {
-                    completion.SetResult(work());
-                }
-                catch (OperationCanceledException)
-                {
-                    completion.SetCanceled();
-                }
-                catch (Exception ex)
-                {
-                    completion.SetException(ex);
-                }
-            });
-            return completion.Task;
+            return _inner.RunAsync(work, ct);
+        }
+
+        private static bool Post(Action job)
+        {
+            var request = ExternalEventManager.Instance.TryExecuteCommand(app => job());
+            // Pending＝先前的要求還沒被處理，處理常式的 Execute 會把整個佇列清空，所以我們的工作也會被執行。
+            return request == ExternalEventRequest.Accepted || request == ExternalEventRequest.Pending;
         }
     }
 }

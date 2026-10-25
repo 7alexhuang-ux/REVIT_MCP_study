@@ -39,7 +39,9 @@ namespace RevitMCP.Core.IssueManager
             {
                 Browser = new SystemBrowserLauncher(),
                 Log = message => Logger.Info("[IssueManager] " + message),
-                OpenUrl = url => new SystemBrowserLauncher().Open(url)
+                OpenUrl = url => new SystemBrowserLauncher().Open(url),
+                ConfirmDiscardOnClose = () => System.Windows.MessageBox.Show(Strings.ConfirmDiscardText, Strings.ConfirmDiscardTitle,
+                    System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question) == System.Windows.MessageBoxResult.Yes
             };
 
             string baseUrl;
@@ -79,8 +81,26 @@ namespace RevitMCP.Core.IssueManager
 
             var capturedApi = services.Api;
             services.CreateFlow = () => new UploadFlow(capturedApi, new RevitBundleExportSteps(uiApp, snapshot), new RevitApiThreadRunner(),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RevitMCP", "issue-manager", "bundles"));
+                BundleTempCleaner.DefaultRoot());
             return services;
+        }
+
+        /// <summary>外掛啟動時呼叫：背景刪除超過 <see cref="BundleTempCleaner.DefaultMaxAgeDays"/> 天的舊上傳暫存。失敗不影響啟動。</summary>
+        public static void CleanupOldBundlesInBackground()
+        {
+            try
+            {
+                System.Threading.Tasks.Task.Run(() =>
+                {
+                    try
+                    {
+                        BundleTempCleaner.CleanOld(BundleTempCleaner.DefaultRoot(), TimeSpan.FromDays(BundleTempCleaner.DefaultMaxAgeDays),
+                            DateTimeOffset.UtcNow, message => Logger.Info("[IssueManager] " + message));
+                    }
+                    catch (Exception) { }
+                });
+            }
+            catch (Exception) { }
         }
 
         private static HttpClient CreateHttpClient(TimeSpan timeout)

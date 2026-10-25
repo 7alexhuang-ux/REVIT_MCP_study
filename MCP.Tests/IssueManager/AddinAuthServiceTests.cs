@@ -30,6 +30,10 @@ namespace RevitMCP.Tests.IssueManager
         public int RefreshRequests;
         public int ExchangeRequests;
         public bool FailRefreshWith503;
+        public int RevokeByBearer;
+        public int RevokeByRefresh;
+        /// <summary>模擬伺服器端認為 access 已過期：Bearer 一律 401。</summary>
+        public bool ForceRevoke401;
         public int AccessExpiresInSeconds = 3600;
         public string LastIssuedAccess;
         public string LastIssuedRefresh;
@@ -153,13 +157,29 @@ namespace RevitMCP.Tests.IssueManager
 
             if (request.Method == HttpMethod.Post && path == "/api/addin/token/revoke")
             {
+                // addin-auth.md §4.4：Bearer 有效 → 撤銷該 access 的整族；Bearer 無效 → 401；
+                // 沒有 Authorization 但 body 帶 refresh_token → 撤銷該 refresh 所屬的族（不存在也回 200）。
                 lock (_gate)
                 {
-                    var access = request.Authorization == null ? null : request.Authorization.Replace("Bearer ", string.Empty);
                     string family;
-                    if (access != null && _accessFamily.TryGetValue(access, out family)) _revokedFamilies.Add(family);
+                    if (request.Authorization != null)
+                    {
+                        var access = request.Authorization.Replace("Bearer ", string.Empty);
+                        if (IsAccessValid(access) && !ForceRevoke401 && _accessFamily.TryGetValue(access, out family))
+                        {
+                            _revokedFamilies.Add(family);
+                            RevokeByBearer++;
+                            return FakeHandler.Json(HttpStatusCode.OK, new JObject { ["revoked"] = true });
+                        }
+                        return FakeHandler.Error(HttpStatusCode.Unauthorized, "unauthorized");
+                    }
+                    var refresh = request.Json == null ? null : (string)request.Json["refresh_token"];
+                    if (refresh == null) return FakeHandler.Error(HttpStatusCode.BadRequest, "invalid_request");
+                    SecretsSeen.Add(refresh);
+                    if (_refreshFamily.TryGetValue(refresh, out family)) _revokedFamilies.Add(family);
+                    RevokeByRefresh++;
+                    return FakeHandler.Json(HttpStatusCode.OK, new JObject { ["revoked"] = true });
                 }
-                return FakeHandler.Json(HttpStatusCode.OK, new JObject { ["revoked"] = true });
             }
 
             var token = request.Authorization == null ? null : request.Authorization.Replace("Bearer ", string.Empty);
@@ -390,9 +410,94 @@ namespace RevitMCP.Tests.IssueManager
             var auth = NewAuth();
             await auth.LoginAsync(Browser(), TimeSpan.FromSeconds(10), CancellationToken.None);
             _server.Handler.BeforeRespond = r => { if (r.Uri.AbsolutePath.EndsWith("/revoke")) throw new HttpRequestException("offline"); return Task.FromResult(0); };
-            await auth.LogoutAsync(CancellationToken.None);
+            var outcome = await auth.LogoutAsync(CancellationToken.None);
+            Assert.AreEqual(LogoutOutcome.ServerRevokeFailed, outcome, "撤銷失敗必須如實回報，讓視窗告知使用者");
             Assert.IsNull(_vault.Stored);
             Assert.IsFalse(auth.IsLoggedIn);
+        }
+
+        [Test]
+        public async Task Logout_ReportsRevokedWhenBearerWorks()
+        {
+            var auth = NewAuth();
+            await auth.LoginAsync(Browser(), TimeSpan.FromSeconds(10), CancellationToken.None);
+            Assert.AreEqual(LogoutOutcome.Revoked, await auth.LogoutAsync(CancellationToken.None));
+            Assert.AreEqual(1, _server.RevokeByBearer);
+            Assert.AreEqual(0, _server.RevokeByRefresh);
+        }
+
+        [Test]
+        public async Task Logout_AfterAccessExpired_RevokesByRefreshToken()
+        {
+            var auth = NewAuth();
+            await auth.LoginAsync(Browser(), TimeSpan.FromSeconds(10), CancellationToken.None);
+            var access = _server.LastIssuedAccess;
+            var refresh = _server.LastIssuedRefresh;
+            _now = _now.AddHours(2); // access 已過期，refresh 仍有效
+
+            var outcome = await auth.LogoutAsync(CancellationToken.None);
+
+            Assert.AreEqual(LogoutOutcome.Revoked, outcome);
+            Assert.AreEqual(0, _server.RevokeByBearer, "過期的 access 不能拿去當 Bearer");
+            Assert.AreEqual(1, _server.RevokeByRefresh);
+            Assert.IsFalse(_server.IsAccessValid(access), "伺服器端整族已撤銷");
+            Assert.IsNull(_vault.Stored);
+            StringAssert.DoesNotContain(refresh, _log.All);
+        }
+
+        [Test]
+        public async Task Logout_BearerRejectedWith401_FallsBackToRefreshToken()
+        {
+            var auth = NewAuth();
+            await auth.LoginAsync(Browser(), TimeSpan.FromSeconds(10), CancellationToken.None);
+            var access = _server.LastIssuedAccess;
+            _server.ForceRevoke401 = true; // 本機時鐘以為 access 還有效，但伺服器已視為無效
+
+            var outcome = await auth.LogoutAsync(CancellationToken.None);
+
+            Assert.AreEqual(LogoutOutcome.Revoked, outcome);
+            Assert.AreEqual(1, _server.RevokeByRefresh, "Bearer 被 401 之後必須改用 refresh_token 撤銷");
+            Assert.IsFalse(_server.IsAccessValid(access));
+            Assert.IsNull(_vault.Stored);
+        }
+
+        [Test]
+        public async Task Logout_AfterRestoreFromDisk_RevokesByRefreshToken()
+        {
+            await NewAuth().LoginAsync(Browser(), TimeSpan.FromSeconds(10), CancellationToken.None);
+            var access = _server.LastIssuedAccess;
+            var restored = NewAuth(); // 重開 Revit：只有 DPAPI 檔裡的 refresh，沒有 access
+            Assert.IsTrue(restored.TryRestore());
+
+            Assert.AreEqual(LogoutOutcome.Revoked, await restored.LogoutAsync(CancellationToken.None));
+            Assert.AreEqual(1, _server.RevokeByRefresh);
+            Assert.IsFalse(_server.IsAccessValid(access));
+            Assert.IsNull(_vault.Stored);
+        }
+
+        [Test]
+        public async Task Logout_BothBearerAndRefreshRejected_ReportsFailureButClearsLocal()
+        {
+            var auth = NewAuth();
+            await auth.LoginAsync(Browser(), TimeSpan.FromSeconds(10), CancellationToken.None);
+            _server.Handler.BeforeRespond = r => { if (r.Uri.AbsolutePath.EndsWith("/revoke")) throw new HttpRequestException("offline"); return Task.FromResult(0); };
+            _now = _now.AddHours(2);
+
+            Assert.AreEqual(LogoutOutcome.ServerRevokeFailed, await auth.LogoutAsync(CancellationToken.None));
+            Assert.IsNull(_vault.Stored, "撤銷失敗時本機登入資料仍要刪除");
+            Assert.IsFalse(auth.IsLoggedIn);
+        }
+
+        [Test]
+        public async Task Logout_WhenNothingIsValidAnymore_SaysNothingToRevoke()
+        {
+            var auth = NewAuth();
+            await auth.LoginAsync(Browser(), TimeSpan.FromSeconds(10), CancellationToken.None);
+            _now = _now.AddDays(40); // access 與 refresh 都過期
+
+            Assert.AreEqual(LogoutOutcome.NothingToRevoke, await auth.LogoutAsync(CancellationToken.None));
+            Assert.AreEqual(0, _server.RevokeByBearer + _server.RevokeByRefresh);
+            Assert.IsNull(_vault.Stored);
         }
 
         [Test]

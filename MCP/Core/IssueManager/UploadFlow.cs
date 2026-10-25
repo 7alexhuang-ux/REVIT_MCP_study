@@ -8,10 +8,13 @@ using System.Threading.Tasks;
 
 namespace RevitMCP.Core.IssueManager
 {
-    /// <summary>把工作丟到 Revit API 執行緒執行（實作：ExternalEventManager）。測試時直接在目前執行緒跑。</summary>
+    /// <summary>
+    /// 把一段工作丟到 Revit API 執行緒執行（實作：QueuedApiThreadRunner＋ExternalEventManager）。測試時直接在目前執行緒跑。
+    /// 取消只對「還在排隊、尚未開始」的工作有效；已開始的工作會做完。
+    /// </summary>
     public interface IApiThreadRunner
     {
-        Task<T> RunAsync<T>(Func<T> work);
+        Task<T> RunAsync<T>(Func<T> work, CancellationToken ct);
     }
 
     public interface IUploadFlowProgress
@@ -30,10 +33,10 @@ namespace RevitMCP.Core.IssueManager
 
     /// <summary>
     /// 整個「按下上傳」的流程（revit-addin-export.md §3）：
-    /// 1 建立版本包 → 2～5 在 Revit API 執行緒匯出 → 6 背景上傳 → 7 finalize。
+    /// 1 建立版本包 → 2～5 匯出（每個 Revit 步驟各自一次 ExternalEvent，步驟之間回到訊息迴圈）→ 6 背景上傳 → 7 finalize。
     /// ‧取消：任何步驟之間偵測到取消 → 呼叫 DELETE /bundles/:id 並清掉本機暫存，不再上傳（X05）；
     /// ‧失敗：顯示白話原因；伺服器端 bundle 保持 open 到過期自動清；若匯出已完成，可用 ResumeAsync 重試上傳（不重傳已完成的檔案）；
-    /// ‧同一時間只允許一個進行中的上傳（跨視窗、跨 flow 實例）。
+    /// ‧同一時間只允許一個進行中的上傳（跨視窗、跨 flow 實例）；任何結束路徑（成功、取消、逾時、例外）都會在 finally 釋放這個旗標。
     /// </summary>
     public sealed class UploadFlow
     {
@@ -88,7 +91,7 @@ namespace RevitMCP.Core.IssueManager
                 ExportedBundle exported;
                 try
                 {
-                    exported = await _runner.RunAsync(() => _exporter.Export(request, _steps, directory, exportProgress, ct)).ConfigureAwait(false);
+                    exported = await _exporter.ExportAsync(request, _steps, _runner, directory, exportProgress, ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -131,7 +134,7 @@ namespace RevitMCP.Core.IssueManager
             }
         }
 
-        /// <summary>放棄待重試的上傳：通知伺服器清暫存、刪本機檔。</summary>
+        /// <summary>放棄待重試的上傳：先刪本機檔，再盡力通知伺服器清暫存（伺服器連不上也不會留下本機檔）。</summary>
         public async Task DiscardAsync()
         {
             if (!CanResume) return;
@@ -139,7 +142,15 @@ namespace RevitMCP.Core.IssueManager
             var directory = _pendingExport.Directory;
             _pendingBundle = null;
             _pendingExport = null;
-            await CleanupAfterCancelAsync(id, directory).ConfigureAwait(false);
+            TryDeleteDirectory(directory);
+            try
+            {
+                await _api.DeleteBundleAsync(id, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // 伺服器端 bundle 會在過期時自動清除；本機檔已刪，不再丟例外打擾關視窗。
+            }
         }
 
         private async Task<UploadFlowResult> UploadAndFinalizeAsync(IUploadFlowProgress flowProgress, CancellationToken ct)

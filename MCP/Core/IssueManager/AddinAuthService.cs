@@ -13,6 +13,17 @@ namespace RevitMCP.Core.IssueManager
         void Open(string url);
     }
 
+    /// <summary>登出時伺服器端撤銷的結果（本機登入資料不論結果一律已刪除）。</summary>
+    public enum LogoutOutcome
+    {
+        /// <summary>伺服器已確認撤銷。</summary>
+        Revoked,
+        /// <summary>本機沒有仍有效的權杖（已過期或沒登入），沒有需要撤銷的授權。</summary>
+        NothingToRevoke,
+        /// <summary>撤銷沒有成功（網路、權杖被拒等）；伺服器端這一族授權可能仍有效，應請使用者到網站帳號頁手動撤銷。</summary>
+        ServerRevokeFailed
+    }
+
     /// <summary>
     /// 外掛登入（D-596／addin-auth.md）：授權碼＋PKCE＋loopback，權杖安全保存、refresh 輪替。
     /// 執行緒安全：refresh 以單一鎖序列化——同一個 refresh token 被兩個請求同時使用，
@@ -184,58 +195,76 @@ namespace RevitMCP.Core.IssueManager
             }
         }
 
-        public async Task LogoutAsync(CancellationToken ct)
+        /// <summary>
+        /// 登出：先撤銷伺服器端這一族授權，再刪本機資料（不論撤銷成不成功，本機一定刪）。
+        /// access 還沒過期就用 Bearer 撤銷；access 已過期、被伺服器拒絕（401）或根本沒有 access（重開 Revit 後從 DPAPI 還原）
+        /// 就改用 refresh_token 撤銷（addin-auth.md §4.4）。回傳撤銷結果，呼叫端必須在失敗時如實告知使用者。
+        /// 整段持有 refresh 鎖：登出期間不會有並行的 refresh 輪替改掉要撤銷的權杖。
+        /// </summary>
+        public async Task<LogoutOutcome> LogoutAsync(CancellationToken ct)
         {
-            string access;
-            string refresh;
             await _lock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                access = _accessToken;
-                refresh = _refreshToken;
+                return await RevokeOnServerAsync(ct).ConfigureAwait(false);
             }
             finally
             {
+                ClearLocal();
                 _lock.Release();
             }
+        }
 
+        private async Task<LogoutOutcome> RevokeOnServerAsync(CancellationToken ct)
+        {
+            var now = _now();
+            var accessUsable = !string.IsNullOrEmpty(_accessToken) && _accessExpiresAt - AccessSkew > now;
+            var refreshUsable = !string.IsNullOrEmpty(_refreshToken) && _refreshExpiresAt > now;
+            if (!accessUsable && !refreshUsable)
+            {
+                // 兩種權杖都已過期或根本沒有：伺服器端沒有還有效的授權可撤銷。
+                _log("本機沒有仍有效的權杖，只清除本機登入資料。");
+                return LogoutOutcome.NothingToRevoke;
+            }
+
+            if (accessUsable)
+            {
+                if (await TryRevokeAsync(_accessToken, null, ct).ConfigureAwait(false)) return LogoutOutcome.Revoked;
+                _log("以 access 撤銷沒有成功（過期、被拒絕或網路問題），改用 refresh 權杖撤銷。");
+            }
+            if (refreshUsable && await TryRevokeAsync(null, _refreshToken, ct).ConfigureAwait(false)) return LogoutOutcome.Revoked;
+
+            _log("伺服器端撤銷沒有成功（網路問題或權杖已失效），仍已清除本機登入資料。");
+            return LogoutOutcome.ServerRevokeFailed;
+        }
+
+        /// <summary>送一次撤銷請求；只有 2xx 算成功。網路錯誤、非 2xx 回 false（取消則照常丟出）。</summary>
+        private async Task<bool> TryRevokeAsync(string access, string refresh, CancellationToken ct)
+        {
             try
             {
                 using (var request = new HttpRequestMessage(HttpMethod.Post, _baseUrl + "/api/addin/token/revoke"))
                 {
+                    request.Headers.TryAddWithoutValidation(AddinHttp.ApiVersionHeader, AddinHttp.ApiVersion);
                     if (!string.IsNullOrEmpty(access))
                     {
                         request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + access);
                         request.Content = AddinHttp.Json(new JObject());
                     }
-                    else if (!string.IsNullOrEmpty(refresh))
+                    else
                     {
                         request.Content = AddinHttp.Json(new JObject { ["refresh_token"] = refresh });
                     }
-                    else
-                    {
-                        request.Content = AddinHttp.Json(new JObject());
-                    }
                     using (var response = await _http.SendAsync(request, ct).ConfigureAwait(false))
                     {
-                        // 撤銷失敗（網路不通、token 已失效）不阻止本機登出。
+                        return response.IsSuccessStatusCode;
                     }
                 }
             }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception)
             {
-                _log("伺服器端撤銷沒有成功（網路問題或權杖已失效），仍已清除本機登入資料。");
-            }
-
-            await _lock.WaitAsync(ct).ConfigureAwait(false);
-            try
-            {
-                ClearLocal();
-            }
-            finally
-            {
-                _lock.Release();
+                return false;
             }
         }
 

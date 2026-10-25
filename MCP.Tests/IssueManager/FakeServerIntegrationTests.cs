@@ -172,6 +172,31 @@ namespace RevitMCP.Tests.IssueManager
         }
 
         [Test]
+        public async Task LogoutAfterAccessExpiredStillRevokesTheWholeFamilyOnTheServer()
+        {
+            // 審查探針：access 只活 1 秒，2.5 秒後登出。舊版拿過期 access 當 Bearer → 401 且沒撤銷（revokedTokens 為 0）。
+            await _http.PostAsync(_url + "/__config", new StringContent("{\"accessTtlSec\":1}", Encoding.UTF8, "application/json"));
+            try
+            {
+                var vault = new InMemoryVault();
+                var auth = NewAuth(vault);
+                await auth.LoginAsync(AutoBrowser(), TimeSpan.FromSeconds(15), CancellationToken.None);
+                var before = (int)(await StateAsync())["revokedTokens"];
+                await Task.Delay(2500);
+
+                var outcome = await auth.LogoutAsync(CancellationToken.None);
+
+                Assert.AreEqual(LogoutOutcome.Revoked, outcome);
+                Assert.AreEqual(before + 2, (int)(await StateAsync())["revokedTokens"], "access 與 refresh 兩個權杖都要在伺服器端被撤銷");
+                Assert.IsNull(vault.Stored);
+            }
+            finally
+            {
+                await _http.PostAsync(_url + "/__config", new StringContent("{\"accessTtlSec\":3600}", Encoding.UTF8, "application/json"));
+            }
+        }
+
+        [Test]
         public async Task LogoutRevokesOnTheRealServer()
         {
             var vault = new InMemoryVault();

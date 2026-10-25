@@ -33,6 +33,18 @@ namespace RevitMCP.Core.IssueManager
         public const string MissingSheets = "這個版本將缺圖（沒有勾選任何圖紙）";
         public const string MissingModel = "這個版本將缺模型（沒有勾選 3D 模型）";
 
+        public const string LoggedOut = "已登出，本機的登入資料已刪除。";
+        public const string LoggedOutRevokeFailed =
+            "已登出，本機的登入資料已刪除，但伺服器端撤銷未完成（網路問題或權杖已失效）。"
+            + "為安全起見，請到 Issue Manager 網站的「帳號 › 已授權的外掛」頁面，手動撤銷這台電腦的授權。";
+        public const string SwitchRevokeFailed =
+            "舊帳號在伺服器端的撤銷未完成（本機的登入資料已刪除）。"
+            + "請稍後到 Issue Manager 網站的「帳號 › 已授權的外掛」頁面，手動撤銷這台電腦的舊授權。";
+        public const string LoginCancelled = "已取消登入。";
+        public const string ConfirmDiscardTitle = "放棄這次上傳？";
+        public const string ConfirmDiscardText =
+            "放棄這次上傳並清除？\n\n選「是」：通知 Issue Manager 刪除暫存的版本包，並刪除本機匯出的 PDF／GLB 檔（之後要重新匯出）。\n選「否」：回到視窗，仍可按「重試上傳」。";
+
         public const string OtherViewsHeader = "其他視圖（不在圖紙上）";
         public const string SheetsHeader = "圖紙";
 
