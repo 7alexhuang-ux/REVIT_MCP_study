@@ -116,3 +116,86 @@
 - 本檔所在 commit 之後，工作樹只剩已被追蹤的建置產物（`MCP/bin/Release*`、`MCP/obj/*`）顯示為已修改，**刻意不提交**（同前一份交班單）。
 - 中央日誌已追記；完成旗標 `C:\Temp\grokbot_sessions\imv4b_finished.flag` 已寫入。
 - 暫時用過的 `C:\temp\revit_v4b\c1`（commit 1 單獨驗證用）已移除。
+
+
+---
+
+## 8. 審查後修正（2026-10-25，獨立安全審查 opus 之後）
+
+> 建置者：Claude Sonnet 5.5（Claude Code）。審查者以程式碼行號指出五個必修；每一項都先自行讀程式碼確認屬實才修。**仍只做離線驗證**：未啟動或操作 Revit、未安裝外掛、未連真實 Issue Manager、未 push。
+> 本段取代上文中與之衝突的敘述：§2 的數字（429 → 479）、§4 T7（匯出期間視窗行為）、§5 R2（巢狀訊息迴圈）、T10（登出）。
+
+### 8.1 Commit
+
+| Commit | 內容 |
+|---|---|
+| `fba7a60` | 修正：程式與測試（21 個檔：外掛端 12 個、測試 7 個、`Application.cs`、`ExternalEventManager.cs`；新增 `ApiThreadRunners.cs`、`BundleTempCleaner.cs`、`HardeningTests.cs`、`RunnerAndCleanupTests.cs`） |
+| （本檔所在 commit） | 文件：功能說明、ADR D-011 審查後修正、CHANGELOG、LESSONS L-21～L-23、log、本段 |
+
+### 8.2 必修項（審查指出 → 確認 → 修法 → 測試）
+
+| # | 審查指出 | 確認結果 | 修法 | 主要測試 |
+|---|---|---|---|---|
+| 1 | `AddinAuthService.cs` 登出：有記憶體 access 就當 Bearer，不看到期／401，也不改用 refresh 撤銷 | **屬實**（舊 `LogoutAsync` 把回應丟掉；假伺服器對無效 Bearer 回 401，審查探針 `revokedTokens`＝0） | access 未過期→Bearer；已過期、401、或重開後沒有 access→`{"refresh_token"}` 走同一端點（`addin-auth.md` §4.4）。`LogoutAsync` 回傳 `LogoutOutcome`；失敗時本機仍刪除，視窗顯示「伺服器端撤銷未完成」並指引到網站「帳號 › 已授權的外掛」。切換帳號同一條路（舊帳號撤銷失敗時登入完成後仍警告）。整段持有 refresh 鎖 | `FakeServerIntegrationTests.LogoutAfterAccessExpired…`（真的 Node 假伺服器，accessTtl 1 秒、2.5 秒後登出，`revokedTokens` 增加 **2**）；`AddinAuthServiceTests` 新增 6 個（Bearer、過期→refresh、401→refresh、重開還原→refresh、兩者都失敗、全過期）；視窗 5 個（過期登出、撤銷失敗文案、切換帳號兩種、登入取消） |
+| 2 | `GlbMergeRunner.cs`：`CanRun("node")` 裸名；`FindScript` 往上 8 層找 `tools\` | **屬實**（`UseShellExecute=false` 先找目前工作目錄；我實測對照組：把會寫標記檔的假 `node.exe` 放工作目錄，裸名 `node` 確實執行了它） | `FindNode` 只回絕對、存在的路徑（標準安裝位置→PATH 內絕對目錄），略過工作目錄與開啟中專案資料夾之下者，`canRun` 用絕對路徑並固定工作目錄；`FindScript` 往上找 `tools\` 預設關閉，需 `REVITMCP_DEV_TOOLS=1` | `GlbMergeRunnerTests`：陷阱 `node.exe`（CodeDom 現場編譯、執行就留標記檔）放工作目錄→`FindNode` 不執行、PATH 放 `.`／相對／工作目錄絕對路徑→`canRun` 一次都不被呼叫；專案資料夾略過；旗標測試 |
+| 3 | `RevitApiThreadRunner`：排隊不理取消、不看 `Raise()`，`_running` 卡 1 | **屬實**（無條件 `await` 一個永遠不會完成的 `TaskCompletionSource`） | 新增 `QueuedApiThreadRunner`（不引用 Revit API）：排隊／已開始／已放棄三態；取消或開始前逾時（120 秒）→白話訊息「Revit 目前沒有回應，請關掉 Revit 裡的對話框後重試」，之後 Revit 處理佇列也不執行該工作；`Raise()` 非 `Accepted`／`Pending`→立刻失敗；已開始的長呼叫不受逾時限制。`ExternalEventManager.TryExecuteCommand` 回傳 `Raise()` 結果。`UploadFlow` 的 `_running` 在所有結束路徑 `finally` 釋放 | `QueuedApiThreadRunnerTests` 8 個；`UploadFlowStuckRevitTests` 4 個（外部事件永不執行→逾時＋旗標歸零＋可立刻再上傳；排隊中取消→伺服器 bundle 被刪＋旗標歸零；Raise 被拒；步驟例外） |
+| 4 | `UploadWindow.cs`：X 關閉不呼叫 `DiscardAsync`；本機暫存累積 | **屬實**（只有「關閉」按鈕路徑會 Discard） | `Closing` 事件統一處理：進行中→取消；有可重試 bundle→`ConfirmDiscardOnClose` 詢問「放棄這次上傳並清除？」（真實環境為 MessageBox；測試未設定＝直接放棄），同意則**先同步刪本機檔**、再背景盡力 `DELETE`（連不上也不留本機檔）；選「否」→取消關閉。啟動時 `BundleTempCleaner` 背景清除超過 3 天（`DefaultMaxAgeDays`）的暫存資料夾（資料夾內有最近寫入的檔案不刪） | 視窗 3 個（X 關閉清本機＋伺服器、回答「否」保留且可重試成功、已完成的上傳不詢問）；`BundleTempCleanerTests` 4 個 |
+| 5 | 巢狀訊息迴圈（`Dispatcher.Invoke` 在 ExternalEvent 內） | **屬實** | **選「每個 Revit 步驟各自一次 ExternalEvent」**（`BundleExporter.ExportAsync`）；步驟之間回到 UI 執行緒更新進度、檢查取消；移除 `IExportProgress.Pump`。不採 `EnableWindow`（取捨表見 ADR D-011「審查後修正」） | `ExporterStepSplittingTests`（事件順序 report/run 交錯、排隊中取消）；視窗整段流程測試（真視窗＋Dispatcher 模擬 Revit 執行緒）仍全過 |
+
+**#5 取捨摘要**：優點是移除問題根源、不碰 Win32、取消在步驟邊界即時生效；代價是**步驟之間 Revit 主視窗可以操作**（使用者若在匯出中途編輯模型，PDF 與 GLB 可能對應不同狀態，程式只檢查作用中文件沒換），以及 GLB 那一步仍會佔住 Revit 執行緒（視窗此時可能顯示「沒有回應」，與以前相同）。未採 B（`EnableWindow`）的理由：保留巢狀迴圈的一半風險，且「Revit 主視窗被我們停用後 `finally` 前當掉」的後果更重，行為又只能實機驗證。
+
+### 8.3 建議項
+
+| 項目 | 狀態 |
+|---|---|
+| `LoopbackCallbackListener` `ExclusiveAddressUse` ＋ `Task.WhenAny`／`Delay` 讀取逾時 | ✅ 做了；測試：只連線不送資料的連線在逾時後被關閉且不擋後續正確回呼、`SO_REUSEADDR` 搶綁會失敗 |
+| `BundleUploader` 重試時重新計算磁碟 sha256 | ✅ 做了（只在狀態檔已存在＝續傳時重算，第一次上傳不重算避免大 GLB 多花時間）；檔案被改動→拒絕續傳並請放棄後重新匯出 |
+| `PdfInspector` 串流掃描 | ✅ 做了（1 MB 區塊＋128 字元重疊，測試涵蓋跨區塊邊界不重複計數） |
+| 頁數不符時中止而非只警告 | ✅ 做了，**含例外**：頁數少於圖紙數、且 PDF 含物件串流（`/ObjStm`）時估計不可靠，只警告（否則壓縮 PDF 會誤擋所有上傳）；頁數多於圖紙數一律中止 |
+| 登入中取消的文案 | ✅ 「已取消登入。」，按鈕文字「取消登入」 |
+| `Application.cs` 面板建立包 `try/catch` | ✅ |
+
+### 8.4 測試與建置數字
+
+| 項目 | 基線（`b07bd5d`） | 現在 |
+|---|---|---|
+| `dotnet build -c Release.R24 MCP/RevitMCP.csproj` | 0 錯誤、1184 警告 | 0 錯誤、**1184 警告**（沒有增加） |
+| `dotnet test MCP.Tests` | 429 通過 | **479 通過**、0 失敗、0 略過（+50；連跑 6 次穩定） |
+| MCP-Server `npm test` | 38 ＋ Node 34 | 38 ＋ Node 34（未改 MCP-Server 與假伺服器原始碼） |
+
+新增測試分布：`QueuedApiThreadRunnerTests` 8、`UploadFlowStuckRevitTests` 4、`ExporterStepSplittingTests` 2、`BundleTempCleanerTests` 4、`LoopbackHardeningTests` 3、`UploaderResumeVerificationTests` 3、`PdfInspectionTests` 7、`GlbMergeRunnerTests` +4、`AddinAuthServiceTests` +6、整合測試 +1、視窗流程測試 +8；調整既有：`FakeSteps` 預設 PDF 改為「頁數＝傳入圖紙數」，頁數不符的既有測試改為預期中止。
+
+測試途中發現並修掉的自己的問題：視窗測試在背景載入專案清單完成前就結束，背景工作之後對已結束的 UI 執行緒 `Dispatcher.Invoke` 造成 `NUnitEngineUnloadException`（改為等專案清單載入完才結束）；進度回報在結果之後才到達會蓋掉最後的狀態文字（結果處理一律先 `InvalidateProgress()`）。
+
+### 8.5 未做項與理由
+
+| 項目 | 理由 |
+|---|---|
+| `EnableWindow` 停用 Revit 主視窗 | 見 8.2 #5 取捨；等實機觀察後再決定要不要疊加 |
+| 匯出失敗（非取消）時也 `DELETE` 伺服器端 bundle | 審查未要求；規格說 open 的 bundle 到期自動清。逾時後使用者重試會多出一個 open bundle（到期清除） |
+| `CommandExecutor.Walkthrough.cs` 的 `FindNodeExecutable`（同型裸名 `node` 問題） | 不屬於本案（走動展示的深度圖匯出）、也不在審查範圍；**建議另案處理** |
+| 其他 Revit 年份建置 | 同前，既有檔案錯誤 |
+
+### 8.6 待 4A 約定（合約缺口，客戶端無法單方面解決）
+
+1. **finalize 進行中按取消**：`UploadFlow` 在 finalize 請求送出後被取消時，伺服器可能已建立版本，客戶端卻接著 `DELETE /bundles/:id`。需約定：①`DELETE` 一個已 finalize 的 bundle 的語意（建議 409 且**不刪版本**）；②客戶端取消後如何得知結果（冪等 finalize 重送回同一 `setId`，B05 已有）。在約定前，客戶端建議行為是「finalize 開始後不再允許取消」，目前**尚未實作**，需 Alex 決定。
+2. **`POST /bundles` 回應 `files[].kind` 的值域**：規格只寫 `files:[{kind,name,partBytes,urls}]`，沒列舉 `kind`。客戶端目前假設 `pdf`／`glb`／`namedViews`（`viewPositions` 屬 V5），以 `kind` 對應 manifest 與上傳憑證；與網站端不一致就會出現「伺服器沒有為…核發上傳憑證」。與既有 R5（簽名網址數量）一併約定。
+
+### 8.7 需實機觀察（未宣稱通過）
+
+| # | 項目 | 為什麼只能實機 |
+|---|---|---|
+| O1 | 每步一次 ExternalEvent 後，視窗在步驟之間是否正常重繪、「取消上傳」是否在 PDF／命名視圖步驟邊界即時生效 | 取決於 Revit 真實的 Idling／ExternalEvent 排程 |
+| O2 | GLB 那一步（可達十幾分鐘）視窗是否顯示「沒有回應」、使用者此時點視窗會怎樣 | 與以前相同的限制，但未量測 |
+| O3 | 步驟之間使用者操作 Revit 主視窗（切文件、編輯模型）的實際影響；程式只能偵測文件切換 | 無法離線模擬使用者操作 |
+| O4 | `ExternalEvent.Raise()` 在「前一個要求尚未處理」時是否回 `Pending`、Revit 停在對話框時 `Raise()` 回傳什麼；120 秒開始前逾時是否合理（佇列與 MCP 指令共用，若 MCP 正在跑長指令也會等） | 只能看 Revit 實際行為；`Accepted`／`Pending` 以外視為被拒是依 API 文件的設計 |
+| O5 | 關閉視窗時 `MessageBox` 詢問是否在 Revit 內正常顯示（Owner、焦點） | UI 行為 |
+| O6 | 外掛啟動時背景清暫存是否拖慢 Revit 啟動（預期只列舉資料夾） | 需實測 |
+| O7 | T10 登出：access 過期情境（`/__state.revokedTokens` 增加 2）可用 `POST /__config {"accessTtlSec":10}` 登入、等 15 秒後按登出驗證 | 在 Revit 內走一次 |
+
+### 8.8 對 §4 實機測試清單的補充
+
+- **T7（匯出期間畫面）**：改為觀察 O1～O3；視窗文字現為「匯出進行中：請勿切換文件、編輯模型或關閉專案，直到匯出完成。」
+- **T10**：再做一次「`accessTtlSec:10` → 登入 → 等 15 秒 → 登出」，預期 `/__state.revokedTokens` 比登出前多 2。
+- **新增 T13**：上傳失敗出現「重試上傳」後直接按視窗右上角 X → 預期跳出「放棄這次上傳並清除？」，選「是」後 `bundles\` 下該資料夾消失、`/__state.deleted` 增加；選「否」視窗留著且可重試。
+- **新增 T14**：Revit 中開一個會卡住的對話框（例如未關閉的屬性對話框）後按上傳 → 約 2 分鐘後出現「Revit 目前沒有回應…」，關掉對話框後可立刻再上傳，不需重開 Revit。

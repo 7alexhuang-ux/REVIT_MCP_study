@@ -23,6 +23,9 @@
 
 含設計選項的模型需要系統 **Node.js** 與已部署的 `merge-option-glbs.mjs`（`scripts/install-addon.ps1` 會複製到 `%APPDATA%\RevitMCP\bridge\node\bundle\`）。沒有設計選項的專案不需要 Node。
 
+- **找 Node 只用絕對路徑（審查後修正）**：依序是標準安裝位置（`Program Files\nodejs\node.exe` 等）、PATH 內的絕對目錄；不使用裸名 `node`（`UseShellExecute=false` 時 Windows 會先找目前工作目錄，專案資料夾放一個 `node.exe` 就會被執行）。目前工作目錄與開啟中專案所在資料夾之下的 `node.exe` 一律略過。
+- **開發旗標**：往上層目錄找 `tools\merge-option-glbs.mjs` 的開發用路徑，正式安裝版預設關閉；開發時設環境變數 `REVITMCP_DEV_TOOLS=1` 才啟用。正式版只找 dll 同層與 `%APPDATA%\RevitMCP\bridge\node\bundle\`。
+
 ## 3. 勾選視窗
 
 | 欄位 | 規則 |
@@ -51,11 +54,20 @@
 6. 背景分段 PUT 到簽名網址（可重試、不重傳已完成的檔案）。
 7. `POST …/finalize`（冪等）→ 顯示版本連結。
 
-步驟 2～5 在 Revit API 執行緒內（期間 Revit 無法操作）；每個步驟之間檢查取消旗標並讓視窗重繪。**GLB 匯出是單一長呼叫，無法中途取消**（CPC 案實測 631～1,175 秒）。步驟 6、7 在背景執行緒。
+步驟 2～5 的**每個 Revit 步驟各自是一次 ExternalEvent**（文件資訊、PDF、GLB、命名視圖各一次，經 `QueuedApiThreadRunner` 排進與 MCP 指令共用的佇列）；步驟之間回到 UI 執行緒更新進度、檢查取消旗標，不再在 API 呼叫中途跑巢狀訊息迴圈。檔案雜湊、manifest 等不需要 Revit API 的工作在背景執行緒，不佔用 Revit。**GLB 匯出是單一長呼叫，無法中途取消**（CPC 案實測 631～1,175 秒）。步驟 6、7 在背景執行緒。
+
+- **排隊等待可取消**：還在佇列裡、尚未開始的工作，取消或逾時時標成「已放棄」，之後即使 Revit 才處理佇列也不會執行；已開始的工作會做完。
+- **`ExternalEvent.Raise()` 被拒絕**（回傳不是 `Accepted`／`Pending`）→ 立刻以白話訊息失敗，不會永遠等。
+- **開始執行前的等待逾時 120 秒**（外部事件一直沒被處理，例如 Revit 停在對話框）→「Revit 目前沒有回應，請關掉 Revit 裡的對話框後重試」。逾時只算「開始前」，開始後的長呼叫不受限。
+- 任何結束路徑（成功、取消、逾時、例外）都在 `finally` 釋放「同一時間只允許一個上傳」的旗標，不需要重開 Revit。
 
 - 取消：呼叫 `DELETE /bundles/:id`、刪本機暫存、不再上傳。
 - 失敗：顯示白話原因；伺服器端 bundle 保持 open 至過期自動清；若匯出已完成，視窗出現「重試上傳」（從未完成的檔案／分段繼續）。
 - 同一時間只允許一個進行中的上傳。
+- **關閉視窗（含右上角 X）**：進行中 → 送出取消，流程自己清伺服器與本機暫存；閒置但有可重試的 bundle → 詢問「放棄這次上傳並清除？」，同意就先刪本機 PDF／GLB 暫存、再盡力通知伺服器 `DELETE`（伺服器連不上也不會留下本機檔），選「否」回到視窗可繼續重試。
+- **舊暫存清理**：外掛啟動時背景刪除 `%LOCALAPPDATA%\RevitMCP\issue-managerundles\` 下超過 3 天（常數 `BundleTempCleaner.DefaultMaxAgeDays`）沒有任何檔案更新的資料夾；清不掉的（被占用）下次再清，不影響啟動。
+- **PDF 頁數檢查**：以串流掃描（每次 1 MB）估計 PDF 頁數；頁數與勾選圖紙數不符 → **中止**（避免網站上圖紙與頁面對錯）。例外：頁數少於圖紙數、且 PDF 含物件串流（`/ObjStm`，頁面物件可能被壓縮而漏數）時估計不可靠，只警告。
+- **續傳前驗證**：重試（狀態檔已存在）時重新計算磁碟上每個要送的檔案的 sha256；檔案被改動或損毀 → 拒絕續傳並請使用者放棄後重新匯出（第一次上傳不重算，避免大 GLB 多花時間）。
 - 「含設計選項」未勾：只匯出主模型與各選項集合的**主要選項**（`isPrimary`），不含其他選項（這是本案的解讀，見 ADR D-011）。
 - 匯出報告 `complete:false`（任何分件失敗／預算截斷）→ 整個模型步驟中止並指出報告路徑，**不上傳缺漏的模型**（LESSONS L-15）。
 
@@ -63,10 +75,10 @@
 
 依 `addin-auth.md`：產生 `state`、`code_verifier`（32 位元組亂數）、`code_challenge`（S256）→ 在 `127.0.0.1` 隨機埠開監聽 → 開預設瀏覽器到 `/addin/authorize?state&code_challenge&code_challenge_method=S256&port&client_version&client_name` → 使用者在網站按「授權」→ 302 回 `http://127.0.0.1:埠/callback?code&state` → 比對 state → `POST /api/addin/token`（`authorization_code`＋`code_verifier`）→ 取得 access／refresh。
 
-- loopback 用 `TcpListener(IPAddress.Loopback, 0)`（不需 URL ACL）；只接受 `GET /callback`、Host 必須是 `127.0.0.1:埠`、state 固定時間比對；不符回 400／404 並**繼續等**（本機其他程式亂打不會讓正確回呼失敗）；120 秒逾時自動關閉。
+- loopback 用 `TcpListener(IPAddress.Loopback, 0)`（不需 URL ACL），並設 `ExclusiveAddressUse`（別的程式不能用 `SO_REUSEADDR` 搶綁同一個埠攔截授權碼）；單一連線讀請求標頭上限 5 秒（以 `Task.WhenAny`／`Task.Delay` 實作，因為 .NET Framework 4.8 的 `NetworkStream.ReadAsync` 不理會取消）；只接受 `GET /callback`、Host 必須是 `127.0.0.1:埠`、state 固定時間比對；不符回 400／404 並**繼續等**（本機其他程式亂打不會讓正確回呼失敗）；120 秒逾時自動關閉。
 - refresh token 以 **Windows DPAPI（使用者層級，P/Invoke crypt32）** 加密寫入 `%LOCALAPPDATA%\RevitMCP\issue-manager\auth.bin`（連 email 也不明文）；access token 只放記憶體。
 - refresh 輪替：新 refresh 立刻落檔；refresh 以單一鎖序列化（並行使用同一份 refresh 會被伺服器判成外洩而撤銷整族）；`invalid_grant` → 清本機並要求重新登入；暫時性錯誤（5xx、斷網）不清登入。
-- 登出：`POST /api/addin/token/revoke` ＋刪檔（伺服器不通也照刪）。
+- 登出（審查後修正）：先撤銷伺服器端這一族授權，再刪本機檔（不論撤銷成不成功，本機一定刪）。access 尚未過期用 `Authorization: Bearer`；**access 已過期、被伺服器回 401、或重開 Revit 後只剩 DPAPI 檔裡的 refresh** 時，改用 `{"refresh_token": …}` 走同一個 `POST /api/addin/token/revoke`（`addin-auth.md` §4.4）。撤銷沒成功時 `LogoutAsync` 回傳 `ServerRevokeFailed`，視窗顯示「伺服器端撤銷未完成」並指引到網站「帳號 › 已授權的外掛」手動撤銷。「切換帳號」走同一條路（舊帳號撤銷失敗時，重新登入完成後仍顯示警告）。
 - 權杖、授權碼、verifier、state 不寫日誌、不進例外訊息（單元測試以全部祕密字串搜尋日誌與訊息驗證）。
 - Bearer 只送給 Issue Manager 自己的主機；簽名上傳網址若在別的主機，不附 Authorization。上傳網址必須是 https（本機例外）。HttpClient 不自動跟隨轉址。
 
@@ -80,12 +92,13 @@
 | `…/AddinAuthService.cs`、`AddinApiClient.cs`、`AddinHttp.cs`、`AddinModels.cs`、`IssueManagerSettings.cs` | 登入、API 客戶端、錯誤轉換、設定 | 否 |
 | `…/SelectionModels.cs`、`ExportSelectionViewModel.cs`、`Strings.cs` | 勾選視窗的資料模型與檢視模型（zh-TW 字串集中） | 否 |
 | `…/BundleManifest.cs`、`BundleExporter.cs`、`BundleUploader.cs`、`UploadFlow.cs`、`GlbMergeRunner.cs` | manifest 產生、匯出流程、上傳器、整體流程 | 否 |
+| `…/ApiThreadRunners.cs`、`BundleTempCleaner.cs` | 排隊式 API 執行緒執行器（取消、Raise 被拒、開始前逾時）、舊暫存清理 | 否 |
 | `…/UploadWindow.cs` | WPF 勾選視窗（程式碼建構，不引用 Revit API） | 否 |
 | `…/RevitSelectionCollector.cs`、`RevitBundleExportSteps.cs`、`IssueManagerSession.cs` | 讀 Revit 清單、經分派器匯出、工作階段 | **是** |
 | `MCP/Commands/UploadToIssueManagerCommand.cs`、`MCP/Application.cs` | 功能區按鈕與指令 | 是 |
 | `docs/schemas/bundle-manifest.schema.json`、`docs/schemas/fixtures/bundle-manifest.sample.json` | manifest schema（客戶端副本）與共用 fixture | — |
 | `tools/fake-issue-manager/server.mjs` | 假 Issue Manager（Node，無相依） | — |
-| `MCP.Tests/IssueManager/` | 115 個 NUnit 測試 | — |
+| `MCP.Tests/IssueManager/` | 165 個 NUnit 測試（審查前 115） | — |
 | `tools/*.test.mjs`（`bundle-manifest.schema.test.mjs`、`fake-issue-manager.test.mjs`） | ajv 驗 schema／fixture；假伺服器合約 | — |
 
 ## 7. 假伺服器與試跑
@@ -107,7 +120,8 @@ $env:ISSUE_MANAGER_URL = "http://127.0.0.1:<印出的埠>"                      
 
 ## 9. 已知限制
 
-- 全部未在 Revit 內實跑；視窗行為（訊息泵、取消、Revit 主視窗在匯出期間是否仍可點）、PDF 頁序、設計選項匯出完整性都待實機。
+- 全部未在 Revit 內實跑；視窗行為（每步一次 ExternalEvent 的實際表現、取消、**步驟之間** Revit 主視窗可被操作時的影響、單一長步驟期間視窗是否顯示「沒有回應」）、PDF 頁序、設計選項匯出完整性都待實機（**需實機觀察**，見交班單「審查後修正」）。
+- 步驟之間 Revit 可以操作：使用者若在匯出中途編輯模型，PDF 與 GLB 可能對應不同的模型狀態（程式只檢查作用中文件沒有換掉）。視窗提示「請勿切換文件、編輯模型或關閉專案」。這是拆步驟（取代巢狀訊息迴圈）的已知取捨。
 - 只有 Release.R24 驗證可建置（0 錯誤、警告數與基線相同）。其他年份的建置失敗來自既有檔案（R25／R26：`RevitGltfExportContext.cs` 缺 `System.Drawing.Common`；R22：`WebCompareSection.cs` 用了 2022 沒有的 API），新增檔案在這些目標上沒有新增錯誤。
 - 視窗字串目前只有 zh-TW。
 - 圖紙上的圖例／明細表視口不列入（不對應模型位置）。
