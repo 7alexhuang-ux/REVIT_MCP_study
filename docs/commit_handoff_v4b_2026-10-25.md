@@ -271,3 +271,68 @@
 - 網站端將新增 `too_many_open_bundles`（429）的修正任務：訊息已先備好；`POST /bundles` 回 429 時客戶端不重試（`Rejected`）。
 - `server.mjs` 的 `urlsPerFile` 預設從固定 64 改為「依大小上限 ÷ partBytes、最多 256」（真實伺服器給足，假伺服器為輕量設上限）；`--part-bytes 64` 時 PDF 會得到 256 個網址（夠測試用）。
 - 與網站端 `docs/spec/schemas` 的原樣副本是**手動複製**的（`docs/schemas/web-authoritative/`）；網站端 schema 再改時要重新複製（Node 測試在本機找得到網站端工作樹時會偵測過期，找不到就略過）。
+
+---
+
+## 10. 開視窗效能修正（2026-10-25，分支 `v4b2`，接在 §9 之後）
+
+> 建置者：Claude Sonnet 5.5（Claude Code）。**仍只做離線驗證**：未啟動或操作 Revit、未安裝外掛、未連真實 Issue Manager、未 push。實機計時請依 10.4 另做。
+
+### 10.1 問題與熱點（讀碼結論；耗時**未在 Revit 內量測**）
+
+實機觀察（v4b `4720a2e`）：Snowdon 範例專案（55 張圖紙）按功能區按鈕後 Revit 凍住 12～15 分鐘；3 張圖紙的小專案幾秒。
+
+開視窗的整條路徑只有一次同步呼叫：`UploadToIssueManagerCommand.Execute` →（舊）`RevitSelectionCollector.Collect(doc)` → 建檢視模型 → `window.Show()`；`IssueManagerSession.Create` 只讀 `Application.VersionNumber` 與設定檔，視窗載入只打網路 API（非 Revit）。所以凍結只可能來自 `Collect`，其 Revit API 呼叫如下（舊碼 `RevitSelectionCollector.cs`，v4b 的 HEAD）：
+
+| 呼叫 | 次數 | 性質 |
+|---|---|---|
+| `FilteredElementCollector.OfClass(View)`＋逐視圖 `IsTemplate`／`ViewType`／`Name`／`UniqueId`／`Id` | 視圖數（數百～數千） | 中繼資料屬性，便宜 |
+| `ViewSheet` 逐張 `SheetNumber`／`Name`／`GetAllViewports()` | 圖紙數（55） | 便宜 |
+| `doc.GetElement(viewportId)`、`doc.GetElement(viewport.ViewId)`、`view.UniqueId`（每視口各一次） | 視口數 | 便宜（但可免） |
+| **`viewport.GetBoxOutline()`（舊碼第 48 行，在「圖紙 × 視口」雙層迴圈內）** | **每個視口一次** | **推測是熱點**：Revit 要算視口在圖紙上的外框（含視圖的裁剪範圍與註解範圍），大模型的視圖可能因此觸發視圖圖形運算 |
+| `ViewSheetSet` 的 `Views` 逐成員 `UniqueId` | 圖紙集成員數 | 便宜 |
+
+結論：`GetBoxOutline` 確實在開視窗路徑的雙層迴圈裡，是唯一「成本隨視圖內容而非筆數成長」的呼叫，與「55 張圖紙慢、3 張圖紙快」吻合。**但「它就是 12～15 分鐘的原因」仍是推測**——沒有在 Revit 內量過。因此除了移除它，也加了計時日誌（10.3），讓實機一次就能證實或推翻。其餘呼叫（每筆微秒～毫秒級）即使有數千筆也不可能累積到分鐘級，除非 `GetElement` 觸發載入（未證實，同樣由日誌看出）。
+
+### 10.2 修法
+
+| 項目 | 做法 | 檔案 |
+|---|---|---|
+| 開視窗只讀便宜欄位 | `Collect` 改為只讀名稱、識別碼、種類、圖紙→視口→視圖 ElementId 對應；視口只存 `ViewportElementId`，**不呼叫 `GetBoxOutline`**。視圖對應改用 ElementId 查表，省掉逐視口 `GetElement(view)` 與 `UniqueId`。collector 加 `using` 釋放 | `RevitSelectionCollector.cs` |
+| 可測的介面 | 新增 `IProjectSource`（只有 `Title`／`Path`／`ReadViews`／`ReadSheets`／`ReadSheetSets`，**型別上沒有任何量測成員**）與純邏輯 `SnapshotBuilder.Build`；Revit 端只是 `IProjectSource` 的實作 | `SnapshotBuilder.cs`（新）、`RevitSelectionCollector.cs` |
+| 昂貴資料延後到匯出 | `IBundleExportSteps.MeasureViewports(ids)`（Revit 實作呼叫 `GetBoxOutline`）；`BundleExporter` 只量「勾選後、同一張圖紙仍有兩個以上視口」的視口（單一視口必然是主要視口，面積無關），量過的 `SizeMeasured` 不重量（重試上傳不重量） | `BundleExporter.cs`、`SelectionModels.cs`、`RevitBundleExportSteps.cs` |
+| 分段讓出 UI、進度、可取消 | 每 6 個視口一批（`BundleExporter.MeasureChunkSize`），每批一次獨立 ExternalEvent，批次之間回到 Revit 訊息迴圈；進度文字「讀取視口大小 12/45」；每批前檢查取消 | `BundleExporter.cs` |
+| 計時日誌 | 開視窗：視圖／圖紙／圖紙集三階段各一行「數量＋ms」，另含視口總數；匯出量測：每批「個數＋ms＋最慢一個」，單一視口超過 2 秒另記一行。日誌只有數字，不含圖紙號、圖名或專案名稱（有測試） | `SnapshotBuilder.cs`、`RevitBundleExportSteps.cs`、`UploadToIssueManagerCommand.cs` |
+| 行為不變處 | 量不到（`GetBoxOutline` 丟 `ApplicationException`）→ 面積 0、主要視口退回清單第一個（與舊碼相同）；manifest 與勾選邏輯、視窗樹狀結構不變 | — |
+
+沒有改的：勾選視窗的 WPF 樹狀（`BuildTree` 一次建完整棵樹，55 張圖紙級別是毫秒級；若圖紙上千才需虛擬化，未做）。
+
+### 10.3 測試與建置數字
+
+| 項目 | 基線（`a6e0744`） | 現在 |
+|---|---|---|
+| `dotnet build -c Release.R24 MCP/RevitMCP.csproj` | 0 錯誤、1184 警告 | 0 錯誤、**1184 警告**（沒有增加；用既有 `ToElementId()` 擴充避開新的 `ElementId(int)` 過時警告） |
+| `dotnet test MCP.Tests` | 545 通過＋2 略過（547） | **560 通過＋2 略過**（562；+15）。連跑 3 次：1 次出現既有測試 `UploadWindowFlowTests.WhileTheServerIsProcessingTheWindowSaysSo` 偶發失敗（斷言「已等待」，看到的是第一則進度文字；競態，與本批無關，另兩次與單獨重跑全過），**建議另案處理** |
+| MCP-Server `npm test` | 38 ＋ Node 68 | 38 ＋ Node 68（未改） |
+
+新增測試（`OpenWindowPerformanceTests.cs`）：
+- `OpenWindowCostTests`（6）：開窗對 55 張圖紙×3 視口各清單只讀 1 次；來源介面成員名稱鎖定且不含 measure／outline／size／crop／location；快照視口有 ID、寬高為 0、`SizeMeasured` 為 false；圖紙集過濾與暫時集合略過；檢視模型可由未量測快照建立；計時日誌含數量與 ms、不含名稱。
+- `DeferredViewportMeasureTests`（9）：單一視口圖紙不量；只量多視口圖紙且主要視口取最大；未勾選視口不量；15 個視口分 3 批、進度文字；每批各一次佇列呼叫（`InlineRunner.Calls`）；量過不重量；量不到退回第一個；批次之間取消即停、不再量下一批也不匯出 PDF；舊呼叫端（`ViewportElementId=0` 自帶寬高）行為不變。
+- 變異檢查：把「同圖紙視口數 < 2 才略過」改成 `< 1` → 3 項失敗（還原後全過）。
+
+### 10.4 需實機計時（未宣稱通過）
+
+在 Snowdon（55 張）與 AR_CPC（19 張）各做一次，**日誌檔**為外掛 `Logger` 的輸出（`[IssueManager]` 前綴）：
+
+| 步驟 | 做法 | 預期 / 判讀 |
+|---|---|---|
+| T-A 開窗耗時 | 按功能區按鈕，用碼錶量到視窗出現；對照日誌三行「開視窗讀取視圖／圖紙／圖紙集…ms；合計 N ms」 | **預期 Snowdon 在數秒內**（視圖數千時主要是 `FilteredElementCollector` 與屬性讀取）。合計 ≤ 10 秒＝修正有效；若仍是分鐘級，看三行哪一行大：視圖那行大＝`OfClass(View)`／`Name` 才是熱點（本推測被推翻），圖紙那行大＝`GetAllViewports`／`GetElement` |
+| T-B 量測耗時 | 勾全部圖紙（含有多視口的圖紙），按上傳，看進度「讀取視口大小 n/m」是否逐批前進，日誌「量測視口外框：k 個，N ms（最慢一個 M ms）」 | 這一步才是 `GetBoxOutline` 的真實成本；每批（6 個）應回到訊息迴圈。若單批仍超過數十秒，把 `MeasureChunkSize` 調成 1～2，或改為不量外框改用 `Viewport.GetBoxCenter`＋視圖裁剪尺寸估算（需另案評估精準度） |
+| T-C 取消 | 在「讀取視口大小」期間按「取消上傳」 | 批次邊界即時生效（單一批次內無法取消） |
+| T-D 與舊版對照 | 同專案在 v4b 安裝版（`4720a2e`）與本分支各開一次視窗 | 證實或推翻「`GetBoxOutline` 是 12～15 分鐘的原因」；若兩者開窗都快，原因另有其他 |
+
+### 10.5 未做／取捨
+
+- **只有一個視口的圖紙不量**：它必然是主要視口，面積無關（manifest 內容與舊版一致）。
+- **主要視口判斷改在匯出時**，因此「面積」不再存在於開窗後的檢視模型；目前沒有任何 UI 使用面積。
+- 若實機證明 `GetBoxOutline` 單次也要數秒，量測階段本身仍可能累積數分鐘（雖然已分批、可取消、且只量多視口圖紙）；進一步可改為「以視圖裁剪框尺寸×比例估算」，會改變主要視口的判斷精準度，需 Alex 決定。
