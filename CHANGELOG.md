@@ -8,6 +8,16 @@
 
 ## [Unreleased]
 
+### 🔧 修正 — 上傳到 Issue Manager 外掛端：獨立安全審查後修正（2026-10-25，分支 v4b，commit `fba7a60`）
+
+- **登出／切換帳號真的撤銷伺服器端授權**：access 已過期或被 401 時改用 `refresh_token` 走撤銷端點（舊版拿過期 access 當 Bearer、伺服器端一族權杖沒被撤銷，審查探針 `revokedTokens` 0 → 2）；`LogoutAsync` 回傳 `LogoutOutcome`，失敗時視窗如實顯示「伺服器端撤銷未完成」並指引到網站帳號頁手動撤銷。
+- **只執行絕對路徑的 node.exe**：不再用裸名 `node`（工作目錄／專案資料夾放假 `node.exe` 不會被執行）；往上找 `tools` 資料夾的開發路徑預設關閉（`REVITMCP_DEV_TOOLS=1` 才啟用）。
+- **ExternalEvent 等待可取消、可逾時**：新增 `QueuedApiThreadRunner`（排隊取消、`Raise()` 回傳值檢查、開始前 120 秒逾時＋白話訊息、放棄的工作不會稍後被執行）；所有結束路徑釋放 `UploadFlow` 的 `_running`，不需重開 Revit。`ExternalEventManager` 新增 `TryExecuteCommand`。
+- **關閉視窗（含 X）清理未完成的 bundle**（詢問「放棄這次上傳並清除？」，先刪本機檔再通知伺服器）；外掛啟動時背景清除超過 3 天的舊暫存（`BundleTempCleaner`）。
+- **移除巢狀訊息迴圈**：匯出每個 Revit 步驟各自一次 ExternalEvent，步驟之間回到 UI 執行緒；移除 `IExportProgress.Pump`。取捨與「需實機觀察」項見 [ADR D-011 審查後修正](docs/adr/D-011-issue-manager-upload-addin.md) 與交班單。
+- 加固：loopback `ExclusiveAddressUse` 與讀取逾時；續傳前重新計算磁碟 sha256；PDF 1 MB 串流掃描、頁數不符中止（含物件串流且頁數偏少時只警告）；登入中取消的文案；功能區面板建立包 `try/catch`。
+- 測試：`dotnet test MCP.Tests` 429 → 479（+50）；MCP-Server `npm test` 38＋Node 34 通過；R24 建置 0 錯誤、警告 1184 同基線。**僅離線驗證；未連 Revit、未安裝外掛、未連真實 Issue Manager。**
+
 ### 新增 — 上傳到 Issue Manager：功能區按鈕、勾選視窗、版本包、瀏覽器授權登入（2026-10-25，分支 v4b，任務書 V4 的 4B）
 
 - 功能區新面板「Issue Manager」＋按鈕「上傳到 Issue Manager」（`IExternalCommand`＋`ExternalEventManager` 佇列，**不經 MCP WebSocket**，MCP 服務關閉時可用）。勾選視窗：專案、設計階段（第一項「請選擇階段」、無預設值）、版本說明、圖紙集（Revit `ViewSheetSet` 為預設勾選來源）、圖紙／視口視圖樹、其他視圖分組、模型與設計選項、摘要與缺項提示。
