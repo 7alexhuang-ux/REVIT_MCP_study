@@ -16,6 +16,7 @@
 - Revit 端接線：`RevitSelectionCollector`（圖紙、視口面積、可匯出視圖、`ViewSheetSet`）、`RevitBundleExportSteps`（經 `CommandExecutor.ExecuteCommand` 分派既有匯出指令；有設計選項分件時以 `merge-option-glbs.mjs` 合併；匯出報告 `complete:false` 即中止，不上傳缺漏的模型）、`IssueManagerSession`（共用登入狀態與 HttpClient，不自動轉址）；視窗在每個 `await` 之後切回 UI 執行緒，進度回呼帶執行代號（流程結束後的舊進度不蓋掉最後狀態）。網址設定：環境變數 `ISSUE_MANAGER_URL` 或 `%APPDATA%\RevitMCP\issue-manager.json`（無預設值、僅 https，http 限本機）。
 - 新增 `docs/schemas/bundle-manifest.schema.json`（客戶端副本，待與網站端 4A 對齊）與共用 fixture、假 Issue Manager（`tools/fake-issue-manager/server.mjs`）、`scripts/install-addon.ps1` 部署 GLB 合併腳本。詳 [docs/ISSUE_MANAGER_UPLOAD.md](docs/ISSUE_MANAGER_UPLOAD.md)、[docs/adr/D-011-issue-manager-upload-addin.md](docs/adr/D-011-issue-manager-upload-addin.md)。
 - 測試：`dotnet test MCP.Tests` 314 → 429（新增 115，含 Node 假伺服器整合測試、WPF 視窗綁定與整段流程測試）；`tools/*.test.mjs` 10 → 34。R24 建置 0 錯誤、警告數 1184 與基線相同。**僅離線驗證；未連 Revit、未安裝外掛、未連真實 Issue Manager。**
+- 文件：新增 [docs/ISSUE_MANAGER_UPLOAD.md](docs/ISSUE_MANAGER_UPLOAD.md)（設定、流程、登入、檔案地圖、假伺服器、與網站端 schema 的對齊）、[ADR D-011](docs/adr/D-011-issue-manager-upload-addin.md)、LESSONS L-18～L-20、ROADMAP R-08、交班單 [docs/commit_handoff_v4b_2026-10-25.md](docs/commit_handoff_v4b_2026-10-25.md)（含給 Alex 的實機測試清單 T1～T12）；SPEC、文件清單、PROJECT_INTRO 同步。
 
 ### 新增 — 設計選項實體幾何、命名視圖與無人操作工具（2026-10-23）
 

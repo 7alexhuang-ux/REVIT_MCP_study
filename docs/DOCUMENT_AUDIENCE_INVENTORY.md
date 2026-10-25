@@ -62,6 +62,9 @@ These must remain understandable by both sides.
 | `docs/troubleshoot-first-install.md` | users | First-install troubleshooting |
 | `docs/PROJECT_INTRO.md` | community readers | Community-facing project introduction (zh-TW, two-tier: overview + full technical detail, mermaid diagrams); update when features/counts change |
 | `docs/WEB_COMPARE_EXPORT.md` | maintainers and issue-manager developers | `export_web_compare` usage, output files, camera.json coordinate mapping (zh-TW) |
+| `docs/ISSUE_MANAGER_UPLOAD.md` | maintainers and issue-manager developers | "Upload to Issue Manager" add-in feature: settings, selection window, export/upload flow, login, file map, fake server, schema alignment (zh-TW) |
+| `docs/commit_handoff_v4b_2026-10-25.md` | maintainers and the next session | Handoff for the V4 4B build: commits, acceptance status, real-Revit test checklist, risks, open decisions (zh-TW) |
+| `docs/schemas/bundle-manifest.schema.json`, `docs/schemas/fixtures/bundle-manifest.sample.json` | developers (add-in and issue-manager) | Client copy of the version-bundle manifest schema and the shared golden fixture; must be reconciled with the issue-manager repo's schema |
 | `docs/slides.md` | presenters | Slide index |
 | `Antigravity_MCP_Complete_Guide.md` | Antigravity users | Manual MCP setup for Antigravity client |
 | `docs/UPDATE-PULL-GUIDE.md`, `docs/branch-index.md` | users and maintainers | Update flow and branch overview |
