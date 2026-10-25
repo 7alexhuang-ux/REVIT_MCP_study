@@ -32,6 +32,7 @@ namespace RevitMCP.Tests.IssueManager
         public byte[] BodyBytes { get; set; }
         public string Authorization { get; set; }
         public string ApiVersion { get; set; }
+        public string PartSha256 { get; set; }
         public JObject Json { get { return string.IsNullOrEmpty(Body) ? null : Jsons.Parse(Body); } }
     }
 
@@ -54,6 +55,7 @@ namespace RevitMCP.Tests.IssueManager
             };
             IEnumerable<string> versions;
             if (request.Headers.TryGetValues("X-Addin-Api", out versions)) recorded.ApiVersion = string.Join(",", versions);
+            if (request.Headers.TryGetValues("X-Part-Sha256", out versions)) recorded.PartSha256 = string.Join(",", versions);
             if (request.Content != null)
             {
                 recorded.BodyBytes = await request.Content.ReadAsByteArrayAsync().ConfigureAwait(false);

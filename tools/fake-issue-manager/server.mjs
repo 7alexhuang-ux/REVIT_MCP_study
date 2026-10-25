@@ -334,6 +334,8 @@ export async function startFakeServer(options = {}) {
                 const data = await readBody(req);
                 if (data.length > config.partBytes) return error(res, 413, 'payload_too_large');
                 if (data.length === 0) return error(res, 400, 'invalid_part');
+                const declared = req.headers['x-part-sha256'];
+                if (declared !== undefined && (!/^[0-9a-f]{64}$/.test(declared) || declared !== sha256Hex(data))) return error(res, 400, 'checksum_mismatch');
                 if (!bundle.parts.has(upload[2])) bundle.parts.set(upload[2], new Map());
                 bundle.parts.get(upload[2]).set(Number(upload[3]), data);
                 state.putCount++;

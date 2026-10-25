@@ -118,6 +118,20 @@ namespace RevitMCP.Core.IssueManager
             return token != null && (token.Type == JTokenType.Integer || token.Type == JTokenType.Float) ? (long)token : 0;
         }
 
+        /// <summary>可選標頭：分段的 SHA-256（64 位小寫十六進位），revit-addin-export.md §5.2。</summary>
+        public const string PartHashHeader = "X-Part-Sha256";
+
+        private static string Sha256Hex(byte[] data, int offset, int count)
+        {
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                var hash = sha.ComputeHash(data, offset, count);
+                var builder = new System.Text.StringBuilder(hash.Length * 2);
+                foreach (var b in hash) builder.Append(b.ToString("x2"));
+                return builder.ToString();
+            }
+        }
+
         /// <summary>PUT 一個分段到簽名網址。回傳前已確認 2xx。</summary>
         public async Task PutPartAsync(string url, byte[] data, int offset, int count, CancellationToken ct)
         {
@@ -145,6 +159,9 @@ namespace RevitMCP.Core.IssueManager
                         {
                             request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token);
                             request.Headers.TryAddWithoutValidation(AddinHttp.ApiVersionHeader, AddinHttp.ApiVersion);
+                            // 磁碟模式（Issue Manager 自己接收分段）：帶分段雜湊，伺服器不符就在這一段回 400 checksum_mismatch，
+                            // 不必等整包 finalize 才發現。簽名網址（別的主機）不加額外標頭。
+                            request.Headers.TryAddWithoutValidation(PartHashHeader, Sha256Hex(data, offset, count));
                         }
                         var content = new ByteArrayContent(data, offset, count);
                         content.Headers.TryAddWithoutValidation("Content-Type", "application/octet-stream");

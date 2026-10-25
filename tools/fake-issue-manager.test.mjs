@@ -168,6 +168,10 @@ test('bundles：分段上傳、finalize 檢查雜湊與標頭、冪等、DELETE'
         for (let i = 0; i * 8 < pdf.length; i++) assert.equal((await put('pdf', i, pdf.subarray(i * 8, (i + 1) * 8))).status, 200);
         assert.equal((await put('pdf', 0, Buffer.alloc(9))).status, 413, '分段超過 partBytes');
         assert.equal((await put('viewPositions', 0, Buffer.from('x'))).status, 404, 'viewPositions 不核發');
+        const withHash = (hash, data) => fetch(`${fake.url}/upload/${created.bundleId}/pdf/0`, { method: 'PUT', headers: { Authorization: `Bearer ${tokens.access_token}`, 'X-Part-Sha256': hash }, body: data });
+        assert.equal((await withHash('0'.repeat(64), Buffer.from('abc'))).status, 400, 'X-Part-Sha256 不符 → 400 checksum_mismatch');
+        assert.equal((await withHash(sha256Hex(Buffer.from('%PDF-1.7')), Buffer.from('%PDF-1.7'))).status, 200);
+        for (let i = 0; i * 8 < pdf.length; i++) assert.equal((await put('pdf', i, pdf.subarray(i * 8, (i + 1) * 8))).status, 200, '重送覆寫');
 
         const finalize = finalizeOf(fake, tokens, created.bundleId);
         const ok = await (await finalize({ manifest: pdfManifest(pdf) })).json();

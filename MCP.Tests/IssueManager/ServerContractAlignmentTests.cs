@@ -532,6 +532,26 @@ namespace RevitMCP.Tests.IssueManager
         }
 
         [Test]
+        public async Task PartHashHeaderIsSentOnlyToIssueManagerItselfAndMatchesTheBytes()
+        {
+            var api = await Harness.LoggedInApiAsync(_server);
+            var created = await api.CreateBundleAsync("p1", "SD", "x", new BundleSummary(), CancellationToken.None);
+            var data = Harness.Bytes(40, 5);
+            await api.PutPartAsync(created.Files[0].Urls[0], data, 10, 16, CancellationToken.None);
+            string expected;
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+                expected = string.Concat(sha.ComputeHash(data, 10, 16).Select(b => b.ToString("x2")));
+            Assert.AreEqual(expected, _server.Puts[0].PartSha256);
+            StringAssert.IsMatch("^[0-9a-f]{64}$", _server.Puts[0].PartSha256);
+
+            var other = new FakeTokenServer { PartBytes = 16, UploadHost = "storage.example.test" };
+            var otherApi = await Harness.LoggedInApiAsync(other);
+            var otherCreated = await otherApi.CreateBundleAsync("p1", "SD", "x", new BundleSummary(), CancellationToken.None);
+            await otherApi.PutPartAsync(otherCreated.Files[0].Urls[0], data, 0, 16, CancellationToken.None);
+            Assert.IsNull(other.Puts[0].PartSha256, "簽名網址（別的主機）不加額外標頭");
+        }
+
+        [Test]
         public async Task BearerIsStillOnlySentToTheIssueManagerHost()
         {
             var flow = await NewFlow(new FakeSteps());
