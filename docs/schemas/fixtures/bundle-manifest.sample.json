@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "revitDoc": {
+    "title": "AR_CPC",
+    "versionNumber": "2024 (24.3.0.0)"
+  },
+  "exportedAt": "2026-10-25T08:30:00Z",
+  "originOffsetMeters": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "sheetSet": {
+    "name": "送審圖"
+  },
+  "sheets": [
+    {
+      "pageNumber": 1,
+      "sheetNumber": "A-2",
+      "title": "二層平面圖",
+      "uniqueId": "sheet-a2-uid",
+      "viewports": [
+        {
+          "viewUniqueId": "view-plan-2f-uid",
+          "viewName": "2F",
+          "viewKind": "plan",
+          "isPrimary": true
+        }
+      ]
+    },
+    {
+      "pageNumber": 2,
+      "sheetNumber": "A-10",
+      "title": "剖面與透視",
+      "uniqueId": "sheet-a10-uid",
+      "viewports": [
+        {
+          "viewUniqueId": "view-section-aa-uid",
+          "viewName": "A-A 剖面",
+          "viewKind": "section",
+          "isPrimary": false
+        },
+        {
+          "viewUniqueId": "view-3d-main-uid",
+          "viewName": "主透視",
+          "viewKind": "3d",
+          "isPrimary": true
+        }
+      ]
+    }
+  ],
+  "views": [
+    {
+      "uniqueId": "view-3d-main-uid",
+      "name": "主透視",
+      "kind": "3d"
+    },
+    {
+      "uniqueId": "view-plan-2f-uid",
+      "name": "2F",
+      "kind": "plan"
+    },
+    {
+      "uniqueId": "view-section-aa-uid",
+      "name": "A-A 剖面",
+      "kind": "section"
+    }
+  ],
+  "files": {
+    "pdf": {
+      "name": "sheets.pdf",
+      "bytes": 1234,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "glb": {
+      "name": "model.glb",
+      "bytes": 5678,
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "namedViews": {
+      "name": "named_views.json",
+      "bytes": 910,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  },
+  "options": {
+    "designOptions": true
+  },
+  "warnings": [
+    "範例：沒有視圖位置檔（V5 才有）"
+  ]
+}

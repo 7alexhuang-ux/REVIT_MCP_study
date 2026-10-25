@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://revit-mcp.invalid/schemas/bundle-manifest.schema.json",
+  "title": "Issue Manager 版本包 manifest（schemaVersion 1）",
+  "description": "外掛端（REVIT_MCP_study）依 Issue Manager docs/spec/revit-addin-export.md §5.1 建立的客戶端副本；網站端 4A 建立的 docs/spec/schemas/bundle-manifest.schema.json 完成後必須逐欄對齊（見 docs/ISSUE_MANAGER_UPLOAD.md「與網站端 schema 的對齊」）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "revitDoc", "exportedAt", "originOffsetMeters", "sheets", "views", "files", "options", "warnings"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "revitDoc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "versionNumber"],
+      "properties": {
+        "title": { "type": "string" },
+        "versionNumber": { "type": "string" }
+      }
+    },
+    "exportedAt": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$" },
+    "originOffsetMeters": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "number" }
+    },
+    "sheetSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": { "name": { "type": "string", "minLength": 1 } }
+    },
+    "sheets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pageNumber", "sheetNumber", "title", "uniqueId", "viewports"],
+        "properties": {
+          "pageNumber": { "type": "integer", "minimum": 1 },
+          "sheetNumber": { "type": "string", "minLength": 1 },
+          "title": { "type": "string" },
+          "uniqueId": { "type": "string", "minLength": 1 },
+          "viewports": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["viewUniqueId", "viewName", "viewKind", "isPrimary"],
+              "properties": {
+                "viewUniqueId": { "type": "string", "minLength": 1 },
+                "viewName": { "type": "string" },
+                "viewKind": { "$ref": "#/definitions/viewKind" },
+                "isPrimary": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "views": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["uniqueId", "name", "kind"],
+        "properties": {
+          "uniqueId": { "type": "string", "minLength": 1 },
+          "name": { "type": "string" },
+          "kind": { "$ref": "#/definitions/viewKind" }
+        }
+      }
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pdf": { "$ref": "#/definitions/file" },
+        "glb": { "$ref": "#/definitions/file" },
+        "namedViews": { "$ref": "#/definitions/file" },
+        "viewPositions": { "$ref": "#/definitions/file" }
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["designOptions"],
+      "properties": { "designOptions": { "type": "boolean" } }
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "definitions": {
+    "viewKind": { "enum": ["3d", "plan", "ceiling", "section", "elevation", "detail"] },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "bytes", "sha256"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

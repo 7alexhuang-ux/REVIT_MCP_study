@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+### 新增 — 上傳到 Issue Manager：功能區按鈕、勾選視窗、版本包、瀏覽器授權登入（2026-10-25，分支 v4b，任務書 V4 的 4B）
+
+- 功能區新面板「Issue Manager」＋按鈕「上傳到 Issue Manager」（`IExternalCommand`＋`ExternalEventManager` 佇列，**不經 MCP WebSocket**，MCP 服務關閉時可用）。勾選視窗：專案、設計階段（第一項「請選擇階段」、無預設值）、版本說明、圖紙集（Revit `ViewSheetSet` 為預設勾選來源）、圖紙／視口視圖樹、其他視圖分組、模型與設計選項、摘要與缺項提示。
+- 一次匯出：PDF（`export_sheets_pdf` 合併單檔）、GLB（`export_design_options`，有選項分件時以 `merge-option-glbs.mjs` 合併）、3D 視角（`export_named_views`，與 GLB 同原點）→ `manifest.json`（圖號取自 Revit、UniqueId 對應、sha256）→ 背景分段上傳（可重試、已完成的檔案不重傳、可取消並 `DELETE` 伺服器暫存）→ finalize。視圖位置檔屬 V5，本案不匯出。
+- 登入：瀏覽器授權碼＋PKCE（S256）＋loopback（`TcpListener` 127.0.0.1 隨機埠）；refresh token 以 Windows DPAPI 加密落檔、輪替且單鎖序列化；權杖／授權碼／verifier／state 不寫日誌。
+- 新增 `docs/schemas/bundle-manifest.schema.json`（客戶端副本，待與網站端 4A 對齊）與共用 fixture、假 Issue Manager（`tools/fake-issue-manager/server.mjs`）、`scripts/install-addon.ps1` 部署 GLB 合併腳本。詳 [docs/ISSUE_MANAGER_UPLOAD.md](docs/ISSUE_MANAGER_UPLOAD.md)、[docs/adr/D-011-issue-manager-upload-addin.md](docs/adr/D-011-issue-manager-upload-addin.md)。
+- 測試：`dotnet test MCP.Tests` 314 → 429（新增 115，含 Node 假伺服器整合測試、WPF 視窗綁定與整段流程測試）；`tools/*.test.mjs` 10 → 34。R24 建置 0 錯誤、警告數 1184 與基線相同。**僅離線驗證；未連 Revit、未安裝外掛、未連真實 Issue Manager。**
+
 ### 新增 — 設計選項實體幾何、命名視圖與無人操作工具（2026-10-23）
 
 - 新增 list_design_options／export_design_options／export_named_views；export_web_compare 以 designOptions:true 選用新流程，預設保留原匯出。穩定 UniqueId、逐元素 designOption extras、design_options.json 及共用原點相機資料。
