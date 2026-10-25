@@ -75,7 +75,10 @@ namespace RevitMCP.Core.IssueManager
     /// </summary>
     public sealed class BundleUploader
     {
-        /// <summary>單一分段上限（整段讀進記憶體再送）；伺服器回報更大的值視為不正確。</summary>
+        /// <summary>
+        /// 單一分段的「合理性上限」（整段讀進記憶體再送）；伺服器回報更大的值視為不正確。
+        /// 實際分段大小一律以伺服器回應的 partBytes 為準（磁碟模式目前是 8 MiB 以內、Supabase 模式 45 MB），這裡不寫死伺服器的值。
+        /// </summary>
         public const long MaxPartBytes = 128L * 1024 * 1024;
 
         private readonly AddinApiClient _api;
@@ -150,6 +153,43 @@ namespace RevitMCP.Core.IssueManager
                 fileState.Completed = true;
                 state.Save(statePath);
             }
+        }
+
+        /// <summary>
+        /// 檔案大小與頁數是否在伺服器回報的上限內（<see cref="BundleLimits"/>，0＝未知，不檢查）。
+        /// 超過就不必傳了：伺服器 finalize 也會拒絕（413），而且傳完才被拒要白等一輪上傳。
+        /// </summary>
+        public static void EnsureWithinLimits(BundleLimits limits, ExportedBundle exported)
+        {
+            if (limits == null || exported == null) return;
+            foreach (var file in exported.Files)
+            {
+                long max = 0;
+                string label = null;
+                if (file.Kind == BundleFile.Pdf) { max = limits.PdfBytes; label = "圖紙 PDF"; }
+                else if (file.Kind == BundleFile.Glb) { max = limits.GlbBytes; label = "3D 模型 GLB"; }
+                else if (file.Kind == BundleFile.NamedViews) { max = limits.NamedViewsBytes; label = "3D 視角檔"; }
+                if (max > 0 && file.Bytes > max)
+                    throw new InvalidOperationException(label + "（" + FormatMegabytes(file.Bytes) + "）超過 Issue Manager 的上限（" + FormatMegabytes(max)
+                        + "）。請減少勾選的圖紙或改以較小的範圍匯出。");
+            }
+            if (limits.PdfPages > 0 && exported.Manifest != null)
+            {
+                var sheets = exported.Manifest["sheets"] as Newtonsoft.Json.Linq.JArray;
+                if (sheets != null && sheets.Count > limits.PdfPages)
+                    throw new InvalidOperationException("勾選的圖紙（" + sheets.Count + " 張）超過 Issue Manager 單一版本的上限（" + limits.PdfPages + " 張）。");
+            }
+        }
+
+        private static string FormatMegabytes(long bytes)
+        {
+            return Math.Round(bytes / 1048576.0, 1).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " MB";
+        }
+
+        /// <summary>檔案（大小與雜湊）是否仍和匯出時一樣；重建版本包後整批重傳前先確認。</summary>
+        public static void VerifyFilesUnchanged(ExportedBundle exported)
+        {
+            foreach (var file in exported.Files) VerifyFileUnchanged(file);
         }
 
         private static void VerifyFileUnchanged(BundleFile file)

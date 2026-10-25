@@ -647,13 +647,14 @@ namespace RevitMCP.Tests.IssueManager
         public async Task FinalizeRejectionIsReportedAndResumable()
         {
             var flow = await NewFlow(new FakeSteps());
-            _server.RejectFinalizeWithCode = "invalid_manifest";
+            _server.RejectFinalizeWithCode = "checksum_mismatch"; // 檔案在傳輸中壞掉：伺服器作廢整個版本包，用本機檔案重建後可以重試
             var ex = Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
             StringAssert.Contains("清單", ex.Message);
             Assert.IsTrue(flow.CanResume);
             await flow.DiscardAsync();
-            Assert.AreEqual(1, _server.Deleted.Count);
+            Assert.AreEqual(0, _server.Deleted.Count, "伺服器已作廢的版本包不必再 DELETE");
             Assert.IsFalse(flow.CanResume);
+            Assert.IsFalse(Directory.Exists(Path.Combine(_dir, "bundles")) && Directory.GetDirectories(Path.Combine(_dir, "bundles")).Length > 0, "放棄後本機檔案已刪");
         }
 
         [Test]

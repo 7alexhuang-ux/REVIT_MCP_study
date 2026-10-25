@@ -48,10 +48,20 @@ namespace RevitMCP.Core.IssueManager
         public List<string> Urls { get; set; } = new List<string>();
     }
 
+    /// <summary>建立版本包時伺服器回報的上限（revit-addin-export.md §5.2：limits）。沒給的欄位為 0＝未知，不檢查。</summary>
+    public sealed class BundleLimits
+    {
+        public long PdfBytes { get; set; }
+        public long GlbBytes { get; set; }
+        public long NamedViewsBytes { get; set; }
+        public int PdfPages { get; set; }
+    }
+
     public sealed class BundleCreateResult
     {
         public string BundleId { get; set; }
         public DateTimeOffset? ExpiresAt { get; set; }
+        public BundleLimits Limits { get; set; } = new BundleLimits();
         public List<BundleFileTicket> Files { get; set; } = new List<BundleFileTicket>();
 
         public BundleFileTicket Find(string kind)
@@ -69,6 +79,19 @@ namespace RevitMCP.Core.IssueManager
         public string SetId { get; set; }
         public string Url { get; set; }
         public List<string> Warnings { get; set; } = new List<string>();
+    }
+
+    /// <summary>DELETE /bundles/:id 的結果：取消流程據此決定要告訴使用者什麼（已 finalize 的版本不能用取消刪掉）。</summary>
+    public enum BundleDeleteOutcome
+    {
+        /// <summary>已刪除，或伺服器上已經不存在（404／410）。</summary>
+        Deleted,
+        /// <summary>409 already_finalized：版本已建立，取消什麼都沒做。</summary>
+        AlreadyFinalized,
+        /// <summary>409 finalize_in_progress：伺服器正在建立版本，取消什麼都沒做。</summary>
+        FinalizeInProgress,
+        /// <summary>連不上或其他錯誤（伺服器端暫存會在過期時自動清除）。</summary>
+        Failed
     }
 
     public enum AddinErrorKind
@@ -97,16 +120,19 @@ namespace RevitMCP.Core.IssueManager
     {
         private static readonly Regex SafeCode = new Regex("^[a-z0-9_]{1,40}$", RegexOptions.Compiled);
 
-        public AddinApiException(AddinErrorKind kind, string message, int statusCode = 0, string code = null)
+        public AddinApiException(AddinErrorKind kind, string message, int statusCode = 0, string code = null, bool isTimeout = false)
             : base(message)
         {
             Kind = kind;
             StatusCode = statusCode;
+            IsTimeout = isTimeout;
             Code = code != null && SafeCode.IsMatch(code) ? code : null;
         }
 
         public AddinErrorKind Kind { get; private set; }
         public int StatusCode { get; private set; }
         public string Code { get; private set; }
+        /// <summary>網路錯誤中的「等不到回應（逾時）」：伺服器可能仍在處理，與「連不上」不同。</summary>
+        public bool IsTimeout { get; private set; }
     }
 }

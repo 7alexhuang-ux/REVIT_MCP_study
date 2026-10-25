@@ -72,7 +72,7 @@ namespace RevitMCP.Core.IssueManager
     /// 規則：
     /// ‧階段一開始就是「請選擇階段」，沒有預設值；
     /// ‧選 ViewSheetSet ＝ 取代目前勾選（圖紙＋其視口視圖＋集內的視圖）；使用者再手動增減，下拉自動回到「（自訂）」；
-    /// ‧「上傳」需要：已登入、專案、階段、說明、至少勾一項（圖紙、視圖或模型）。
+    /// ‧「上傳」需要：已登入、專案、階段、說明、至少勾一張圖紙或一個模型（只勾視圖會被伺服器拒絕：400 invalid_manifest）。
     /// </summary>
     public sealed class ExportSelectionViewModel : NotifyBase
     {
@@ -299,7 +299,11 @@ namespace RevitMCP.Core.IssueManager
             }
         }
 
-        public bool HasAnySelection { get { return CheckedSheetCount > 0 || CheckedViewCount > 0 || _includeModel; } }
+        /// <summary>
+        /// 至少要有一張圖紙或一個模型：只勾視圖的版本包，伺服器 finalize 會回 400 invalid_manifest（PDF 與 GLB 至少要有一個，
+        /// revit-addin-export.md §5.2）。視圖本身只是圖紙／模型的附屬資料，不能單獨成為一個版本。
+        /// </summary>
+        public bool HasAnySelection { get { return CheckedSheetCount > 0 || _includeModel; } }
 
         /// <summary>「上傳」被停用的原因；可以上傳時為 null。</summary>
         public string BlockReason
@@ -312,6 +316,8 @@ namespace RevitMCP.Core.IssueManager
                 if (_selectedStage == null || _selectedStage.Code == null) return Strings.NoStageSelected;
                 if (string.IsNullOrWhiteSpace(_description)) return Strings.NoDescription;
                 if (!HasAnySelection) return Strings.NothingSelected;
+                if (CheckedSheetCount > ManifestBuilder.MaxSheets) return Strings.TooManySheets(ManifestBuilder.MaxSheets);
+                if (CheckedViewCount > ManifestBuilder.MaxViews) return Strings.TooManyViews(ManifestBuilder.MaxViews);
                 return null;
             }
         }

@@ -8,7 +8,7 @@ namespace RevitMCP.Tests.IssueManager
 {
     /// <summary>
     /// 測試專用的 JSON Schema（draft-07 子集）驗證器：只實作 docs/schemas/bundle-manifest.schema.json 用到的關鍵字
-    /// （type、const、enum、required、properties、additionalProperties、items、minItems、maxItems、minimum、minLength、pattern、$ref/definitions）。
+    /// （type、const、enum、required、properties、additionalProperties、items、minItems、maxItems、minimum、maximum、minLength、maxLength、pattern、$ref/definitions）。
     /// 遇到沒實作的關鍵字會丟例外，避免 schema 加了新規則卻被靜默略過。
     /// 另有 Node 端的 ajv 測試（tools/bundle-manifest.schema.test.mjs）用同一份 schema 與 fixture 交叉驗證。
     /// </summary>
@@ -17,7 +17,7 @@ namespace RevitMCP.Tests.IssueManager
         private static readonly HashSet<string> Supported = new HashSet<string>
         {
             "$schema", "$id", "title", "description", "type", "const", "enum", "required", "properties", "additionalProperties",
-            "items", "minItems", "maxItems", "minimum", "minLength", "pattern", "$ref", "definitions"
+            "items", "minItems", "maxItems", "minimum", "maximum", "minLength", "maxLength", "pattern", "$ref", "definitions"
         };
 
         private readonly JObject _root;
@@ -61,11 +61,14 @@ namespace RevitMCP.Tests.IssueManager
             {
                 var text = (string)value;
                 if (schema["minLength"] != null && text.Length < (int)schema["minLength"]) errors.Add(path + " 長度小於 " + schema["minLength"]);
+                if (schema["maxLength"] != null && text.Length > (int)schema["maxLength"]) errors.Add(path + " 長度大於 " + schema["maxLength"]);
                 if (schema["pattern"] != null && !Regex.IsMatch(text, (string)schema["pattern"])) errors.Add(path + " 不符 pattern " + schema["pattern"]);
             }
 
             if ((value.Type == JTokenType.Integer || value.Type == JTokenType.Float) && schema["minimum"] != null && (double)value < (double)schema["minimum"])
                 errors.Add(path + " 小於最小值 " + schema["minimum"]);
+            if ((value.Type == JTokenType.Integer || value.Type == JTokenType.Float) && schema["maximum"] != null && (double)value > (double)schema["maximum"])
+                errors.Add(path + " 大於最大值 " + schema["maximum"]);
 
             var obj = value as JObject;
             if (obj != null)

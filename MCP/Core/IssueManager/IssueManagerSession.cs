@@ -29,6 +29,7 @@ namespace RevitMCP.Core.IssueManager
         private static readonly object Gate = new object();
         private static HttpClient _http;
         private static HttpClient _uploadHttp;
+        private static HttpClient _finalizeHttp;
         private static AddinAuthService _auth;
         private static AddinApiClient _api;
         private static string _baseUrl;
@@ -69,10 +70,12 @@ namespace RevitMCP.Core.IssueManager
                     var client = ClientInfo.Create(Environment.MachineName + " · Revit " + uiApp.Application.VersionNumber, version);
                     _http = CreateHttpClient(TimeSpan.FromSeconds(60));
                     _uploadHttp = CreateHttpClient(TimeSpan.FromMinutes(15));
+                    // 伺服器 finalize 最長約 300 秒（磁碟模式更久）：專用逾時 330 秒；其餘 JSON 呼叫維持 60 秒。
+                    _finalizeHttp = CreateHttpClient(AddinApiClient.FinalizeTimeout);
                     _auth = new AddinAuthService(_http, new DpapiTokenVault(DpapiTokenVault.DefaultPath()), baseUrl, client,
                         log: message => Logger.Info("[IssueManager] " + message));
                     _auth.TryRestore();
-                    _api = new AddinApiClient(_http, _auth, client, _uploadHttp);
+                    _api = new AddinApiClient(_http, _auth, client, _uploadHttp, _finalizeHttp);
                     _baseUrl = baseUrl;
                 }
                 services.Auth = _auth;

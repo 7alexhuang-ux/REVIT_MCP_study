@@ -199,7 +199,8 @@ namespace RevitMCP.Tests.IssueManager
             vm.SelectedProject = vm.Projects[0];
 
             vm.IncludeModel = false;
-            Assert.AreEqual("請至少勾選一項", vm.BlockReason);
+            Assert.AreEqual(Strings.NothingSelected, vm.BlockReason);
+            StringAssert.Contains("圖紙", vm.BlockReason);
             vm.Sheets.First().IsChecked = true;
             Assert.IsTrue(vm.CanUpload);
 

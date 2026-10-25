@@ -3,6 +3,9 @@
 //   授權頁（auto-approve 或手動按鈕）、授權碼＋PKCE、權杖換發與 refresh 輪替／重用偵測、撤銷、
 //   /api/addin/me、/api/addin/projects、版本包 bundles（建立、分段 PUT、finalize、DELETE）。
 // 不含任何真實權杖或網址；資料只存在記憶體；只綁 127.0.0.1。
+// 版本包合約依 Issue Manager 網站端 imv4a 實作（revit-addin-export.md §5.2）：建立回 201、階段錯誤碼 invalid_input、
+//   files 只有 pdf／glb／namedViews、finalize 驗證失敗即作廢（之後 409 bundle_failed）、finalize 進行中 409 finalize_in_progress、
+//   DELETE 已 finalize 的 bundle 回 409 already_finalized、過期 410 bundle_expired、只有 namedViews（沒有 PDF 也沒有 GLB）回 400 invalid_manifest。
 // 用法：node tools/fake-issue-manager/server.mjs [--port 8799] [--auto-approve] [--part-bytes 4194304]
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -12,7 +15,11 @@ import path from 'node:path';
 const b64url = buffer => buffer.toString('base64url');
 const sha256Hex = buffer => crypto.createHash('sha256').update(buffer).digest('hex');
 const randomToken = prefix => prefix + b64url(crypto.randomBytes(32));
-const KINDS = ['pdf', 'glb', 'namedViews', 'viewPositions'];
+const KINDS = ['pdf', 'glb', 'namedViews'];
+const LIMITS = { pdfBytes: 300 * 1024 * 1024, glbBytes: 500 * 1024 * 1024, namedViewsBytes: 4 * 1024 * 1024, pdfPages: 1000 };
+const LIMIT_OF_KIND = { pdf: 'pdfBytes', glb: 'glbBytes', namedViews: 'namedViewsBytes' };
+// 假伺服器為了輕量，每個 kind 最多核發 256 個網址（真實伺服器依「大小上限 ÷ partBytes」給足）；options.urlsPerFile 可覆寫。
+const MAX_FAKE_URLS = 256;
 
 export async function startFakeServer(options = {}) {
     const config = {
@@ -21,7 +28,11 @@ export async function startFakeServer(options = {}) {
         accessTtlSec: options.accessTtlSec ?? 3600,
         refreshTtlSec: options.refreshTtlSec ?? 30 * 24 * 3600,
         codeTtlSec: options.codeTtlSec ?? 60,
-        urlsPerFile: options.urlsPerFile ?? 64,
+        urlsPerFile: options.urlsPerFile ?? null,
+        finalizeDelayMs: options.finalizeDelayMs ?? 0,
+        failNextFinalize: options.failNextFinalize ?? 0,
+        maxOpenBundles: options.maxOpenBundles ?? Infinity,
+        uploadOrigin: options.uploadOrigin ?? null,
         failNextPuts: options.failNextPuts ?? 0,
         failPutStatus: options.failPutStatus ?? 503,
         user: options.user ?? { id: 'user-1', email: 'fake.user@example.test', name: 'Fake User', accountRole: 'member', role: 'admin' },
@@ -35,6 +46,7 @@ export async function startFakeServer(options = {}) {
         deleted: [],
         authEvents: [],
         putCount: 0,
+        finalizeCount: 0,
         refreshCount: 0
     };
 
@@ -156,15 +168,59 @@ export async function startFakeServer(options = {}) {
         } catch { return error(res, 400, 'invalid_request'); }
     }
 
+    function urlCount(kind) {
+        if (config.urlsPerFile) return config.urlsPerFile;
+        return Math.min(MAX_FAKE_URLS, Math.ceil(LIMITS[LIMIT_OF_KIND[kind]] / config.partBytes));
+    }
+
     function describeBundle(id, bundle, origin) {
+        const uploadOrigin = config.uploadOrigin ?? origin;
         return {
             bundleId: id,
             expiresAt: new Date(bundle.expiresAt).toISOString(),
+            limits: LIMITS,
             files: KINDS.map(kind => ({
-                kind, name: kind, partBytes: config.partBytes,
-                urls: Array.from({ length: config.urlsPerFile }, (_, i) => `${origin}/upload/${id}/${kind}/${i}`)
+                kind, name: { pdf: 'sheets.pdf', glb: 'model.glb', namedViews: 'named_views.json' }[kind], partBytes: config.partBytes,
+                urls: Array.from({ length: urlCount(kind) }, (_, i) => `${uploadOrigin}/upload/${id}/${kind}/${i}`)
             }))
         };
+    }
+
+    // 驗證 manifest：回傳 { status, code } 表示被拒，null 表示通過。只實作會影響外掛行為的規則（完整 schema 由 ajv 測試與網站端負責）。
+    function validateManifest(manifest) {
+        if (!manifest || manifest.schemaVersion !== 1 || !Array.isArray(manifest.sheets) || !Array.isArray(manifest.views)
+            || typeof manifest.files !== 'object' || manifest.files === null || !Array.isArray(manifest.warnings)
+            || typeof manifest.options !== 'object' || manifest.options === null) return { status: 400, code: 'invalid_manifest' };
+        if (manifest.sheets.length > 1000 || manifest.views.length > 5000 || manifest.warnings.length > 200) return { status: 400, code: 'invalid_manifest' };
+        if (manifest.warnings.some(w => typeof w !== 'string' || w.length > 500)) return { status: 400, code: 'invalid_manifest' };
+        const numbers = new Set();
+        for (const [index, sheet] of manifest.sheets.entries()) {
+            if (sheet.pageNumber !== index + 1 || typeof sheet.sheetNumber !== 'string' || sheet.sheetNumber.length === 0 || sheet.sheetNumber.length > 100)
+                return { status: 400, code: 'invalid_manifest' };
+            if (numbers.has(sheet.sheetNumber.toLowerCase())) return { status: 400, code: 'invalid_manifest' };
+            numbers.add(sheet.sheetNumber.toLowerCase());
+        }
+        const hasPdf = manifest.files.pdf !== undefined;
+        const hasGlb = manifest.files.glb !== undefined;
+        if ((manifest.sheets.length > 0) !== hasPdf) return { status: 400, code: 'invalid_manifest' };
+        if (!hasPdf && !hasGlb) return { status: 400, code: 'invalid_manifest' }; // 只有命名視圖：PDF 與 GLB 至少要有一個
+        for (const [kind, file] of Object.entries(manifest.files)) {
+            if (!['pdf', 'glb', 'namedViews', 'viewPositions'].includes(kind)) return { status: 400, code: 'invalid_manifest' };
+            if (!file || !Number.isInteger(file.bytes) || file.bytes < 1 || typeof file.sha256 !== 'string') return { status: 400, code: 'invalid_manifest' };
+            const limit = LIMIT_OF_KIND[kind];
+            if (limit && file.bytes > LIMITS[limit]) return { status: 413, code: 'payload_too_large' };
+        }
+        return null;
+    }
+
+    // 驗證失敗即作廢（B03）：之後再 finalize 一律 409 bundle_failed，暫存立即清除。
+    function failBundle(bundle) {
+        bundle.status = 'failed';
+        bundle.parts.clear();
+    }
+
+    function expireIfDue(bundle) {
+        if (bundle.status === 'open' && bundle.expiresAt <= Date.now()) { bundle.status = 'expired'; bundle.parts.clear(); }
     }
 
     async function handleBundles(req, res, url, origin) {
@@ -174,41 +230,58 @@ export async function startFakeServer(options = {}) {
         if (req.method === 'POST' && parts.length === 4) {
             let body;
             try { body = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8')); } catch { return error(res, 400, 'invalid_request'); }
-            if (!['PD', 'SD', 'DD'].includes(body.stage)) return error(res, 400, 'stage_required');
+            if (!['PD', 'SD', 'DD'].includes(body.stage)) return sendJson(res, 400, { error: 'invalid_input', field: 'stage' });
             if (typeof body.description !== 'string' || body.description.trim() === '') return error(res, 400, 'description_required');
             if (!config.projects.some(p => p.id === body.projectId)) return error(res, 404, 'not_found');
+            if ([...state.bundles.values()].filter(b => b.status === 'open').length >= config.maxOpenBundles) return error(res, 429, 'too_many_open_bundles');
             const id = crypto.randomUUID();
             const bundle = { status: 'open', stage: body.stage, description: body.description, projectId: body.projectId, parts: new Map(), setId: null, expiresAt: Date.now() + 24 * 3600 * 1000 };
             state.bundles.set(id, bundle);
-            return sendJson(res, 200, describeBundle(id, bundle, origin));
+            return sendJson(res, 201, describeBundle(id, bundle, origin));
         }
         const id = parts[4];
         const bundle = state.bundles.get(id);
         if (!bundle) return error(res, 404, 'not_found');
+        expireIfDue(bundle);
         if (req.method === 'DELETE' && parts.length === 5) {
-            state.bundles.delete(id);
-            state.deleted.push(id);
-            return sendJson(res, 200, { deleted: true });
+            if (bundle.status === 'finalized') return error(res, 409, 'already_finalized'); // 版本已建立：什麼都不做
+            if (bundle.status === 'finalizing') return error(res, 409, 'finalize_in_progress');
+            if (bundle.status === 'open' || bundle.status === 'failed') { bundle.status = 'deleted'; bundle.parts.clear(); state.deleted.push(id); }
+            return sendJson(res, 200, { deleted: true }); // deleted／expired 重送也回 200（冪等）
         }
         if (req.method === 'POST' && parts[5] === 'finalize') {
-            if (bundle.status === 'finalized') return sendJson(res, 200, { setId: bundle.setId, url: `${origin}/sets/${bundle.setId}`, warnings: [] });
+            if (bundle.status === 'finalized') return sendJson(res, 200, { setId: bundle.setId, url: `${origin}/projects/${bundle.projectId}/sets/${bundle.setId}`, warnings: bundle.warnings ?? [] });
+            if (bundle.status === 'expired') return error(res, 410, 'bundle_expired');
+            if (bundle.status === 'failed') return error(res, 409, 'bundle_failed');
+            if (bundle.status === 'finalizing') return error(res, 409, 'finalize_in_progress');
+            if (bundle.status !== 'open') return error(res, 404, 'not_found');
             let body;
             try { body = JSON.parse((await readBody(req, 8 * 1024 * 1024)).toString('utf8')); } catch { return error(res, 400, 'invalid_request'); }
             const manifest = body.manifest;
-            if (!manifest || manifest.schemaVersion !== 1 || !Array.isArray(manifest.sheets) || !Array.isArray(manifest.views) || typeof manifest.files !== 'object')
-                return error(res, 400, 'invalid_manifest');
+            const rejected = validateManifest(manifest);
+            if (rejected) { failBundle(bundle); return error(res, rejected.status, rejected.code); }
             for (const [kind, file] of Object.entries(manifest.files)) {
+                if (kind === 'viewPositions') continue; // V5：4A 不收，忽略並回 warning
                 const stored = bundle.parts.get(kind);
-                if (!stored) return error(res, 400, 'invalid_file');
+                if (!stored) { failBundle(bundle); return error(res, 400, 'invalid_file'); }
                 const joined = Buffer.concat([...stored.entries()].sort((a, b) => a[0] - b[0]).map(entry => entry[1]));
-                if (joined.length !== file.bytes || sha256Hex(joined) !== file.sha256) return error(res, 400, 'checksum_mismatch');
-                if (kind === 'pdf' && !joined.subarray(0, 5).equals(Buffer.from('%PDF-'))) return error(res, 400, 'invalid_file');
-                if (kind === 'glb' && !joined.subarray(0, 4).equals(Buffer.from('glTF'))) return error(res, 400, 'invalid_file');
+                if (joined.length !== file.bytes || sha256Hex(joined) !== file.sha256) { failBundle(bundle); return error(res, 400, 'checksum_mismatch'); }
+                if (kind === 'pdf' && !joined.subarray(0, 5).equals(Buffer.from('%PDF-'))) { failBundle(bundle); return error(res, 400, 'invalid_file'); }
+                if (kind === 'glb' && !joined.subarray(0, 4).equals(Buffer.from('glTF'))) { failBundle(bundle); return error(res, 400, 'invalid_file'); }
             }
+            if (config.failNextFinalize > 0) {
+                config.failNextFinalize--;
+                failBundle(bundle);
+                return error(res, 500, 'finalize_failed');
+            }
+            bundle.status = 'finalizing';
+            if (config.finalizeDelayMs > 0) await new Promise(resolve => setTimeout(resolve, config.finalizeDelayMs));
             bundle.status = 'finalized';
             bundle.setId = crypto.randomUUID();
             bundle.manifest = manifest;
-            return sendJson(res, 200, { setId: bundle.setId, url: `${origin}/sets/${bundle.setId}`, warnings: [] });
+            bundle.warnings = manifest.files.viewPositions ? ['view_positions_not_supported'] : [];
+            state.finalizeCount++;
+            return sendJson(res, 200, { setId: bundle.setId, url: `${origin}/projects/${bundle.projectId}/sets/${bundle.setId}`, warnings: bundle.warnings });
         }
         return error(res, 404, 'not_found');
     }
@@ -254,7 +327,13 @@ export async function startFakeServer(options = {}) {
                 if (config.failNextPuts > 0) { config.failNextPuts--; await readBody(req); return error(res, config.failPutStatus, 'temporarily_unavailable'); }
                 const bundle = state.bundles.get(upload[1]);
                 if (!bundle) return error(res, 404, 'not_found');
+                expireIfDue(bundle);
+                if (bundle.status === 'expired') { await readBody(req); return error(res, 410, 'bundle_expired'); }
+                if (bundle.status !== 'open') { await readBody(req); return error(res, 409, bundle.status === 'finalizing' ? 'finalize_in_progress' : 'bundle_closed'); }
+                if (!KINDS.includes(upload[2])) { await readBody(req); return error(res, 404, 'not_found'); }
                 const data = await readBody(req);
+                if (data.length > config.partBytes) return error(res, 413, 'payload_too_large');
+                if (data.length === 0) return error(res, 400, 'invalid_part');
                 if (!bundle.parts.has(upload[2])) bundle.parts.set(upload[2], new Map());
                 bundle.parts.get(upload[2]).set(Number(upload[3]), data);
                 state.putCount++;
@@ -262,13 +341,15 @@ export async function startFakeServer(options = {}) {
             }
             if (req.method === 'POST' && url.pathname === '/__config') {
                 const patch = JSON.parse((await readBody(req, 8 * 1024)).toString('utf8') || '{}');
-                for (const key of ['failNextPuts', 'failPutStatus', 'accessTtlSec', 'partBytes']) if (patch[key] !== undefined) config[key] = patch[key];
+                for (const key of ['failNextPuts', 'failPutStatus', 'accessTtlSec', 'partBytes', 'finalizeDelayMs', 'failNextFinalize', 'maxOpenBundles', 'uploadOrigin', 'urlsPerFile'])
+                    if (patch[key] !== undefined) config[key] = patch[key];
+                if (patch.expireOpenBundles) for (const b of state.bundles.values()) if (b.status === 'open') b.expiresAt = Date.now() - 1000;
                 return sendJson(res, 200, { ok: true });
             }
             if (url.pathname === '/__state') {
                 return sendJson(res, 200, {
                     bundles: [...state.bundles.entries()].map(([id, b]) => ({ id, status: b.status, setId: b.setId, stage: b.stage, description: b.description, manifest: b.manifest ?? null })),
-                    deleted: state.deleted, putCount: state.putCount, refreshCount: state.refreshCount, authEvents: state.authEvents,
+                    deleted: state.deleted, putCount: state.putCount, finalizeCount: state.finalizeCount, refreshCount: state.refreshCount, authEvents: state.authEvents,
                     revokedTokens: [...state.tokens.values()].filter(t => t.revokedAt).length
                 });
             }

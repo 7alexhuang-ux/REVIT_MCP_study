@@ -379,11 +379,107 @@ namespace RevitMCP.Tests.IssueManager
             RunSta(() =>
             {
                 var rig = BuildRig();
-                rig.Server.RejectFinalizeWithCode = "invalid_manifest";
+                rig.Server.RejectFinalizeWithCode = "checksum_mismatch";
                 Click(rig.Window.UploadButton);
                 PumpUntil(() => !rig.Window.IsBusy);
                 StringAssert.Contains("清單", rig.Window.StatusText.Text);
                 Assert.AreEqual(WpfVisibility.Visible, rig.Window.RetryButton.Visibility);
+            });
+        }
+
+        [Test]
+        public void RetryAfterTheServerVoidedTheBundleRecreatesItWithoutExportingAgain()
+        {
+            RunSta(() =>
+            {
+                var rig = BuildRig();
+                rig.Server.RejectFinalizeWithCode = "invalid_file";
+                Click(rig.Window.UploadButton);
+                PumpUntil(() => !rig.Window.IsBusy);
+                Assert.AreEqual(WpfVisibility.Visible, rig.Window.RetryButton.Visibility);
+                var exports = rig.Steps.Calls.Count(c => c == "pdf");
+
+                rig.Server.RejectFinalizeWithCode = null;
+                Click(rig.Window.RetryButton);
+                PumpUntil(() => !rig.Window.IsBusy);
+
+                StringAssert.Contains("完成", rig.Window.StatusText.Text);
+                Assert.AreEqual(exports, rig.Steps.Calls.Count(c => c == "pdf"), "重試不重新匯出");
+                Assert.AreEqual(2, rig.Server.CreatedBundleIds.Count, "重新建立版本包");
+                Assert.AreEqual(2, rig.Server.FinalizeRequestBundleIds.Count);
+                Assert.AreNotEqual(rig.Server.FinalizeRequestBundleIds[0], rig.Server.FinalizeRequestBundleIds[1], "不對作廢的版本包重送 finalize");
+                Assert.AreEqual(WpfVisibility.Collapsed, rig.Window.RetryButton.Visibility);
+            });
+        }
+
+        [Test]
+        public void ContentRejectedByTheServerOffersNoRetryAndKeepsNoLocalFiles()
+        {
+            RunSta(() =>
+            {
+                var rig = BuildRig();
+                rig.Server.RejectFinalizeWithCode = "invalid_manifest";
+                Click(rig.Window.UploadButton);
+                PumpUntil(() => !rig.Window.IsBusy);
+                StringAssert.Contains("清單", rig.Window.StatusText.Text);
+                Assert.AreEqual(WpfVisibility.Collapsed, rig.Window.RetryButton.Visibility, "同樣的內容再傳也會被拒，不提供重試");
+                Assert.IsFalse(Directory.Exists(rig.BundlesRoot) && Directory.GetDirectories(rig.BundlesRoot).Length > 0);
+            });
+        }
+
+        [Test]
+        public void CancelAfterTheServerAlreadyCreatedTheVersionTellsTheUserToDeleteItOnTheWebsite()
+        {
+            RunSta(() =>
+            {
+                var rig = BuildRig();
+                rig.Server.Handler.BeforeRespond = r =>
+                {
+                    if (r.Uri.AbsolutePath.EndsWith("/finalize", StringComparison.Ordinal))
+                    {
+                        rig.Server.MarkFinalized(r.Uri.AbsolutePath.Split('/')[5]);
+                        rig.Window.Dispatcher.Invoke(new Action(() => Click(rig.Window.CancelButton))); // 使用者在 finalize 送出的同時按了「取消上傳」
+                    }
+                    return Task.FromResult(0);
+                };
+                Click(rig.Window.UploadButton);
+                PumpUntil(() => !rig.Window.IsBusy);
+
+                StringAssert.Contains("已經上傳完成，無法取消", rig.Window.StatusText.Text);
+                StringAssert.Contains("網站", rig.Window.StatusText.Text);
+                Assert.AreEqual(0, rig.Server.Deleted.Count);
+                Assert.AreEqual(WpfVisibility.Collapsed, rig.Window.RetryButton.Visibility);
+            });
+        }
+
+        [Test]
+        public void WhileTheServerIsProcessingTheWindowSaysSo()
+        {
+            RunSta(() =>
+            {
+                var rig = BuildRig();
+                var seen = new System.Collections.Generic.List<string>();
+                var runner = new DispatcherRunner(Dispatcher.CurrentDispatcher);
+                rig.Services.CreateFlow = () => new UploadFlow(rig.Services.Api, rig.Steps, runner, rig.BundlesRoot,
+                    uploader: new BundleUploader(rig.Services.Api, 2, (span, token) => Task.FromResult(0)),
+                    delay: async (span, token) =>
+                    {
+                        // 等「伺服器處理中」的提示真的出現在視窗上（Stage 是用 BeginInvoke 排進 UI 執行緒的）
+                        for (var i = 0; i < 300; i++)
+                        {
+                            var text = rig.Window.Dispatcher.Invoke(new Func<string>(() => rig.Window.StatusText.Text));
+                            if (text.Contains("伺服器處理中")) { seen.Add(text); return; }
+                            await Task.Delay(10);
+                        }
+                    });
+                rig.Server.FinalizeScript.Enqueue(r => FakeHandler.Error((System.Net.HttpStatusCode)409, "finalize_in_progress"));
+                Click(rig.Window.UploadButton);
+                PumpUntil(() => !rig.Window.IsBusy);
+
+                StringAssert.Contains("完成", rig.Window.StatusText.Text);
+                Assert.AreEqual(2, rig.Server.FinalizeRequestBundleIds.Count);
+                Assert.IsNotEmpty(seen, "輪詢等待期間視窗要顯示「伺服器處理中」");
+                StringAssert.Contains("已等待", seen[0]);
             });
         }
     }

@@ -196,6 +196,136 @@ namespace RevitMCP.Tests.IssueManager
             }
         }
 
+        // ── 對齊網站端合約（真的 HTTP、真的逾時）─────────────────────────
+
+        private async Task ConfigAsync(string json)
+        {
+            await _http.PostAsync(_url + "/__config", new StringContent(json, Encoding.UTF8, "application/json"));
+        }
+
+        private async Task<AddinApiClient> LoggedInApiAsync(HttpClient finalizeHttp = null)
+        {
+            var auth = NewAuth();
+            await auth.LoginAsync(AutoBrowser(), TimeSpan.FromSeconds(15), CancellationToken.None);
+            return new AddinApiClient(new HttpClient(), auth, ClientInfo.Create("整合測試-PC", "1.0.0.0"), null, finalizeHttp);
+        }
+
+        private sealed class StageHook : IUploadFlowProgress
+        {
+            public Action<string> OnStage = text => { };
+            public List<string> Stages = new List<string>();
+            public void Stage(string text) { Stages.Add(text); OnStage(text); }
+            public void Upload(UploadProgress progress) { }
+        }
+
+        [Test]
+        public async Task FinalizeThatOutlastsTheHttpTimeoutIsPolledUntilTheServerFinishesAndRunsOnlyOnce()
+        {
+            // 伺服器 finalize 要 1.5 秒；finalize 專用 HttpClient 只等 0.5 秒 → 逾時 → 重送 → 409 finalize_in_progress → 輪詢 → 200。
+            await ConfigAsync("{\"finalizeDelayMs\":1500}");
+            try
+            {
+                var api = await LoggedInApiAsync(new HttpClient { Timeout = TimeSpan.FromMilliseconds(500) });
+                var request = RequestFactory.Full();
+                request.ProjectId = "project-1";
+                var before = (int)(await StateAsync())["finalizeCount"];
+                var flow = new UploadFlow(api, new FakeSteps(), new InlineRunner(), Path.Combine(_dir, "bundles")) { FinalizePollInterval = TimeSpan.FromMilliseconds(200) };
+                var hook = new StageHook();
+                var result = await flow.RunAsync(request, null, hook, CancellationToken.None);
+
+                Assert.IsNotNull(result.SetId);
+                Assert.AreEqual(before + 1, (int)(await StateAsync())["finalizeCount"], "伺服器端只處理一次（重送的是冪等查詢）");
+                Assert.IsTrue(hook.Stages.Any(t => t.Contains("伺服器處理中")), string.Join("|", hook.Stages));
+            }
+            finally { await ConfigAsync("{\"finalizeDelayMs\":0}"); }
+        }
+
+        [Test]
+        public async Task CancelWhileTheRealServerIsFinalizingReportsThatItCannotBeCancelled()
+        {
+            await ConfigAsync("{\"finalizeDelayMs\":1500}");
+            try
+            {
+                var api = await LoggedInApiAsync();
+                var request = RequestFactory.Full();
+                request.ProjectId = "project-1";
+                var flow = new UploadFlow(api, new FakeSteps(), new InlineRunner(), Path.Combine(_dir, "bundles"));
+                using (var cts = new CancellationTokenSource())
+                {
+                    var hook = new StageHook { OnStage = text => { if (text == Strings.FinalizeStage) cts.CancelAfter(300); } };
+                    var ex = Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(request, null, hook, cts.Token));
+                    Assert.AreEqual("finalize_in_progress", ex.Code);
+                    StringAssert.Contains("無法取消", ex.Message);
+                }
+                Assert.IsFalse(flow.CanResume);
+                await Task.Delay(1500); // 讓伺服器把這個版本做完，不影響後面的測試
+            }
+            finally { await ConfigAsync("{\"finalizeDelayMs\":0}"); }
+        }
+
+        [Test]
+        public async Task DeleteAfterFinalizeIsRefusedByTheRealServerAndTheVersionStays()
+        {
+            var api = await LoggedInApiAsync();
+            var request = RequestFactory.Full();
+            request.ProjectId = "project-1";
+            var flow = new UploadFlow(api, new FakeSteps(), new InlineRunner(), Path.Combine(_dir, "bundles"));
+            var result = await flow.RunAsync(request, null, null, CancellationToken.None);
+            var deletedBefore = (await StateAsync())["deleted"].Count();
+
+            Assert.AreEqual(BundleDeleteOutcome.AlreadyFinalized, await api.DeleteBundleDetailedAsync(result.BundleId, CancellationToken.None));
+            Assert.IsFalse(await api.DeleteBundleAsync(result.BundleId, CancellationToken.None));
+
+            var state = await StateAsync();
+            Assert.AreEqual(deletedBefore, state["deleted"].Count());
+            Assert.AreEqual("finalized", (string)state["bundles"].First(b => (string)b["id"] == result.BundleId)["status"]);
+        }
+
+        [Test]
+        public async Task ServerSideFinalizeFailureVoidsTheBundleAndRetryRecreatesIt()
+        {
+            var api = await LoggedInApiAsync();
+            var request = RequestFactory.Full();
+            request.ProjectId = "project-1";
+            var steps = new FakeSteps();
+            var flow = new UploadFlow(api, steps, new InlineRunner(), Path.Combine(_dir, "bundles"));
+            await ConfigAsync("{\"failNextFinalize\":1}");
+            var ex = Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(request, null, null, CancellationToken.None));
+            Assert.AreEqual("finalize_failed", ex.Code);
+            StringAssert.Contains("作廢", ex.Message);
+            Assert.IsTrue(flow.CanResume);
+
+            var result = await flow.ResumeAsync(null, CancellationToken.None);
+            var bundles = (await StateAsync())["bundles"].ToList();
+            var voided = bundles.Where(b => (string)b["status"] == "failed").ToList();
+            Assert.IsNotEmpty(voided, "第一個版本包被伺服器作廢");
+            Assert.AreEqual("finalized", (string)bundles.First(b => (string)b["id"] == result.BundleId)["status"]);
+            Assert.AreEqual(1, steps.Calls.Count(c => c == "pdf"), "不重新匯出");
+        }
+
+        [Test]
+        public async Task AViewsOnlyPackageIsRejectedAsInvalidManifestAndNotRetried()
+        {
+            var api = await LoggedInApiAsync();
+            var request = new ExportRequest { ProjectId = "project-1", Stage = "SD", Description = "只有視圖", IncludeModel = false };
+            request.Views.Add(Samples.View("v-3d", "主透視", ViewKinds.ThreeD));
+            var flow = new UploadFlow(api, new FakeSteps(), new InlineRunner(), Path.Combine(_dir, "bundles"));
+            var ex = Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(request, null, null, CancellationToken.None));
+            Assert.AreEqual("invalid_manifest", ex.Code);
+            StringAssert.Contains("清單", ex.Message);
+            Assert.IsFalse(flow.CanResume);
+        }
+
+        [Test]
+        public async Task TheRealServerAnswers201AndOnlyThreeFileKinds()
+        {
+            var api = await LoggedInApiAsync();
+            var created = await api.CreateBundleAsync("project-1", "SD", "x", new BundleSummary(), CancellationToken.None);
+            CollectionAssert.AreEqual(new[] { "pdf", "glb", "namedViews" }, created.Files.Select(f => f.Kind).ToArray());
+            Assert.AreEqual(1000, created.Limits.PdfPages);
+            await api.DeleteBundleAsync(created.BundleId, CancellationToken.None);
+        }
+
         [Test]
         public async Task LogoutRevokesOnTheRealServer()
         {

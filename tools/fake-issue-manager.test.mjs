@@ -120,8 +120,11 @@ test('bundles：階段與說明必填、版本標頭不符回 426、無權杖回
     const fake = await startFakeServer();
     try {
         const { tokens } = await login(fake);
-        assert.equal((await createBundle(fake, tokens, { stage: undefined })).status, 400);
-        assert.equal((await createBundle(fake, tokens, { stage: 'XX' })).status, 400);
+        for (const stage of [undefined, 'XX', 'pd', ' SD', null, 1]) {
+            const response = await createBundle(fake, tokens, { stage });
+            assert.equal(response.status, 400, `stage=${stage}`);
+            assert.deepEqual(await response.json(), { error: 'invalid_input', field: 'stage' }, '網站端錯誤碼是 invalid_input（不是 stage_required）');
+        }
         assert.equal((await createBundle(fake, tokens, { description: '   ' })).status, 400);
         assert.equal((await createBundle(fake, tokens, { projectId: 'nope' })).status, 404);
         const old = await fetch(`${fake.url}/api/addin/v1/bundles`, { method: 'POST', headers: { Authorization: `Bearer ${tokens.access_token}` }, body: '{}' });
@@ -132,31 +135,166 @@ test('bundles：階段與說明必填、版本標頭不符回 426、無權杖回
     } finally { await fake.close(); }
 });
 
+test('bundles：建立回 201，files 只有 pdf／glb／namedViews，附 limits', async () => {
+    const fake = await startFakeServer({ partBytes: 8 * 1024 * 1024 });
+    try {
+        const { tokens } = await login(fake);
+        const response = await createBundle(fake, tokens);
+        assert.equal(response.status, 201);
+        const created = await response.json();
+        assert.deepEqual(created.files.map(f => f.kind), ['pdf', 'glb', 'namedViews']);
+        assert.deepEqual(created.limits, { pdfBytes: 300 * 1024 * 1024, glbBytes: 500 * 1024 * 1024, namedViewsBytes: 4 * 1024 * 1024, pdfPages: 1000 });
+        assert.ok(created.files.every(f => f.partBytes === 8 * 1024 * 1024));
+        assert.equal(created.files.find(f => f.kind === 'namedViews').urls.length, 1, '4 MiB ÷ 8 MiB＝1 段');
+        assert.ok(created.files.find(f => f.kind === 'pdf').urls.length >= 38, '300 MiB ÷ 8 MiB 至少 38 段（假伺服器上限 256）');
+    } finally { await fake.close(); }
+});
+
+const finalizeOf = (fake, tokens, bundleId) => body => fetch(`${fake.url}/api/addin/v1/bundles/${bundleId}/finalize`, { method: 'POST', headers: { Authorization: `Bearer ${tokens.access_token}`, 'X-Addin-Api': '1' }, body: JSON.stringify(body) });
+const deleteOf = (fake, tokens, bundleId) => () => fetch(`${fake.url}/api/addin/v1/bundles/${bundleId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${tokens.access_token}`, 'X-Addin-Api': '1' } });
+const putOf = (fake, tokens, bundleId) => (kind, index, data) => fetch(`${fake.url}/upload/${bundleId}/${kind}/${index}`, { method: 'PUT', headers: { Authorization: `Bearer ${tokens.access_token}` }, body: data });
+const oneSheet = { pageNumber: 1, sheetNumber: 'A-1', title: '封面', uniqueId: 'sheet-1', viewports: [] };
+const pdfManifest = pdf => ({ schemaVersion: 1, sheets: [oneSheet], views: [], files: { pdf: { name: 'sheets.pdf', bytes: pdf.length, sha256: sha256Hex(pdf) } }, options: { designOptions: false }, warnings: [] });
+
 test('bundles：分段上傳、finalize 檢查雜湊與標頭、冪等、DELETE', async () => {
     const fake = await startFakeServer({ partBytes: 8 });
     try {
         const { tokens } = await login(fake);
         const created = await (await createBundle(fake, tokens)).json();
         const pdf = Buffer.from('%PDF-1.7 twelve bytes+');
-        const put = (kind, index, data) => fetch(`${fake.url}/upload/${created.bundleId}/${kind}/${index}`, { method: 'PUT', headers: { Authorization: `Bearer ${tokens.access_token}` }, body: data });
+        const put = putOf(fake, tokens, created.bundleId);
         const ticket = created.files.find(f => f.kind === 'pdf');
         assert.equal(ticket.partBytes, 8);
         for (let i = 0; i * 8 < pdf.length; i++) assert.equal((await put('pdf', i, pdf.subarray(i * 8, (i + 1) * 8))).status, 200);
+        assert.equal((await put('pdf', 0, Buffer.alloc(9))).status, 413, '分段超過 partBytes');
+        assert.equal((await put('viewPositions', 0, Buffer.from('x'))).status, 404, 'viewPositions 不核發');
 
-        const finalize = body => fetch(`${fake.url}/api/addin/v1/bundles/${created.bundleId}/finalize`, { method: 'POST', headers: { Authorization: `Bearer ${tokens.access_token}`, 'X-Addin-Api': '1' }, body: JSON.stringify(body) });
-        const manifest = { schemaVersion: 1, sheets: [], views: [], files: { pdf: { name: 'sheets.pdf', bytes: pdf.length, sha256: 'f'.repeat(64) } } };
-        assert.equal((await finalize({ manifest })).status, 400, 'sha256 不符');
-        manifest.files.pdf.sha256 = sha256Hex(pdf);
-        const ok = await (await finalize({ manifest })).json();
+        const finalize = finalizeOf(fake, tokens, created.bundleId);
+        const ok = await (await finalize({ manifest: pdfManifest(pdf) })).json();
         assert.ok(ok.setId);
-        const again = await (await finalize({ manifest })).json();
+        assert.match(ok.url, /\/projects\/project-1\/sets\//);
+        const again = await (await finalize({ manifest: pdfManifest(pdf) })).json();
         assert.equal(again.setId, ok.setId, 'finalize 冪等');
         assert.equal(fake.state.bundles.size, 1);
 
         const second = await (await createBundle(fake, tokens)).json();
-        const del = await fetch(`${fake.url}/api/addin/v1/bundles/${second.bundleId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${tokens.access_token}`, 'X-Addin-Api': '1' } });
+        const del = await deleteOf(fake, tokens, second.bundleId)();
         assert.equal(del.status, 200);
         assert.deepEqual(fake.state.deleted, [second.bundleId]);
+        assert.equal((await deleteOf(fake, tokens, second.bundleId)()).status, 200, '已刪除重送仍 200（冪等）');
+    } finally { await fake.close(); }
+});
+
+test('bundles：DELETE 已 finalize 的版本包回 409 already_finalized，什麼都不做', async () => {
+    const fake = await startFakeServer({ partBytes: 64 });
+    try {
+        const { tokens } = await login(fake);
+        const created = await (await createBundle(fake, tokens)).json();
+        const pdf = Buffer.from('%PDF-1.7 abc');
+        assert.equal((await putOf(fake, tokens, created.bundleId)('pdf', 0, pdf)).status, 200);
+        assert.equal((await finalizeOf(fake, tokens, created.bundleId)({ manifest: pdfManifest(pdf) })).status, 200);
+        const del = await deleteOf(fake, tokens, created.bundleId)();
+        assert.equal(del.status, 409);
+        assert.deepEqual(await del.json(), { error: 'already_finalized' });
+        assert.deepEqual(fake.state.deleted, []);
+        assert.equal(fake.state.bundles.get(created.bundleId).status, 'finalized');
+    } finally { await fake.close(); }
+});
+
+test('bundles：驗證失敗即作廢，之後 finalize 一律 409 bundle_failed；500 finalize_failed 同樣作廢', async () => {
+    const fake = await startFakeServer({ partBytes: 64 });
+    try {
+        const { tokens } = await login(fake);
+        const created = await (await createBundle(fake, tokens)).json();
+        const pdf = Buffer.from('%PDF-1.7 abc');
+        await putOf(fake, tokens, created.bundleId)('pdf', 0, pdf);
+        const manifest = pdfManifest(pdf);
+        manifest.files.pdf.sha256 = 'f'.repeat(64);
+        const finalize = finalizeOf(fake, tokens, created.bundleId);
+        const bad = await finalize({ manifest });
+        assert.equal(bad.status, 400);
+        assert.deepEqual(await bad.json(), { error: 'checksum_mismatch' });
+        const retry = await finalize({ manifest: pdfManifest(pdf) });
+        assert.equal(retry.status, 409, '對作廢的版本包重送 finalize 得到 409');
+        assert.deepEqual(await retry.json(), { error: 'bundle_failed' });
+        assert.equal((await putOf(fake, tokens, created.bundleId)('pdf', 0, pdf)).status, 409, '作廢後不再接受分段');
+        assert.equal((await deleteOf(fake, tokens, created.bundleId)()).status, 200, '作廢的版本包可以 DELETE');
+    } finally { await fake.close(); }
+    const fake2 = await startFakeServer({ partBytes: 64, failNextFinalize: 1 });
+    try {
+        const { tokens } = await login(fake2);
+        const created = await (await createBundle(fake2, tokens)).json();
+        const pdf = Buffer.from('%PDF-1.7 abc');
+        await putOf(fake2, tokens, created.bundleId)('pdf', 0, pdf);
+        const response = await finalizeOf(fake2, tokens, created.bundleId)({ manifest: pdfManifest(pdf) });
+        assert.equal(response.status, 500);
+        assert.deepEqual(await response.json(), { error: 'finalize_failed' });
+        assert.equal(fake2.state.bundles.get(created.bundleId).status, 'failed');
+    } finally { await fake2.close(); }
+});
+
+test('bundles：只勾視圖（沒有 PDF 也沒有 GLB）回 400 invalid_manifest', async () => {
+    const fake = await startFakeServer({ partBytes: 64 });
+    try {
+        const { tokens } = await login(fake);
+        const created = await (await createBundle(fake, tokens)).json();
+        const json = Buffer.from('{"views":[]}');
+        await putOf(fake, tokens, created.bundleId)('namedViews', 0, json);
+        const manifest = { schemaVersion: 1, sheets: [], views: [], files: { namedViews: { name: 'named_views.json', bytes: json.length, sha256: sha256Hex(json) } }, options: { designOptions: false }, warnings: [] };
+        const response = await finalizeOf(fake, tokens, created.bundleId)({ manifest });
+        assert.equal(response.status, 400);
+        assert.deepEqual(await response.json(), { error: 'invalid_manifest' });
+    } finally { await fake.close(); }
+});
+
+test('bundles：finalize 進行中另一個 finalize／DELETE 回 409 finalize_in_progress，做完後重送回同一個 setId', async () => {
+    const fake = await startFakeServer({ partBytes: 64, finalizeDelayMs: 600 });
+    try {
+        const { tokens } = await login(fake);
+        const created = await (await createBundle(fake, tokens)).json();
+        const pdf = Buffer.from('%PDF-1.7 abc');
+        await putOf(fake, tokens, created.bundleId)('pdf', 0, pdf);
+        const finalize = finalizeOf(fake, tokens, created.bundleId);
+        const first = finalize({ manifest: pdfManifest(pdf) });
+        await new Promise(resolve => setTimeout(resolve, 150));
+        const concurrent = await finalize({ manifest: pdfManifest(pdf) });
+        assert.equal(concurrent.status, 409);
+        assert.deepEqual(await concurrent.json(), { error: 'finalize_in_progress' });
+        const del = await deleteOf(fake, tokens, created.bundleId)();
+        assert.equal(del.status, 409);
+        assert.deepEqual(await del.json(), { error: 'finalize_in_progress' });
+        const done = await (await first).json();
+        const again = await (await finalize({ manifest: pdfManifest(pdf) })).json();
+        assert.equal(again.setId, done.setId);
+        assert.equal(fake.state.finalizeCount, 1);
+    } finally { await fake.close(); }
+});
+
+test('bundles：過期的版本包 finalize／PUT 回 410 bundle_expired', async () => {
+    const fake = await startFakeServer({ partBytes: 64 });
+    try {
+        const { tokens } = await login(fake);
+        const created = await (await createBundle(fake, tokens)).json();
+        await fetch(`${fake.url}/__config`, { method: 'POST', body: JSON.stringify({ expireOpenBundles: true }) });
+        const pdf = Buffer.from('%PDF-1.7 abc');
+        const put = await putOf(fake, tokens, created.bundleId)('pdf', 0, pdf);
+        assert.equal(put.status, 410);
+        const response = await finalizeOf(fake, tokens, created.bundleId)({ manifest: pdfManifest(pdf) });
+        assert.equal(response.status, 410);
+        assert.deepEqual(await response.json(), { error: 'bundle_expired' });
+    } finally { await fake.close(); }
+});
+
+test('bundles：未完成的版本包太多回 429 too_many_open_bundles；uploadOrigin 可改上傳網址主機', async () => {
+    const fake = await startFakeServer({ maxOpenBundles: 1, uploadOrigin: 'http://localhost:9' });
+    try {
+        const { tokens } = await login(fake);
+        const first = await createBundle(fake, tokens);
+        assert.equal(first.status, 201);
+        assert.match((await first.json()).files[0].urls[0], /^http:\/\/localhost:9\/upload\//);
+        const second = await createBundle(fake, tokens);
+        assert.equal(second.status, 429);
+        assert.deepEqual(await second.json(), { error: 'too_many_open_bundles' });
     } finally { await fake.close(); }
 });
 
