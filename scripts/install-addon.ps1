@@ -464,6 +464,23 @@ if (Test-Path $sourceDepthScript) {
     }
 }
 
+# 複製「上傳到 Issue Manager」用的 GLB 合併腳本（tools/merge-option-glbs.mjs → %APPDATA%\RevitMCP\bridge\node\bundle）
+# 含設計選項的模型匯出會產生「主模型＋各選項」多個 GLB 分件，需用這支腳本合併成單一 model.glb（GlbMergeRunner 依序在
+# dll 同層 → %APPDATA%\RevitMCP\bridge\node\bundle → 開發樹 tools\ 尋找）。需系統 Node.js；沒有選項分件時不需要。
+$sourceMergeScript = Join-Path $projectRoot "tools\merge-option-glbs.mjs"
+if (Test-Path $sourceMergeScript) {
+    $mergeScriptDest = Join-Path $appDataPath "RevitMCP\bridge\node\bundle"
+    try {
+        if (-not (Test-Path $mergeScriptDest)) { New-Item -ItemType Directory -Path $mergeScriptDest -Force | Out-Null }
+        Copy-Item -Path $sourceMergeScript -Destination (Join-Path $mergeScriptDest "merge-option-glbs.mjs") -Force -ErrorAction Stop
+        Write-Host "✓ 已部署 GLB 合併腳本 merge-option-glbs.mjs 到 $mergeScriptDest" -ForegroundColor Green
+        Write-Host "  （「上傳到 Issue Manager」含設計選項的模型需系統 Node.js，不含在本安裝程序內）" -ForegroundColor Gray
+    }
+    catch {
+        Write-Host "⚠️  警告：無法部署 GLB 合併腳本（含設計選項的模型上傳將無法使用，非關鍵）" -ForegroundColor Yellow
+    }
+}
+
 # 複製走動展示網頁 viewer 模板（viewer/walkthrough → %APPDATA%\RevitMCP\viewer\walkthrough）
 # CommandExecutor.FindWalkViewerTemplate 會在 dll 同層 → 開發樹 → %APPDATA%\RevitMCP 依序尋找，
 # export_walkthrough_package 會把模板複製進每個交付包。開發用檔案（dev/、測試、打包腳本、契約文件）不部署。
