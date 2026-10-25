@@ -363,6 +363,16 @@ namespace RevitMCP.Core.IssueManager
                 });
             }
 
+            // 視口大小只量一次會有快取問題：視窗開著時使用者在 Revit 改了圖紙版面，下次上傳不會更新。
+            // 每次按上傳（建立匯出請求）就清掉先前量到的結果，匯出時只重量需要的視口（見 BundleExporter.ViewportsNeedingMeasure）。
+            // 同一次上傳的「重試」不會再走這裡，所以不會重量。
+            foreach (var viewport in request.Sheets.SelectMany(s => s.Viewports).Where(v => v.ViewportElementId != 0))
+            {
+                viewport.SizeMeasured = false;
+                viewport.Width = 0;
+                viewport.Height = 0;
+            }
+
             request.Views.AddRange(_viewByUniqueId.Values.Where(v => v.IsChecked)
                 .Select(v => v.Item)
                 .OrderBy(v => Array.IndexOf(ViewKinds.Ordered, v.Kind))

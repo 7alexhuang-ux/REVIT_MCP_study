@@ -118,7 +118,7 @@ namespace RevitMCP.Core.IssueManager
     /// </summary>
     public sealed class AddinApiException : Exception
     {
-        private static readonly Regex SafeCode = new Regex("^[a-z0-9_]{1,40}$", RegexOptions.Compiled);
+        private static readonly Regex SafeCode = new Regex("^[a-z0-9_]{1,40}\\z", RegexOptions.Compiled);
 
         public AddinApiException(AddinErrorKind kind, string message, int statusCode = 0, string code = null, bool isTimeout = false)
             : base(message)

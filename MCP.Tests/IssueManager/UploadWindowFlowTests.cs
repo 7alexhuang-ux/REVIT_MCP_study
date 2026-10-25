@@ -464,11 +464,13 @@ namespace RevitMCP.Tests.IssueManager
                     uploader: new BundleUploader(rig.Services.Api, 2, (span, token) => Task.FromResult(0)),
                     delay: async (span, token) =>
                     {
-                        // 等「伺服器處理中」的提示真的出現在視窗上（Stage 是用 BeginInvoke 排進 UI 執行緒的）
+                        // 等輪詢提示（含「已等待」）真的出現在視窗上（Stage 是用 BeginInvoke 排進 UI 執行緒的）。
+                        // 不能只比對「伺服器處理中」：finalize 開頭的狀態文字（FinalizeStage）也含這四個字，會讓這裡提早放行、
+                        // 看到的是第一則進度文字而不是輪詢提示（偶發失敗的原因）。
                         for (var i = 0; i < 300; i++)
                         {
                             var text = rig.Window.Dispatcher.Invoke(new Func<string>(() => rig.Window.StatusText.Text));
-                            if (text.Contains("伺服器處理中")) { seen.Add(text); return; }
+                            if (text.Contains("已等待")) { seen.Add(text); return; }
                             await Task.Delay(10);
                         }
                     });

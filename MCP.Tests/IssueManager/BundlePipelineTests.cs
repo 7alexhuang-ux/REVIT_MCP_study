@@ -255,15 +255,15 @@ namespace RevitMCP.Tests.IssueManager
 
     internal static class Harness
     {
-        public static async Task<AddinApiClient> LoggedInApiAsync(FakeTokenServer server, Func<DateTimeOffset> now = null)
+        public static async Task<AddinApiClient> LoggedInApiAsync(FakeTokenServer server, Func<DateTimeOffset> now = null, string baseUrl = null)
         {
-            return (await LoggedInAsync(server, now)).Item2;
+            return (await LoggedInAsync(server, now, baseUrl)).Item2;
         }
 
-        public static async Task<Tuple<AddinAuthService, AddinApiClient>> LoggedInAsync(FakeTokenServer server, Func<DateTimeOffset> now = null)
+        public static async Task<Tuple<AddinAuthService, AddinApiClient>> LoggedInAsync(FakeTokenServer server, Func<DateTimeOffset> now = null, string baseUrl = null)
         {
             var http = server.CreateClient();
-            var auth = new AddinAuthService(http, new InMemoryVault(), FakeTokenServer.BaseUrl, ClientInfo.Create("PC", "1.0.0.0"), now);
+            var auth = new AddinAuthService(http, new InMemoryVault(), baseUrl ?? FakeTokenServer.BaseUrl, ClientInfo.Create("PC", "1.0.0.0"), now);
             using (var callback = new HttpClient())
             {
                 var browser = new ActionBrowser(url =>
@@ -624,13 +624,14 @@ namespace RevitMCP.Tests.IssueManager
         }
 
         [Test]
-        public async Task ExportFailureLeavesServerBundleToExpireAndNoLocalFiles()
+        public async Task ExportFailureDeletesTheServerBundleBestEffortAndLeavesNoLocalFiles()
         {
             var steps = new FakeSteps { ThrowInModel = new InvalidOperationException("3D 模型匯出不完整") };
             var flow = await NewFlow(steps);
             var ex = Assert.ThrowsAsync<InvalidOperationException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
             StringAssert.Contains("不完整", ex.Message);
-            Assert.IsEmpty(_server.Deleted, "規格：失敗時伺服器端 bundle 保持 open 至過期自動清");
+            // 網站端每人最多 5 個未完成 bundle、24 小時才過期：匯出失敗要盡力刪掉，不然連續失敗幾次就卡在 429。
+            CollectionAssert.AreEqual(_server.CreatedBundleIds, _server.Deleted, "匯出失敗：伺服器端 bundle 盡力 DELETE");
             Assert.AreEqual(0, _server.Puts.Count);
             Assert.IsFalse(flow.CanResume);
             Assert.IsFalse(Directory.Exists(Path.Combine(_dir, "bundles")) && Directory.GetDirectories(Path.Combine(_dir, "bundles")).Length > 0);

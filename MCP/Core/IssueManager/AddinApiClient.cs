@@ -144,8 +144,15 @@ namespace RevitMCP.Core.IssueManager
             if (target.IsLoopback && !baseUri.IsLoopback)
                 throw new AddinApiException(AddinErrorKind.Other,
                     "伺服器回傳的上傳網址不是 Issue Manager 的主機，已中止；請通知管理員設定 ADDIN_PUBLIC_URL。");
-            var sameHost = target.Port == baseUri.Port
-                && (string.Equals(target.Host, baseUri.Host, StringComparison.OrdinalIgnoreCase) || (target.IsLoopback && baseUri.IsLoopback));
+            // 嚴格比對：協定、主機名稱、埠都要相同才算 Issue Manager 自己的主機。localhost、127.0.0.1、[::1] 彼此視為不同主機，
+            // 除非 BaseUrl 本身就是那個名稱——否則本機服務（或惡意的本機程式）可以用另一個迴圈名稱收到 Bearer。
+            var sameHost = string.Equals(target.Scheme, baseUri.Scheme, StringComparison.OrdinalIgnoreCase)
+                && target.Port == baseUri.Port
+                && string.Equals(target.Host, baseUri.Host, StringComparison.OrdinalIgnoreCase);
+            // 上傳網址長得像 Issue Manager 自己接收分段的路徑，主機卻和 BaseUrl 不同：管理員把 ADDIN_PUBLIC_URL 設成別的主機／埠。
+            // 這時外掛不會帶權杖，伺服器會回 426（缺 X-Addin-Api）而被誤認成「請更新外掛」。一個位元組都不送，直接講清楚。
+            if (!sameHost && IssueManagerPartPath.IsMatch(target.AbsolutePath))
+                throw new AddinApiException(AddinErrorKind.Other, UploadHostMismatchMessage, 0, UploadHostMismatchCode);
 
             for (var attempt = 0; attempt < 2; attempt++)
             {
@@ -174,6 +181,14 @@ namespace RevitMCP.Core.IssueManager
                                 await _auth.RefreshAfterUnauthorizedAsync(token, ct).ConfigureAwait(false);
                                 continue;
                             }
+                            var status = (int)response.StatusCode;
+                            if (!sameHost)
+                            {
+                                // 別的主機（Supabase 簽名網址）：這裡的 4xx 不是 Issue Manager 的回應，不能套用「401＝登入失效」之類的解讀。
+                                if (status == 426) throw new AddinApiException(AddinErrorKind.Other, UploadHostMismatchMessage, status, UploadHostMismatchCode);
+                                if (status >= 400 && status < 500 && status != 408 && status != 429)
+                                    throw new AddinApiException(AddinErrorKind.Rejected, UploadUrlRejectedMessage, status, UploadUrlRejectedCode);
+                            }
                             throw await AddinHttp.ToExceptionAsync(response).ConfigureAwait(false);
                         }
                     }
@@ -184,6 +199,14 @@ namespace RevitMCP.Core.IssueManager
             }
             throw new AddinApiException(AddinErrorKind.NeedLogin, "登入已失效，請重新登入。");
         }
+
+        /// <summary>簽名上傳網址所在的主機（非 Issue Manager）回 4xx：簽名約 2 小時就失效，這個 bundle 的網址不能再用，要重建 bundle 整批重傳。</summary>
+        public const string UploadUrlRejectedCode = "upload_url_rejected";
+        public const string UploadUrlRejectedMessage = "上傳網址已失效或被拒絕（簽名網址約 2 小時後失效）；按「重試上傳」會重新建立版本包並整批重傳，本機檔案不需要重新匯出。";
+        public const string UploadHostMismatchCode = "upload_host_mismatch";
+        public const string UploadHostMismatchMessage = "上傳網址與 Issue Manager 主機不同，請通知管理員檢查 ADDIN_PUBLIC_URL。";
+        private static readonly System.Text.RegularExpressions.Regex IssueManagerPartPath = new System.Text.RegularExpressions.Regex(
+            "^/api/addin/v1/bundles/[^/]+/parts/[^/]+/[0-9]+$", System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         /// <summary>
         /// finalize（冪等：同一個 bundle 重送回同一個 setId）。伺服器最長約 300 秒，所以用專用的長逾時 HttpClient。

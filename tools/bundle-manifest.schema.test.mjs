@@ -5,6 +5,7 @@
 //   ②原樣副本 vs 本機找得到的網站端工作樹（找不到就略過，不算通過）。差異清單必須為空（已知差異只有 $id 與 description）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -95,9 +96,34 @@ const liveCandidates = [
 ].filter(Boolean);
 const livePath = liveCandidates.find(candidate => fs.existsSync(candidate));
 
-test('原樣副本與本機的網站端工作樹一致（找不到網站端 repo 就略過；可用 IM_WEB_SCHEMA 指定路徑）', { skip: livePath ? false : '找不到網站端的 bundle-manifest.schema.json' }, () => {
-    const live = JSON.parse(fs.readFileSync(livePath, 'utf8'));
-    assert.deepEqual(diffPaths(webCopy, live), [], `原樣副本已過期，請重新複製：${livePath}`);
+// 雜湊一律以 LF 換行正規化後計算（Windows 的 autocrlf 會讓同一個檔案在不同機器的位元組不同）。
+const hashOf = text => crypto.createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex');
+const recordedHash = fs.readFileSync(`${webCopyPath}.sha256`, 'utf8').split('\n').find(line => /^[0-9a-f]{64}\s/.test(line))?.slice(0, 64);
+
+test('原樣副本的雜湊與記錄相符（沒有網站端工作樹時的最低把關：偵測副本被誤改）', () => {
+    assert.ok(recordedHash, 'docs/schemas/web-authoritative/bundle-manifest.schema.json.sha256 缺少 64 位十六進位雜湊');
+    assert.equal(hashOf(fs.readFileSync(webCopyPath, 'utf8')), recordedHash,
+        '原樣副本被改動，或重新複製後沒有更新 .sha256；請以網站端檔案為準重新複製並更新雜湊');
+});
+
+test('客戶端 schema 與原樣副本的「語意雜湊」一致（扣掉已知差異 $id、description）', () => {
+    const normalized = value => {
+        const copy = clone(value);
+        for (const key of KNOWN_DIFFERENCES) delete copy[key];
+        return hashOf(JSON.stringify(copy));
+    };
+    assert.equal(normalized(schema), normalized(webCopy));
+});
+
+// 網站端改版後本檔不會自己知道：只有本機找得到網站端工作樹時才能偵測副本過期。找不到時明確標示略過原因，不假裝通過。
+const liveSkipReason = livePath ? false
+    : '略過原因：本機找不到網站端工作樹，無法偵測網站端 schema 是否已改版（只剩上面的雜湊把關）；可用 IM_WEB_SCHEMA 指定 bundle-manifest.schema.json 的路徑';
+if (!livePath) console.log(`# ${liveSkipReason}`);
+
+test('原樣副本與本機的網站端工作樹一致（找不到網站端 repo 就略過；可用 IM_WEB_SCHEMA 指定路徑）', { skip: liveSkipReason }, () => {
+    const liveText = fs.readFileSync(livePath, 'utf8');
+    assert.deepEqual(diffPaths(webCopy, JSON.parse(liveText)), [], `原樣副本已過期，請重新複製：${livePath}`);
+    assert.equal(hashOf(liveText), recordedHash, `網站端檔案的雜湊與記錄不同，請更新 .sha256：${livePath}`);
 });
 
 // ── 網站端 schema 的新增上限（外掛端 ManifestBuilder 也依此裁切）─────────────

@@ -43,6 +43,8 @@ namespace RevitMCP.Tests.IssueManager
         public readonly Dictionary<string, string> BundleStatus = new Dictionary<string, string>();
         /// <summary>依序消耗的 finalize 回應腳本（先於一般邏輯）：可回傳 409 finalize_in_progress、拋出 TaskCanceledException 模擬逾時…</summary>
         public readonly Queue<Func<RecordedRequest, HttpResponseMessage>> FinalizeScript = new Queue<Func<RecordedRequest, HttpResponseMessage>>();
+        /// <summary>依序消耗的分段 PUT 回應腳本（先於一般邏輯）：可回傳 410 bundle_expired、409 bundle_closed、簽名網址主機的 403…</summary>
+        public readonly Queue<Func<RecordedRequest, HttpResponseMessage>> PutScript = new Queue<Func<RecordedRequest, HttpResponseMessage>>();
         /// <summary>讓指定 bundle 在伺服器端視為已過期（410 bundle_expired）。</summary>
         public void Expire(string bundleId) { lock (_gate) BundleStatus[bundleId] = "expired"; }
         /// <summary>模擬「finalize 其實在伺服器端做完了」：把 bundle 標成已 finalize（取消時的 DELETE 就會得到 409）。</summary>
@@ -80,6 +82,7 @@ namespace RevitMCP.Tests.IssueManager
                 lock (_gate)
                 {
                     Puts.Add(request);
+                    if (PutScript.Count > 0) return PutScript.Dequeue()(request);
                     if (FailNextPuts > 0)
                     {
                         FailNextPuts--;

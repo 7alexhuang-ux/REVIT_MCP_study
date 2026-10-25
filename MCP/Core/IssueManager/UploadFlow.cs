@@ -40,6 +40,10 @@ namespace RevitMCP.Core.IssueManager
     /// ‧失敗：顯示白話原因；匯出已完成時可用 ResumeAsync 重試上傳（不重傳已完成的檔案）；
     /// ‧finalize 驗證失敗時伺服器會作廢整個 bundle（之後再送 finalize 一律 409 bundle_failed）：重試時改為「重新建立 bundle、重傳檔案、
     ///   再 finalize」（本機檔案不用重新匯出）；內容本身被拒（manifest 不符規格、PDF 頁數不符…）重試也不會過，就直接放棄暫存；
+    ///   分段上傳時被拒（410 過期、409 bundle_failed／bundle_closed、404、簽名網址主機 4xx）同樣走重建整批重傳；以伺服器回應為準，不看本機時鐘；
+    /// ‧收到 409 bundle_closed 不直接當作廢：可能是自己先前的 finalize 已提交，先對同一個 bundle 再送一次 finalize（冪等回同一個 setId），仍失敗才重建；
+    /// ‧伺服器每人最多 5 個未完成 bundle（24 小時才過期）：匯出失敗、500 finalize_failed、簽名網址失效時，舊 bundle 盡力 DELETE 一次
+    ///   （失敗不阻擋流程、不顯示給使用者，只記一行日誌）；DELETE 若回 409 已 finalize，改走 finalize 取回結果，不重建；
     /// ‧finalize 最長可能數分鐘：逾時（或 502／504）後重送 finalize（冪等），伺服器回 409 finalize_in_progress 就輪詢等待，上限 10 分鐘；
     /// ‧同一時間只允許一個進行中的上傳（跨視窗、跨 flow 實例）；任何結束路徑（成功、取消、逾時、例外）都會在 finally 釋放這個旗標。
     /// </summary>
@@ -74,6 +78,12 @@ namespace RevitMCP.Core.IssueManager
             _delay = delay ?? ((span, token) => Task.Delay(span, token));
         }
 
+        /// <summary>日誌（只寫固定文字與數字，不含權杖、網址、編號）；沒設就不記。</summary>
+        public Action<string> Log { get; set; }
+
+        /// <summary>盡力 DELETE 的等待上限：網站沒回應時不要讓使用者多等一分鐘。</summary>
+        public static readonly TimeSpan BestEffortDeleteTimeout = TimeSpan.FromSeconds(15);
+
         /// <summary>finalize 回 409 finalize_in_progress（或逾時）後，重送 finalize 的間隔。</summary>
         public TimeSpan FinalizePollInterval { get; set; } = TimeSpan.FromSeconds(5);
 
@@ -92,7 +102,10 @@ namespace RevitMCP.Core.IssueManager
             Enter();
             try
             {
+                // 先前待重試、現在被新的上傳取代的版本包：伺服器端也盡力刪掉，不然會一直佔每人 5 個的未完成名額。
+                var staleId = _pendingBundle != null ? _pendingBundle.BundleId : null;
                 DiscardPendingLocal();
+                if (staleId != null) await TryDeleteServerBundleAsync(staleId).ConfigureAwait(false);
                 flowProgress = flowProgress ?? new NullFlowProgress();
 
                 flowProgress.Stage("向 Issue Manager 建立版本包");
@@ -111,7 +124,10 @@ namespace RevitMCP.Core.IssueManager
                 }
                 catch (Exception)
                 {
-                    TryDeleteDirectory(directory); // 匯出失敗：本機暫存不留；伺服器端 bundle 保持 open 到過期自動清
+                    // 匯出失敗：本機暫存不留；伺服器端 bundle 也盡力刪掉——網站端每人最多 5 個未完成 bundle、24 小時才過期，
+                    // 不刪的話連續幾次匯出失敗（例如 Revit 無回應逾時）就會卡在 429 too_many_open_bundles。
+                    TryDeleteDirectory(directory);
+                    await TryDeleteServerBundleAsync(created.BundleId).ConfigureAwait(false);
                     throw;
                 }
 
@@ -133,9 +149,8 @@ namespace RevitMCP.Core.IssueManager
             Enter();
             try
             {
-                // 版本包過期：伺服器已（或即將）清掉暫存；本機檔案還在，直接重建，不必叫使用者重新匯出。
-                if (_pendingBundle != null && _pendingBundle.ExpiresAt.HasValue && _pendingBundle.ExpiresAt.Value <= _now())
-                    _pendingBundle = null;
+                // 版本包是否過期一律以伺服器回應為準（分段 PUT 或 finalize 回 410／404／409 時自動重建，本機檔案不必重新匯出）；
+                // 不用本機時鐘判斷：時鐘不準會讓還能用的 bundle 被丟掉，而舊的又沒人刪，佔用每人 5 個的未完成名額。
                 return await UploadAndFinalizeAsync(flowProgress ?? new NullFlowProgress(), ct).ConfigureAwait(false);
             }
             finally
@@ -180,33 +195,52 @@ namespace RevitMCP.Core.IssueManager
             try
             {
                 if (_pendingBundle == null) await RecreateBundleAsync(flowProgress, ct).ConfigureAwait(false);
-                var bundle = _pendingBundle;
+                BundleCreateResult bundle;
+                FinalizeResult finalized = null;
+                var autoRecreated = false;
+                while (true)
+                {
+                    bundle = _pendingBundle;
+                    try
+                    {
+                        BundleUploader.EnsureWithinLimits(bundle.Limits, exported);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        await AbandonAsync(bundle.BundleId).ConfigureAwait(false); // 檔案超過上限：再試也一樣，不留暫存
+                        throw;
+                    }
 
-                try
-                {
-                    BundleUploader.EnsureWithinLimits(bundle.Limits, exported);
-                }
-                catch (InvalidOperationException)
-                {
-                    await AbandonAsync(bundle.BundleId).ConfigureAwait(false); // 檔案超過上限：再試也一樣，不留暫存
-                    throw;
-                }
+                    AddinApiException unusable = null;
+                    var finalizing = false; // 兩個階段「這個 bundle 已不能用」的判斷不同：分段 PUT 的 400（雜湊不符…）只代表該分段要重送
+                    try
+                    {
+                        flowProgress.Stage("上傳檔案（背景進行，Revit 可以繼續操作）");
+                        // 不用 Progress<T>：它把回報 Post 到建立當下的 SynchronizationContext（這裡通常是執行緒集區），
+                        // 最後一段的上傳進度可能比後面的 Stage 文字（finalize 開始、伺服器處理中）更晚送達而蓋掉它。直接呼叫，順序才固定。
+                        await _uploader.UploadAsync(bundle, exported, new DirectProgress<UploadProgress>(flowProgress.Upload), ct).ConfigureAwait(false);
+                        ct.ThrowIfCancellationRequested();
+                        finalizing = true;
+                        finalized = await FinalizeWithPollingAsync(bundle.BundleId, exported.Manifest, flowProgress, ct).ConfigureAwait(false);
+                    }
+                    catch (AddinApiException ex) when (finalizing ? IsBundleUnusable(ex) : IsUploadBundleUnusable(ex))
+                    {
+                        // 上傳分段或 finalize 時，伺服器說這個 bundle 已作廢、過期、被清除（或簽名網址已失效）：不能再對它重送。
+                        unusable = ex;
+                    }
 
-                flowProgress.Stage("上傳檔案（背景進行，Revit 可以繼續操作）");
-                await _uploader.UploadAsync(bundle, exported, new Progress<UploadProgress>(flowProgress.Upload), ct).ConfigureAwait(false);
-                ct.ThrowIfCancellationRequested();
+                    if (unusable == null) break;
+                    finalized = await TryRecoverUnusableBundleAsync(bundle, unusable, exported, flowProgress, ct).ConfigureAwait(false);
+                    if (finalized != null) break; // 其實已經完成了
 
-                FinalizeResult finalized;
-                try
-                {
-                    finalized = await FinalizeWithPollingAsync(bundle.BundleId, exported.Manifest, flowProgress, ct).ConfigureAwait(false);
-                }
-                catch (AddinApiException ex) when (IsBundleUnusable(ex))
-                {
-                    // 伺服器已作廢（或過期、找不到）這個 bundle：不能再對它重送 finalize。
-                    _pendingBundle = null;
-                    if (IsContentRejection(ex)) DiscardPendingLocal(); // 內容本身被拒：重傳也不會過，不留暫存，請使用者調整後重新匯出
-                    throw;
+                    _pendingBundle = null; // 確實不能用：重新建立 bundle 並整批重傳（本機檔案不必重新匯出）
+                    if (IsContentRejection(unusable)) DiscardPendingLocal(); // 內容本身被拒：重傳也不會過，不留暫存，請使用者調整後重新匯出
+                    if (finalizing || autoRecreated || _pendingExport == null)
+                        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(unusable).Throw();
+                    // 上傳到一半被拒（例如重試時才發現 bundle 早已過期）：使用者已經按過一次上傳／重試，同一次內自動重建一次，
+                    // 免得要再多按一次「重試」；只自動一次，第二個 bundle 也被拒就把錯誤交給使用者。
+                    autoRecreated = true;
+                    await RecreateBundleAsync(flowProgress, ct).ConfigureAwait(false);
                 }
 
                 _pendingRequest = null;
@@ -302,6 +336,93 @@ namespace RevitMCP.Core.IssueManager
             }
         }
 
+        /// <summary>
+        /// 上傳分段（PUT）時的錯誤代表「這個 bundle 已不能用」：410 過期、404（已被清除）、409 bundle_failed／bundle_closed／already_finalized，
+        /// 或簽名網址所在的主機拒絕（<see cref="AddinApiClient.UploadUrlRejectedCode"/>，簽名網址約 2 小時失效）。
+        /// 以伺服器回應為準，不用本機時鐘判斷。分段本身的 400（checksum_mismatch、invalid_part）與 413 只代表該分段要重送／調整，不在此列。
+        /// </summary>
+        internal static bool IsUploadBundleUnusable(AddinApiException ex)
+        {
+            if (ex.Code == AddinApiClient.UploadUrlRejectedCode) return true;
+            switch (ex.StatusCode)
+            {
+                case 404: return true;
+                case 410: return true;
+                case 409: return ex.Code == "bundle_failed" || ex.Code == "bundle_closed" || ex.Code == "already_finalized";
+                default: return false;
+            }
+        }
+
+        /// <summary>409 bundle_closed／already_finalized：可能是「自己先前的 finalize 其實已經提交」，要先確認，不能直接當作廢重建（會多建一個工作版本）。</summary>
+        internal static bool IsClosedOrFinalized(AddinApiException ex)
+        {
+            return ex.StatusCode == 409 && (ex.Code == "bundle_closed" || ex.Code == "already_finalized");
+        }
+
+        /// <summary>這種錯誤發生時，伺服器端的 bundle 可能仍是 open（佔用每人 5 個的未完成名額）：500 finalize_failed（沒動到檔案時退回 open）、簽名網址失效。</summary>
+        internal static bool MayStillBeOpenOnServer(AddinApiException ex)
+        {
+            return (ex.StatusCode == 500 && ex.Code == "finalize_failed") || ex.Code == AddinApiClient.UploadUrlRejectedCode;
+        }
+
+        /// <summary>
+        /// bundle 被判定不能用之後的善後：①bundle_closed／already_finalized 時先對<b>同一個</b> bundle 再送一次 finalize（冪等：已完成會回同一個 setId，
+        /// 避免第二個 finalize 收到 bundle_closed 就重建而多出第二個工作版本）；②可能仍是 open 的盡力 DELETE，若 DELETE 說「其實已 finalize／正在 finalize」就改走 finalize。
+        /// 回傳非 null＝其實已完成，呼叫端照成功處理；null＝確實作廢，呼叫端重建。
+        /// </summary>
+        private async Task<FinalizeResult> TryRecoverUnusableBundleAsync(BundleCreateResult bundle, AddinApiException ex, ExportedBundle exported,
+            IUploadFlowProgress flowProgress, CancellationToken ct)
+        {
+            if (IsClosedOrFinalized(ex))
+            {
+                var done = await TryFinalizeAgainAsync(bundle.BundleId, exported, flowProgress, ct).ConfigureAwait(false);
+                if (done != null) return done;
+            }
+            if (MayStillBeOpenOnServer(ex))
+            {
+                var outcome = await TryDeleteServerBundleAsync(bundle.BundleId).ConfigureAwait(false);
+                if (outcome == BundleDeleteOutcome.AlreadyFinalized || outcome == BundleDeleteOutcome.FinalizeInProgress)
+                {
+                    var done = await TryFinalizeAgainAsync(bundle.BundleId, exported, flowProgress, ct).ConfigureAwait(false);
+                    if (done != null) return done;
+                }
+            }
+            return null;
+        }
+
+        private async Task<FinalizeResult> TryFinalizeAgainAsync(string bundleId, ExportedBundle exported, IUploadFlowProgress flowProgress, CancellationToken ct)
+        {
+            try
+            {
+                return await FinalizeWithPollingAsync(bundleId, exported.Manifest, flowProgress, ct).ConfigureAwait(false);
+            }
+            catch (AddinApiException again) when (IsBundleUnusable(again))
+            {
+                return null; // 同一個 bundle 再問一次仍不能用：確實作廢
+            }
+        }
+
+        /// <summary>盡力通知伺服器刪除 bundle：失敗、逾時（15 秒）都不丟例外、不顯示給使用者；只記一行日誌（不含編號、網址或權杖）。</summary>
+        private async Task<BundleDeleteOutcome> TryDeleteServerBundleAsync(string bundleId)
+        {
+            if (string.IsNullOrEmpty(bundleId)) return BundleDeleteOutcome.Deleted;
+            var outcome = BundleDeleteOutcome.Failed;
+            try
+            {
+                using (var timeout = new CancellationTokenSource(BestEffortDeleteTimeout))
+                {
+                    outcome = await _api.DeleteBundleDetailedAsync(bundleId, timeout.Token).ConfigureAwait(false);
+                }
+            }
+            catch (Exception) { }
+            try
+            {
+                if (Log != null) Log("盡力清除伺服器上未完成的版本包：" + outcome);
+            }
+            catch (Exception) { }
+            return outcome;
+        }
+
         /// <summary>被拒的是「內容」本身（清單不符規格、PDF 頁數／格式不對、超過大小上限）：同樣的檔案重傳只會再被拒。</summary>
         internal static bool IsContentRejection(AddinApiException ex)
         {
@@ -362,6 +483,13 @@ namespace RevitMCP.Core.IssueManager
         private static void Exit()
         {
             Volatile.Write(ref _running, 0);
+        }
+
+        private sealed class DirectProgress<T> : IProgress<T>
+        {
+            private readonly Action<T> _report;
+            public DirectProgress(Action<T> report) { _report = report; }
+            public void Report(T value) { _report(value); }
         }
 
         private sealed class NullFlowProgress : IUploadFlowProgress

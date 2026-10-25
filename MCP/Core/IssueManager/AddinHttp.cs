@@ -131,12 +131,24 @@ namespace RevitMCP.Core.IssueManager
                 case "already_finalized":
                     return "這個版本已經上傳完成，無法取消或修改；如要移除，請到 Issue Manager 網站刪除該版本。";
                 case "too_many_open_bundles":
-                    return "未完成的上傳太多了，請稍後再試，或等先前未完成的上傳逾時清除。";
+                    return "您有太多未完成的上傳，暫時無法再建立新的版本包。未完成的上傳 24 小時內會自動清除，請稍後再試；若急需上傳，請通知管理員清除。";
                 case "invalid_request":
                     return "Issue Manager 無法解讀送出的請求內容。";
                 default:
-                    return string.IsNullOrEmpty(code) ? "Issue Manager 拒絕了這個請求。" : "Issue Manager 拒絕了這個請求（" + code + "）。";
+                    // 伺服器自己給的代碼原樣顯示前先過濾：只留英數底線點橫線、最多 120 字元；本文最長 8 KB，不能整串貼進視窗。
+                    var safe = SanitizeCode(code);
+                    return safe == null ? "Issue Manager 拒絕了這個請求。" : "Issue Manager 拒絕了這個請求（" + safe + "）。";
             }
+        }
+
+        private static readonly Regex SafeCodeText = new Regex("^[A-Za-z0-9_.\\-]+\\z", RegexOptions.Compiled);
+        public const int MaxCodeChars = 120;
+
+        /// <summary>伺服器回的錯誤代碼是否安全到可以顯示：只允許英數、底線、點、橫線；超過 <see cref="MaxCodeChars"/> 截斷。不安全（含空白、換行、HTML…）回 null。</summary>
+        public static string SanitizeCode(string code)
+        {
+            if (string.IsNullOrEmpty(code) || !SafeCodeText.IsMatch(code)) return null;
+            return code.Length <= MaxCodeChars ? code : code.Substring(0, MaxCodeChars);
         }
 
         public static AddinApiException FromTransport(Exception ex)

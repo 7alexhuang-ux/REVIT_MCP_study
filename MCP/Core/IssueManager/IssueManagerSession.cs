@@ -84,7 +84,7 @@ namespace RevitMCP.Core.IssueManager
 
             var capturedApi = services.Api;
             services.CreateFlow = () => new UploadFlow(capturedApi, new RevitBundleExportSteps(uiApp, snapshot), new RevitApiThreadRunner(),
-                BundleTempCleaner.DefaultRoot());
+                BundleTempCleaner.DefaultRoot()) { Log = message => Logger.Info("[IssueManager] " + message) };
             return services;
         }
 

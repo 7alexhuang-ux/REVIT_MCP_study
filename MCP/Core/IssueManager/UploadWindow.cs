@@ -526,8 +526,10 @@ namespace RevitMCP.Core.IssueManager
         {
             if (_running && _cts != null)
             {
-                _cts.Cancel();
+                // 先顯示「正在取消」再取消：Cancel() 會同步執行取消的延續，結果文字（「已取消登入。」）可能在這一行之前就已寫入，
+                // 先取消再設文字會把它蓋掉（偶發失敗 CancellingWhileWaitingForBrowserLoginShowsCancelledNotAnError 的原因）。
                 SetStatus("正在取消…（目前的步驟結束後就會停止；3D 模型匯出無法中途取消）");
+                _cts.Cancel();
                 return;
             }
             Close(); // 還有待重試的上傳時，由 OnClosing 詢問並清除（按 X 與按「關閉」走同一條路）

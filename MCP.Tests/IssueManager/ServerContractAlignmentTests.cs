@@ -309,47 +309,64 @@ namespace RevitMCP.Tests.IssueManager
             Assert.IsEmpty(_server.Deleted);
         }
 
-        [Test]
-        public async Task FinalizeFailedBundleExpiredAndGoneAreAllTreatedAsUnusable()
+        /// <summary>
+        /// finalize 回這些錯誤時，哪些可以用本機檔案重建 bundle 後重試、哪些不行。
+        /// 可重試：500 finalize_failed、410 過期、409 bundle_failed、409 bundle_closed（再問一次 finalize 仍 closed 才算作廢）、404（已被清除）。
+        /// 不可重試：413（內容超過上限，同樣的檔案重傳只會再被拒）。
+        /// </summary>
+        [TestCase(500, "finalize_failed", 1, true)]
+        [TestCase(410, "bundle_expired", 1, true)]
+        [TestCase(409, "bundle_failed", 1, true)]
+        [TestCase(409, "bundle_closed", 2, true)]
+        [TestCase(404, "not_found", 1, true)]
+        [TestCase(413, "payload_too_large", 1, false)]
+        public async Task FinalizeErrorsAreExplicitlySplitIntoRetryableAndNot(int status, string code, int times, bool retryable)
         {
-            foreach (var script in new Func<HttpResponseMessage>[]
-            {
-                () => Status(500, "finalize_failed"), () => Status(410, "bundle_expired"), () => Status(409, "bundle_failed"),
-                () => Status(409, "bundle_closed"), () => Status(404, "not_found"), () => Status(413, "payload_too_large")
-            })
-            {
-                _server.FinalizeScript.Enqueue(r => script());
-                var flow = await NewFlow(new FakeSteps());
-                Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
-                // 413 是內容被拒，不可重試；其他都可以用本機檔案重建
-                var retryable = flow.CanResume;
-                if (retryable)
-                {
-                    var created = _server.CreatedBundleIds.Count;
-                    await flow.ResumeAsync(null, CancellationToken.None);
-                    Assert.AreEqual(created + 1, _server.CreatedBundleIds.Count);
-                }
-                _server.FinalizeScript.Clear();
-            }
+            for (var i = 0; i < times; i++) _server.FinalizeScript.Enqueue(r => Status(status, code));
+            var flow = await NewFlow(new FakeSteps());
+            var ex = Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
+            Assert.AreEqual(code, ex.Code);
+            Assert.AreEqual(retryable, flow.CanResume, "可重試與否要明確：" + code);
+            if (!retryable) return;
+
+            var created = _server.CreatedBundleIds.Count;
+            await flow.ResumeAsync(null, CancellationToken.None);
+            Assert.AreEqual(created + 1, _server.CreatedBundleIds.Count, "重試＝重新建立 bundle");
         }
 
         [Test]
-        public async Task ABundleThatExpiredOnTheServerWhileWaitingForRetryIsRecreatedAutomatically()
+        public async Task ABundleThatTheServerSaysIsExpiredIsRecreatedAutomaticallyOnRetry()
         {
             var steps = new FakeSteps();
-            var now = new DateTimeOffset(2026, 10, 25, 8, 0, 0, TimeSpan.Zero);
-            var flow = await NewFlow(steps, () => now);
+            var flow = await NewFlow(steps);
             _server.FailNextPuts = 100;
             Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
             Assert.IsTrue(flow.CanResume);
 
             _server.FailNextPuts = 0;
-            now = _server.BundleExpiresAt.AddHours(1); // 超過到期時間
+            _server.Expire(_server.CreatedBundleIds[0]); // 以伺服器回應（410）為準
             var result = await flow.ResumeAsync(null, CancellationToken.None);
 
             Assert.AreEqual(2, _server.CreatedBundleIds.Count, "過期＝重新建立，不再叫使用者重新按上傳");
             Assert.AreEqual(_server.CreatedBundleIds[1], result.BundleId);
             Assert.AreEqual(1, steps.Calls.Count(c => c == "glb"));
+        }
+
+        [Test]
+        public async Task TheLocalClockNeverDecidesThatABundleExpired()
+        {
+            var now = new DateTimeOffset(2026, 10, 25, 8, 0, 0, TimeSpan.Zero);
+            var flow = await NewFlow(new FakeSteps(), () => now);
+            _server.FailNextPuts = 100;
+            Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
+
+            _server.FailNextPuts = 0;
+            now = _server.BundleExpiresAt.AddDays(30); // 本機時鐘快了一個月：伺服器沒說過期就照常續傳同一個 bundle
+            var result = await flow.ResumeAsync(null, CancellationToken.None);
+
+            Assert.AreEqual(1, _server.CreatedBundleIds.Count);
+            Assert.AreEqual(_server.CreatedBundleIds[0], result.BundleId);
+            Assert.IsEmpty(_server.Deleted);
         }
 
         // ── #8 finalize 逾時與「伺服器處理中」──────────────────────────
@@ -696,6 +713,375 @@ namespace RevitMCP.Tests.IssueManager
             vm.SelectAllSheets(true);
             Assert.IsFalse(vm.CanUpload);
             StringAssert.Contains("1000", vm.BlockReason);
+        }
+
+        // ── v4b3：未完成上傳占名額（每人最多 5 個、24 小時才過期）─────────────
+
+        [Test]
+        public async Task Finalize500FailedDeletesTheOldBundleBeforeRecreatingIt()
+        {
+            _server.FinalizeScript.Enqueue(r => Status(500, "finalize_failed"));
+            var logs = new List<string>();
+            var flow = await NewFlow(new FakeSteps());
+            flow.Log = logs.Add;
+            var first = Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
+            Assert.AreEqual("finalize_failed", first.Code);
+
+            var old = _server.CreatedBundleIds.Single();
+            CollectionAssert.AreEqual(new[] { old }, _server.Deleted, "500 finalize_failed 時舊 bundle 可能退回 open（佔名額）：盡力 DELETE 一次");
+            Assert.AreEqual(1, logs.Count);
+            StringAssert.DoesNotContain(old, logs[0], "日誌不含 bundle 編號");
+
+            var result = await flow.ResumeAsync(null, CancellationToken.None);
+            Assert.AreEqual(2, _server.CreatedBundleIds.Count);
+            Assert.AreNotEqual(old, result.BundleId);
+        }
+
+        [Test]
+        public async Task ABestEffortDeleteThatFailsIsSilentAndDoesNotReplaceTheRealError()
+        {
+            var steps = new FakeSteps { ThrowInModel = new InvalidOperationException("3D 模型匯出不完整") };
+            var logs = new List<string>();
+            var flow = await NewFlow(steps);
+            flow.Log = logs.Add;
+            _server.Handler.BeforeRespond = r =>
+            {
+                if (r.Method == HttpMethod.Delete) throw new HttpRequestException("socket closed");
+                return Task.FromResult(0);
+            };
+
+            var ex = Assert.ThrowsAsync<InvalidOperationException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
+
+            StringAssert.Contains("不完整", ex.Message, "使用者看到的還是匯出失敗的原因，不是 DELETE 的錯誤");
+            Assert.AreEqual(1, logs.Count);
+            StringAssert.Contains("Failed", logs[0]);
+            Assert.IsFalse(UploadFlow.IsRunning);
+        }
+
+        [Test]
+        public async Task WhenTheBestEffortDeleteSaysAlreadyFinalizedTheFlowFinishesInsteadOfRecreating()
+        {
+            // 伺服器其實已經建立好版本，卻回了 500（例如回應在提交後才出錯）：DELETE 得到 409 already_finalized → 再問一次 finalize 取回同一個 setId
+            _server.FinalizeScript.Enqueue(r => { _server.MarkFinalized(BundleIdOf(r)); return Status(500, "finalize_failed"); });
+            var flow = await NewFlow(new FakeSteps());
+
+            var result = await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None);
+
+            var id = _server.CreatedBundleIds.Single();
+            Assert.AreEqual("set-" + id, result.SetId);
+            Assert.AreEqual(1, _server.CreatedBundleIds.Count, "不重建（會多出第二個工作版本）");
+            Assert.IsEmpty(_server.Deleted, "DELETE 已 finalize 的 bundle 什麼都沒刪");
+            Assert.AreEqual(2, _server.FinalizeRequestBundleIds.Count);
+            Assert.IsFalse(flow.CanResume);
+        }
+
+        [Test]
+        public async Task StartingANewUploadDeletesTheBundleOfThePreviousUnfinishedOne()
+        {
+            var flow = await NewFlow(new FakeSteps());
+            _server.FailNextPuts = 100;
+            Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
+            var old = _server.CreatedBundleIds.Single();
+            Assert.IsEmpty(_server.Deleted);
+
+            _server.FailNextPuts = 0;
+            await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None);
+
+            CollectionAssert.Contains(_server.Deleted, old, "被新上傳取代的待重試 bundle 不能一直佔名額");
+        }
+
+        [Test]
+        public async Task ThePlainMessageForTooManyOpenBundlesExplainsThe24HourCleanup()
+        {
+            var ex = await AddinHttp.ToExceptionAsync(FakeHandler.Json((HttpStatusCode)429, new JObject { ["error"] = "too_many_open_bundles" }));
+            StringAssert.Contains("未完成", ex.Message);
+            StringAssert.Contains("24 小時", ex.Message);
+            StringAssert.Contains("自動清除", ex.Message);
+            Assert.AreEqual(AddinErrorKind.Rejected, ex.Kind);
+        }
+
+        // ── v4b3：分段上傳被拒也要能重建 ─────────────────────────────
+
+        [TestCase(410, "bundle_expired")]
+        [TestCase(409, "bundle_failed")]
+        [TestCase(409, "bundle_closed")]
+        [TestCase(404, "not_found")]
+        public async Task AnUploadPartRejectedBecauseTheBundleIsGoneRecreatesTheBundleAndResendsEverything(int status, string code)
+        {
+            var steps = new FakeSteps();
+            var stages = new StageLog();
+            var flow = await NewFlow(steps);
+            _server.PutScript.Enqueue(r => Status(status, code));
+
+            var result = await flow.RunAsync(RequestFactory.Full(), null, stages, CancellationToken.None);
+
+            var dead = _server.CreatedBundleIds[0];
+            Assert.AreEqual(2, _server.CreatedBundleIds.Count, "上傳被拒＝重建 bundle，而不是對舊的再傳一次（舊的永遠不會好）");
+            var fresh = _server.CreatedBundleIds[1];
+            Assert.AreEqual(fresh, result.BundleId);
+            Assert.IsTrue(_server.Puts.Skip(1).All(p => p.Uri.AbsolutePath.Contains("/" + fresh + "/")), "第一個分段之後的上傳都送往新的 bundle");
+            Assert.AreEqual("finalized", _server.BundleStatus[fresh]);
+            Assert.AreNotEqual("finalized", _server.BundleStatus[dead]);
+            CollectionAssert.Contains(stages.Stages, Strings.RecreateBundleStage);
+            Assert.AreEqual(1, steps.Calls.Count(c => c == "glb"), "不重新匯出");
+            Assert.IsFalse(flow.CanResume);
+        }
+
+        [Test]
+        public async Task WhenEveryNewBundleIsAlsoRejectedTheUserGetsTheErrorAndTheNextRetryRecreatesAgain()
+        {
+            var flow = await NewFlow(new FakeSteps());
+            _server.PutScript.Enqueue(r => Status(410, "bundle_expired"));
+            _server.PutScript.Enqueue(r => Status(410, "bundle_expired"));
+
+            var ex = Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
+
+            Assert.AreEqual("bundle_expired", ex.Code);
+            Assert.AreEqual(2, _server.CreatedBundleIds.Count, "同一次只自動重建一次，不無限迴圈");
+            Assert.IsTrue(flow.CanResume);
+
+            var result = await flow.ResumeAsync(null, CancellationToken.None);
+            Assert.AreEqual(3, _server.CreatedBundleIds.Count);
+            Assert.AreEqual(_server.CreatedBundleIds[2], result.BundleId);
+        }
+
+        [Test]
+        public async Task WhenTheBundleExpiresHalfWayThroughTheWholeBatchIsSentAgainToTheNewBundle()
+        {
+            var flow = await NewFlow(new FakeSteps());
+            string expiredId = null;
+            _server.Handler.BeforeRespond = r =>
+            {
+                // 第 3 個分段 PUT 時，伺服器端的 bundle 過期（前兩段已傳完）
+                if (r.Uri.AbsolutePath.StartsWith("/upload/", StringComparison.Ordinal) && _server.Puts.Count == 2 && expiredId == null)
+                {
+                    expiredId = r.Uri.AbsolutePath.Split('/')[2];
+                    _server.Expire(expiredId);
+                }
+                return Task.FromResult(0);
+            };
+
+            var result = await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None);
+
+            var fresh = result.BundleId;
+            Assert.IsNotNull(expiredId);
+            Assert.AreNotEqual(expiredId, fresh);
+            foreach (var kind in new[] { "pdf", "glb" })
+            {
+                var uploadedParts = _server.Puts.Count(p => p.Uri.AbsolutePath.StartsWith("/upload/" + fresh + "/" + kind + "/", StringComparison.Ordinal));
+                Assert.Greater(uploadedParts, 0, kind + " 整批重傳到新的 bundle（包含舊 bundle 上已傳完的分段）");
+            }
+            Assert.AreEqual("finalized", _server.BundleStatus[fresh]);
+        }
+
+        [TestCase(400, "checksum_mismatch")]
+        [TestCase(400, "invalid_part")]
+        public async Task AnUploadPartRejectedForItsOwnContentKeepsTheSameBundle(int status, string code)
+        {
+            var flow = await NewFlow(new FakeSteps());
+            _server.PutScript.Enqueue(r => Status(status, code));
+
+            var ex = Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
+            Assert.AreEqual(code, ex.Code);
+            Assert.IsTrue(flow.CanResume);
+
+            var result = await flow.ResumeAsync(null, CancellationToken.None);
+            Assert.AreEqual(1, _server.CreatedBundleIds.Count, "只是該分段要重送：同一個 bundle 續傳");
+            Assert.AreEqual(_server.CreatedBundleIds[0], result.BundleId);
+            Assert.IsEmpty(_server.Deleted);
+        }
+
+        [TestCase(400)]
+        [TestCase(401)]
+        [TestCase(403)]
+        [TestCase(404)]
+        public async Task AFourXxFromTheSignedUploadHostRebuildsTheBundleAndNeverMeansLoginExpired(int status)
+        {
+            _server.UploadHost = "storage.example.test";
+            var flow = await NewFlow(new FakeSteps());
+            _server.PutScript.Enqueue(r => Status(status, null));
+            _server.PutScript.Enqueue(r => Status(status, null)); // 新的 bundle 也被拒 → 錯誤交給使用者
+
+            var ex = Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
+
+            Assert.AreEqual(AddinApiClient.UploadUrlRejectedCode, ex.Code);
+            Assert.AreEqual(AddinErrorKind.Rejected, ex.Kind, "401 也不是「登入失效」：這是 Supabase 的簽名網址被拒");
+            StringAssert.Contains("重新建立版本包", ex.Message);
+            Assert.AreEqual(2, _server.CreatedBundleIds.Count);
+            CollectionAssert.AreEqual(_server.CreatedBundleIds, _server.Deleted, "簽名網址失效時伺服器端 bundle 仍是 open（佔名額）：每個都盡力 DELETE");
+            Assert.IsTrue(flow.CanResume);
+
+            var result = await flow.ResumeAsync(null, CancellationToken.None);
+            Assert.AreEqual(3, _server.CreatedBundleIds.Count);
+            Assert.AreEqual(_server.CreatedBundleIds[2], result.BundleId);
+        }
+
+        [Test]
+        public async Task ASignedUrlThatExpiredAfterTwoHoursIsSilentlyRecreatedOnRetry()
+        {
+            _server.UploadHost = "storage.example.test";
+            var flow = await NewFlow(new FakeSteps());
+            _server.FailNextPuts = 100; // 第一次上傳失敗（網路），使用者過了兩小時才按重試
+            Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
+            _server.FailNextPuts = 0;
+            _server.PutScript.Enqueue(r => Status(403, null)); // 簽名網址過期
+
+            var result = await flow.ResumeAsync(null, CancellationToken.None);
+
+            Assert.AreEqual(2, _server.CreatedBundleIds.Count);
+            Assert.AreEqual(_server.CreatedBundleIds[1], result.BundleId);
+            CollectionAssert.Contains(_server.Deleted, _server.CreatedBundleIds[0]);
+        }
+
+        [TestCase(429)]
+        [TestCase(503)]
+        public async Task ThrottlingOrServerErrorsFromTheSignedUploadHostAreStillJustRetried(int status)
+        {
+            _server.UploadHost = "storage.example.test";
+            var flow = await NewFlow(new FakeSteps());
+            _server.PutScript.Enqueue(r => Status(status, null));
+
+            var result = await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None);
+
+            Assert.IsNotNull(result.SetId);
+            Assert.AreEqual(1, _server.CreatedBundleIds.Count);
+        }
+
+        // ── v4b3：bundle_closed 不能直接當作廢 ────────────────────────
+
+        [Test]
+        public async Task BundleClosedBecauseOurOwnFinalizeAlreadyCommittedResendsFinalizeAndFinishesWithoutASecondVersion()
+        {
+            // 第一個 finalize（等滿 10 分鐘後使用者按了重試，伺服器重新認領）先提交；第二個收到 409 bundle_closed。
+            _server.FinalizeScript.Enqueue(r => { _server.MarkFinalized(BundleIdOf(r)); return Status(409, "bundle_closed"); });
+            var stages = new StageLog();
+            var flow = await NewFlow(new FakeSteps());
+
+            var result = await flow.RunAsync(RequestFactory.Full(), null, stages, CancellationToken.None);
+
+            var id = _server.CreatedBundleIds.Single();
+            Assert.AreEqual(1, _server.CreatedBundleIds.Count, "不重建、不重傳：不會多出第二個 W");
+            Assert.AreEqual("set-" + id, result.SetId, "冪等的 finalize 回同一個 setId");
+            CollectionAssert.AreEqual(new[] { id, id }, _server.FinalizeRequestBundleIds, "對同一個 bundle 再送一次 finalize");
+            Assert.IsEmpty(_server.Deleted);
+            Assert.IsFalse(flow.CanResume);
+            CollectionAssert.DoesNotContain(stages.Stages, Strings.RecreateBundleStage);
+        }
+
+        [Test]
+        public async Task BundleClosedThatStaysClosedAfterTheResendIsTreatedAsVoidedAndRecreated()
+        {
+            _server.FinalizeScript.Enqueue(r => Status(409, "bundle_closed"));
+            _server.FinalizeScript.Enqueue(r => Status(409, "bundle_closed"));
+            var flow = await NewFlow(new FakeSteps());
+
+            var ex = Assert.ThrowsAsync<AddinApiException>(async () => await flow.RunAsync(RequestFactory.Full(), null, null, CancellationToken.None));
+            Assert.AreEqual("bundle_closed", ex.Code);
+            Assert.AreEqual(2, _server.FinalizeRequestBundleIds.Count, "作廢前先確認過一次");
+            Assert.IsTrue(flow.CanResume);
+
+            var result = await flow.ResumeAsync(null, CancellationToken.None);
+            Assert.AreEqual(2, _server.CreatedBundleIds.Count);
+            Assert.AreEqual(_server.CreatedBundleIds[1], result.BundleId);
+        }
+
+        // ── v4b3：伺服器錯誤字串與上傳網址主機 ─────────────────────────
+
+        [Test]
+        public async Task AnUnknownServerErrorStringIsFilteredAndCappedAt120CharactersBeforeItIsShown()
+        {
+            var longCode = new string('a', 8000);
+            var capped = await AddinHttp.ToExceptionAsync(FakeHandler.Json((HttpStatusCode)418, new JObject { ["error"] = longCode }));
+            StringAssert.Contains(new string('a', AddinHttp.MaxCodeChars), capped.Message);
+            StringAssert.DoesNotContain(new string('a', AddinHttp.MaxCodeChars + 1), capped.Message);
+            Assert.LessOrEqual(capped.Message.Length, 160);
+
+            foreach (var hostile in new[] { "<script>alert(1)</script>", "line1\nline2", "has space", "付費牆", "trailing\n" })
+            {
+                var ex = await AddinHttp.ToExceptionAsync(FakeHandler.Json((HttpStatusCode)418, new JObject { ["error"] = hostile }));
+                Assert.AreEqual("Issue Manager 拒絕了這個請求。", ex.Message, "含空白、換行、HTML、非 ASCII 的字串不顯示：" + hostile);
+            }
+        }
+
+        [TestCase("https://other.example.test/api/addin/v1/bundles/b1/parts/pdf/0")]
+        [TestCase("https://im.example.test:8443/api/addin/v1/bundles/b1/parts/pdf/0")]
+        public async Task AnIssueManagerPartUrlOnADifferentHostOrPortSaysToCheckAddinPublicUrlInsteadOfUpdatePlugin(string url)
+        {
+            var api = await Harness.LoggedInApiAsync(_server);
+
+            var ex = Assert.ThrowsAsync<AddinApiException>(async () => await api.PutPartAsync(url, Harness.Bytes(16), 0, 16, CancellationToken.None));
+
+            Assert.AreEqual(AddinApiClient.UploadHostMismatchCode, ex.Code);
+            StringAssert.Contains("ADDIN_PUBLIC_URL", ex.Message);
+            StringAssert.DoesNotContain("更新", ex.Message, "不是外掛版本問題，不要說「請更新外掛」");
+            Assert.AreEqual(0, _server.Puts.Count, "一個位元組都沒有送出");
+        }
+
+        [Test]
+        public async Task A426FromAnotherUploadHostIsExplainedAsAHostMismatch()
+        {
+            _server.UploadHost = "other.example.test";
+            var api = await Harness.LoggedInApiAsync(_server);
+            var created = await api.CreateBundleAsync("p1", "SD", "x", new BundleSummary(), CancellationToken.None);
+            _server.PutScript.Enqueue(r => Status(426, "upgrade_required"));
+
+            var ex = Assert.ThrowsAsync<AddinApiException>(async () => await api.PutPartAsync(created.Files[0].Urls[0], Harness.Bytes(16), 0, 16, CancellationToken.None));
+
+            Assert.AreEqual(AddinApiClient.UploadHostMismatchCode, ex.Code);
+            StringAssert.Contains("ADDIN_PUBLIC_URL", ex.Message);
+        }
+
+        [Test]
+        public async Task LoopbackNamesAreComparedStrictlyAndTheBearerOnlyGoesToTheExactBaseHost()
+        {
+            var server = new FakeTokenServer { PartBytes = 16, UploadScheme = "http", UploadHost = "localhost:3000" };
+            var api = await Harness.LoggedInApiAsync(server, null, "http://localhost:3000");
+            var data = Harness.Bytes(16);
+
+            var same = await api.CreateBundleAsync("p1", "SD", "x", new BundleSummary(), CancellationToken.None);
+            await api.PutPartAsync(same.Files[0].Urls[0], data, 0, 16, CancellationToken.None);
+            Assert.IsNotNull(server.Puts[0].Authorization, "BaseUrl 本身就是 localhost：同主機，帶權杖");
+
+            foreach (var other in new[] { "127.0.0.1:3000", "[::1]:3000" })
+            {
+                server.UploadHost = other;
+                var created = await api.CreateBundleAsync("p1", "SD", "x", new BundleSummary(), CancellationToken.None);
+                await api.PutPartAsync(created.Files[0].Urls[0], data, 0, 16, CancellationToken.None);
+                var put = server.Puts.Last();
+                Assert.IsNull(put.Authorization, other + " 與 localhost 視為不同主機：不帶權杖");
+                Assert.IsNull(put.PartSha256);
+            }
+        }
+
+        // ── v4b3：視口大小快取 ──────────────────────────────────────
+
+        [Test]
+        public void EachNewUploadRequestClearsTheViewportSizesMeasuredEarlier()
+        {
+            var snapshot = new ProjectSnapshot { DocumentTitle = "x" };
+            snapshot.Views.Add(Samples.View("va", "A", ViewKinds.Plan));
+            snapshot.Views.Add(Samples.View("vb", "B", ViewKinds.Section));
+            var a = new ViewportItem { ViewUniqueId = "va", ViewportElementId = 11, Width = 5, Height = 4, SizeMeasured = true };
+            var b = new ViewportItem { ViewUniqueId = "vb", ViewportElementId = 12, Width = 2, Height = 2, SizeMeasured = true };
+            var legacy = new ViewportItem { ViewUniqueId = "vb", ViewportElementId = 0, Width = 7, Height = 7 };
+            snapshot.Sheets.Add(Samples.Sheet("s1", "S1", "t", a, b));
+            snapshot.Sheets.Add(Samples.Sheet("s2", "S2", "t", legacy));
+            var vm = new ExportSelectionViewModel(snapshot);
+            vm.IsLoggedIn = true;
+            vm.SetProjects(new[] { new AddinProject { Id = "p1", Code = "C", Name = "N" } });
+            vm.SelectedProject = vm.Projects[0];
+            vm.SelectedStage = vm.Stages.First(s => s.Code == "SD");
+            vm.Description = "x";
+            vm.SelectAllSheets(true);
+
+            var request = vm.BuildRequest();
+
+            Assert.IsFalse(a.SizeMeasured, "視窗開著時改了圖紙版面：下次上傳要重量，不能用舊快取");
+            Assert.IsFalse(b.SizeMeasured);
+            Assert.AreEqual(0, a.Width);
+            Assert.AreEqual(0, a.Height);
+            Assert.AreEqual(7, legacy.Width, "沒有 ViewportElementId（無法量測）的視口維持原本帶入的寬高");
+            Assert.AreEqual(2, BundleExporter.ViewportsNeedingMeasure(request).Count, "匯出時只量需要的（有兩個以上視口的圖紙）");
         }
     }
 }
