@@ -37,6 +37,18 @@ namespace RevitMCP.Tests.IssueManager
 
         public RevitDocInfo GetDocInfo() { Calls.Add("doc"); OnCall("doc"); return new RevitDocInfo { Title = "AR_CPC", VersionNumber = "2024 (test)" }; }
 
+        /// <summary>每個視口外框寬高（ViewportElementId → 寬, 高）；沒列出的視口回 Ok=false。</summary>
+        public Dictionary<long, double[]> ViewportSizes = new Dictionary<long, double[]>();
+        public List<IReadOnlyList<long>> MeasureBatches = new List<IReadOnlyList<long>>();
+
+        public IReadOnlyList<ViewportSize> MeasureViewports(IReadOnlyList<long> viewportElementIds)
+        {
+            Calls.Add("measure"); OnCall("measure"); MeasureBatches.Add(viewportElementIds);
+            return viewportElementIds.Select(id => ViewportSizes.ContainsKey(id)
+                ? new ViewportSize { ViewportElementId = id, Width = ViewportSizes[id][0], Height = ViewportSizes[id][1], Ok = true }
+                : new ViewportSize { ViewportElementId = id }).ToList();
+        }
+
         public void ExportPdf(IReadOnlyList<SheetItem> sheetsInOrder, string outputPath)
         {
             Calls.Add("pdf"); LastPdfSheets = sheetsInOrder; File.WriteAllBytes(outputPath, PdfBytes ?? PdfWithPages(sheetsInOrder.Count)); OnCall("pdf");

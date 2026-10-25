@@ -44,13 +44,33 @@ namespace RevitMCP.Core.IssueManager
         public string Kind { get; set; }
     }
 
-    /// <summary>圖紙上的一個視口：用視圖的 UniqueId 連回視圖，寬高（英呎，圖紙座標）用來決定主要視口。</summary>
+    /// <summary>
+    /// 圖紙上的一個視口：用視圖的 UniqueId 連回視圖，寬高（英呎，圖紙座標）用來決定主要視口。
+    /// 寬高是「昂貴資料」（Revit 的 Viewport.GetBoxOutline 要算視口外框，大圖紙集會慢到數分鐘），所以開視窗時不讀：
+    /// 由 <see cref="SnapshotBuilder"/> 建出的項目只有 <see cref="ViewportElementId"/>，寬高到匯出時才由
+    /// <see cref="BundleExporter"/> 對「勾選且同圖紙有兩個以上視口」的視口分批讀取。
+    /// </summary>
     public sealed class ViewportItem
     {
         public string ViewUniqueId { get; set; }
         public double Width { get; set; }
         public double Height { get; set; }
         public double Area { get { return Math.Abs(Width) * Math.Abs(Height); } }
+
+        /// <summary>視口本身的 ElementId（供匯出時延後量測外框）；0＝無法量測，寬高就是建立時給的值。</summary>
+        public long ViewportElementId { get; set; }
+
+        /// <summary>寬高是否已量測過（<see cref="ViewportElementId"/> 非 0 時才有意義；量過就不重量）。</summary>
+        public bool SizeMeasured { get; set; }
+    }
+
+    /// <summary><see cref="IBundleExportSteps.MeasureViewports"/> 的單一結果；Ok＝false 時寬高為 0（面積視為 0）。</summary>
+    public sealed class ViewportSize
+    {
+        public long ViewportElementId { get; set; }
+        public double Width { get; set; }
+        public double Height { get; set; }
+        public bool Ok { get; set; }
     }
 
     public sealed class SheetItem

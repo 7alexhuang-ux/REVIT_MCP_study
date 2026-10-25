@@ -9,75 +9,15 @@ namespace RevitMCP.Core.IssueManager
     /// <summary>
     /// 從 Revit 文件讀出「勾選視窗」要用的清單：圖紙（含視口）、可匯出的視圖、命名圖紙集（ViewSheetSet）。
     /// 唯讀，不開 Transaction；必須在 Revit API 執行緒呼叫。
+    /// 開視窗只讀「便宜欄位」（名稱、識別碼、種類、圖紙-視口-視圖對應）；視口外框（Viewport.GetBoxOutline，
+    /// 大專案每個要好幾秒）不在這裡讀，由 <see cref="RevitBundleExportSteps.MeasureViewports"/> 在匯出時分批量測。
     /// </summary>
     internal static class RevitSelectionCollector
     {
-        public static ProjectSnapshot Collect(Document doc)
+        public static ProjectSnapshot Collect(Document doc, Action<string> log = null)
         {
             if (doc == null) throw new ArgumentNullException("doc");
-            var snapshot = new ProjectSnapshot { DocumentTitle = doc.Title, DocumentPath = doc.PathName };
-
-            var knownViews = new Dictionary<string, ViewItem>(StringComparer.Ordinal);
-            foreach (var view in new FilteredElementCollector(doc).OfClass(typeof(View)).Cast<View>())
-            {
-                if (view.IsTemplate) continue;
-                var kind = KindOf(view);
-                if (kind == null) continue;
-                var item = new ViewItem { UniqueId = view.UniqueId, ElementId = view.Id.GetIdValue(), Name = view.Name, Kind = kind };
-                knownViews[item.UniqueId] = item;
-                snapshot.Views.Add(item);
-            }
-
-            var sheetUniqueIds = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var sheet in new FilteredElementCollector(doc).OfClass(typeof(ViewSheet)).Cast<ViewSheet>())
-            {
-                if (sheet.IsPlaceholder) continue;
-                var item = new SheetItem
-                {
-                    UniqueId = sheet.UniqueId, ElementId = sheet.Id.GetIdValue(), Number = sheet.SheetNumber, Title = sheet.Name
-                };
-                foreach (var viewportId in sheet.GetAllViewports())
-                {
-                    var viewport = doc.GetElement(viewportId) as Viewport;
-                    if (viewport == null) continue;
-                    var view = doc.GetElement(viewport.ViewId) as View;
-                    if (view == null || !knownViews.ContainsKey(view.UniqueId)) continue; // 圖例、明細表、製圖視圖不對應模型位置，不列入
-                    double width = 0, height = 0;
-                    try
-                    {
-                        var outline = viewport.GetBoxOutline();
-                        width = outline.MaximumPoint.X - outline.MinimumPoint.X;
-                        height = outline.MaximumPoint.Y - outline.MinimumPoint.Y;
-                    }
-                    catch (Autodesk.Revit.Exceptions.ApplicationException)
-                    {
-                        // 取不到外框：面積視為 0，主要視口退回清單中的第一個。
-                    }
-                    item.Viewports.Add(new ViewportItem { ViewUniqueId = view.UniqueId, Width = width, Height = height });
-                }
-                sheetUniqueIds.Add(item.UniqueId);
-                snapshot.Sheets.Add(item);
-            }
-
-            foreach (var set in new FilteredElementCollector(doc).OfClass(typeof(ViewSheetSet)).Cast<ViewSheetSet>())
-            {
-                var name = set.Name;
-                if (string.IsNullOrWhiteSpace(name) || name.StartsWith("<", StringComparison.Ordinal)) continue; // <In-Session> 等暫時集合
-                var entry = new SheetSetItem { Name = name };
-                foreach (View member in set.Views)
-                {
-                    if (member is ViewSheet)
-                    {
-                        if (sheetUniqueIds.Contains(member.UniqueId)) entry.SheetUniqueIds.Add(member.UniqueId);
-                    }
-                    else if (knownViews.ContainsKey(member.UniqueId))
-                    {
-                        entry.ViewUniqueIds.Add(member.UniqueId);
-                    }
-                }
-                snapshot.SheetSets.Add(entry);
-            }
-            return snapshot;
+            return SnapshotBuilder.Build(new RevitProjectSource(doc), log);
         }
 
         /// <summary>Revit 視圖種類 → manifest 種類；不對應模型位置的種類（圖例、明細表、製圖、漫遊、渲染…）回 null。</summary>
@@ -94,6 +34,77 @@ namespace RevitMCP.Core.IssueManager
                 case ViewType.Elevation: return ViewKinds.Elevation;
                 case ViewType.Detail: return ViewKinds.Detail;
                 default: return null;
+            }
+        }
+
+        private sealed class RevitProjectSource : IProjectSource
+        {
+            private readonly Document _doc;
+            public RevitProjectSource(Document doc) { _doc = doc; }
+
+            public string Title { get { return _doc.Title; } }
+            public string Path { get { return _doc.PathName; } }
+
+            public IList<SourceView> ReadViews()
+            {
+                var list = new List<SourceView>();
+                using (var collector = new FilteredElementCollector(_doc).OfClass(typeof(View)))
+                {
+                    foreach (var view in collector.Cast<View>())
+                    {
+                        if (view.IsTemplate) continue;
+                        var kind = KindOf(view);
+                        if (kind == null) continue;
+                        list.Add(new SourceView { UniqueId = view.UniqueId, ElementId = view.Id.GetIdValue(), Name = view.Name, Kind = kind });
+                    }
+                }
+                return list;
+            }
+
+            public IList<SourceSheet> ReadSheets()
+            {
+                var list = new List<SourceSheet>();
+                using (var collector = new FilteredElementCollector(_doc).OfClass(typeof(ViewSheet)))
+                {
+                    foreach (var sheet in collector.Cast<ViewSheet>())
+                    {
+                        if (sheet.IsPlaceholder) continue;
+                        var item = new SourceSheet
+                        {
+                            UniqueId = sheet.UniqueId, ElementId = sheet.Id.GetIdValue(), Number = sheet.SheetNumber, Title = sheet.Name
+                        };
+                        // 只取視口與其視圖的 ElementId（便宜）；不呼叫 GetBoxOutline、不打開或重新生成視圖。
+                        foreach (var viewportId in sheet.GetAllViewports())
+                        {
+                            var viewport = _doc.GetElement(viewportId) as Viewport;
+                            if (viewport == null) continue;
+                            item.Viewports.Add(new SourceViewport { ViewportElementId = viewportId.GetIdValue(), ViewElementId = viewport.ViewId.GetIdValue() });
+                        }
+                        list.Add(item);
+                    }
+                }
+                return list;
+            }
+
+            public IList<SourceSheetSet> ReadSheetSets()
+            {
+                var list = new List<SourceSheetSet>();
+                using (var collector = new FilteredElementCollector(_doc).OfClass(typeof(ViewSheetSet)))
+                {
+                    foreach (var set in collector.Cast<ViewSheetSet>())
+                    {
+                        var entry = new SourceSheetSet { Name = set.Name };
+                        if (!string.IsNullOrWhiteSpace(entry.Name) && !entry.Name.StartsWith("<", StringComparison.Ordinal))
+                        {
+                            foreach (View member in set.Views)
+                            {
+                                entry.Members.Add(new SourceSheetSetMember { UniqueId = member.UniqueId, IsSheet = member is ViewSheet });
+                            }
+                        }
+                        list.Add(entry);
+                    }
+                }
+                return list;
             }
         }
     }

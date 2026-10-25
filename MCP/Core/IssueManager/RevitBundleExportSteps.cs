@@ -1,6 +1,7 @@
 #nullable disable
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -8,6 +9,11 @@ using System.Threading.Tasks;
 using Autodesk.Revit.UI;
 using Newtonsoft.Json.Linq;
 using RevitMCP.Models;
+#if REVIT2025_OR_GREATER
+using IdType = System.Int64;
+#else
+using IdType = System.Int32;
+#endif
 
 namespace RevitMCP.Core.IssueManager
 {
@@ -37,6 +43,46 @@ namespace RevitMCP.Core.IssueManager
                 Title = doc.Title,
                 VersionNumber = _uiApp.Application.VersionNumber + " (" + _uiApp.Application.VersionBuild + ")"
             };
+        }
+
+        /// <summary>
+        /// 量視口外框（Viewport.GetBoxOutline）。這是整個流程裡最貴的唯讀呼叫之一，所以只在匯出時、分批對需要的視口呼叫。
+        /// 日誌只記數量與毫秒（不記圖紙或專案名稱）；單一視口超過 2 秒會另記一行，供實機計時找出慢的視口。
+        /// </summary>
+        public IReadOnlyList<ViewportSize> MeasureViewports(IReadOnlyList<long> viewportElementIds)
+        {
+            var doc = RequireSameDocument();
+            var results = new List<ViewportSize>();
+            var total = Stopwatch.StartNew();
+            long slowest = 0;
+            foreach (var id in viewportElementIds)
+            {
+                var size = new ViewportSize { ViewportElementId = id };
+                var one = Stopwatch.StartNew();
+                try
+                {
+                    var viewport = doc.GetElement(checked((IdType)id).ToElementId()) as Autodesk.Revit.DB.Viewport;
+                    if (viewport != null)
+                    {
+                        var outline = viewport.GetBoxOutline();
+                        size.Width = outline.MaximumPoint.X - outline.MinimumPoint.X;
+                        size.Height = outline.MaximumPoint.Y - outline.MinimumPoint.Y;
+                        size.Ok = true;
+                    }
+                }
+                catch (Autodesk.Revit.Exceptions.ApplicationException)
+                {
+                    // 取不到外框：面積視為 0，主要視口退回清單中的第一個。
+                }
+                catch (OverflowException)
+                {
+                }
+                if (one.ElapsedMilliseconds > slowest) slowest = one.ElapsedMilliseconds;
+                if (one.ElapsedMilliseconds > 2000) Logger.Info("[IssueManager] 量測單一視口外框耗時 " + one.ElapsedMilliseconds + " ms");
+                results.Add(size);
+            }
+            Logger.Info("[IssueManager] 量測視口外框：" + results.Count + " 個，" + total.ElapsedMilliseconds + " ms（最慢一個 " + slowest + " ms）");
+            return results;
         }
 
         public void ExportPdf(IReadOnlyList<SheetItem> sheetsInOrder, string outputPath)

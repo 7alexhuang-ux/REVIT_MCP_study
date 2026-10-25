@@ -47,7 +47,8 @@ namespace RevitMCP.Commands
                     _window.Close();
                 }
 
-                var snapshot = RevitSelectionCollector.Collect(doc);
+                // 只讀便宜欄位；各階段耗時（只有數量與毫秒）寫進日誌，供實機計時。
+                var snapshot = RevitSelectionCollector.Collect(doc, message => Logger.Info("[IssueManager] " + message));
                 var services = IssueManagerSession.Create(uiApp, snapshot);
                 var window = new IssueManagerUploadWindow(new ExportSelectionViewModel(snapshot), services);
                 new WindowInteropHelper(window) { Owner = uiApp.MainWindowHandle };

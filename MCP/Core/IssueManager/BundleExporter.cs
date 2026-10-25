@@ -27,6 +27,12 @@ namespace RevitMCP.Core.IssueManager
     public interface IBundleExportSteps
     {
         RevitDocInfo GetDocInfo();
+        /// <summary>
+        /// 量測視口外框寬高（昂貴：Revit 的 Viewport.GetBoxOutline 大專案每個要數秒）。只在匯出時、對需要判斷主要視口的視口呼叫，
+        /// 且 <see cref="BundleExporter"/> 會分批（每批一次 ExternalEvent）呼叫以便在批次之間更新進度與檢查取消。
+        /// 單一視口量不到時該筆 Ok＝false（面積視為 0），不丟例外。
+        /// </summary>
+        IReadOnlyList<ViewportSize> MeasureViewports(IReadOnlyList<long> viewportElementIds);
         /// <summary>合併單檔 PDF，頁序＝傳入圖紙順序。</summary>
         void ExportPdf(IReadOnlyList<SheetItem> sheetsInOrder, string outputPath);
         /// <summary>匯出 GLB 到 outputGlbPath；includeDesignOptions=false 時只含主模型與各選項集合的主要選項。</summary>
@@ -72,6 +78,9 @@ namespace RevitMCP.Core.IssueManager
         public const string NamedViewsName = "named_views.json";
         public const string ManifestName = "manifest.json";
 
+        /// <summary>量測視口外框時每一批的視口數（每批一次 ExternalEvent，批次之間回到訊息迴圈、更新進度、檢查取消）。</summary>
+        public const int MeasureChunkSize = 6;
+
         private readonly Func<DateTimeOffset> _now;
 
         public BundleExporter(Func<DateTimeOffset> now = null)
@@ -101,7 +110,9 @@ namespace RevitMCP.Core.IssueManager
             var doExportModel = request.IncludeModel;
             var threeD = request.ThreeDViews.Select(v => v.UniqueId).ToList();
             var doExportNamedViews = doExportModel && threeD.Count > 0;
-            var total = 1 + (doExportPdf ? 1 : 0) + (doExportModel ? 1 : 0) + (doExportNamedViews ? 1 : 0) + 1;
+            var toMeasure = ViewportsNeedingMeasure(request);
+            var doMeasure = toMeasure.Count > 0;
+            var total = 1 + (doMeasure ? 1 : 0) + (doExportPdf ? 1 : 0) + (doExportModel ? 1 : 0) + (doExportNamedViews ? 1 : 0) + 1;
             var step = 0;
             var warnings = new List<string>();
             var files = new List<BundleFile>();
@@ -110,6 +121,35 @@ namespace RevitMCP.Core.IssueManager
             ct.ThrowIfCancellationRequested();
             progress.Report("讀取文件資訊", ++step, total);
             var doc = await runner.RunAsync(() => steps.GetDocInfo(), ct).ConfigureAwait(false);
+
+            if (doMeasure)
+            {
+                // 昂貴資料延後到這裡才讀：只量「勾選且同一張圖紙有兩個以上視口」的視口（只有它們需要面積來決定主要視口），
+                // 並分批——每批一次 ExternalEvent，批次之間回到 Revit 訊息迴圈、更新進度、可取消（不再開視窗就卡死）。
+                ++step;
+                var measured = 0;
+                for (var offset = 0; offset < toMeasure.Count; offset += MeasureChunkSize)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    progress.Report("讀取視口大小 " + measured + "/" + toMeasure.Count, step, total);
+                    var chunk = toMeasure.Skip(offset).Take(MeasureChunkSize).ToList();
+                    var ids = chunk.Select(v => v.ViewportElementId).ToList();
+                    var sizes = await runner.RunAsync(() => steps.MeasureViewports(ids), ct).ConfigureAwait(false);
+                    var byId = (sizes ?? new List<ViewportSize>()).Where(s => s != null).GroupBy(s => s.ViewportElementId).ToDictionary(g => g.Key, g => g.First());
+                    foreach (var viewport in chunk)
+                    {
+                        ViewportSize size;
+                        if (byId.TryGetValue(viewport.ViewportElementId, out size) && size.Ok)
+                        {
+                            viewport.Width = size.Width;
+                            viewport.Height = size.Height;
+                        }
+                        viewport.SizeMeasured = true; // 量不到＝面積 0，主要視口退回清單中的第一個；不重量
+                    }
+                    measured += chunk.Count;
+                }
+                progress.Report("讀取視口大小 " + measured + "/" + toMeasure.Count, step, total);
+            }
 
             if (doExportPdf)
             {
@@ -168,6 +208,26 @@ namespace RevitMCP.Core.IssueManager
             ct.ThrowIfCancellationRequested();
 
             return new ExportedBundle { Directory = bundleDirectory, ManifestPath = manifestPath, Manifest = manifest, Files = files };
+        }
+
+        /// <summary>
+        /// 需要量測外框的視口：要有 ViewportElementId、還沒量過，且所屬圖紙在請求中有兩個以上視口
+        /// （只有一個視口時它必然是主要視口，面積無關）。已去除重複的視口。
+        /// </summary>
+        internal static List<ViewportItem> ViewportsNeedingMeasure(ExportRequest request)
+        {
+            var result = new List<ViewportItem>();
+            var seen = new HashSet<long>();
+            foreach (var sheet in request.Sheets)
+            {
+                if (sheet.Viewports.Count < 2) continue;
+                foreach (var viewport in sheet.Viewports)
+                {
+                    if (viewport.ViewportElementId == 0 || viewport.SizeMeasured) continue;
+                    if (seen.Add(viewport.ViewportElementId)) result.Add(viewport);
+                }
+            }
+            return result;
         }
 
         private static void TryDeleteDirectory(string path)
