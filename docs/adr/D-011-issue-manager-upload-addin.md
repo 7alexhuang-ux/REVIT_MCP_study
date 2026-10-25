@@ -62,3 +62,23 @@ Issue Manager 要讓使用者在 Revit 內勾選圖紙／視圖／模型，一�
 
 - `IExportProgress.Pump` 移除；`IApiThreadRunner.RunAsync` 增加 `CancellationToken`；`BundleExporter` 新增 `ExportAsync`（同步 `Export` 保留給測試與無 Revit 情境）；`ExternalEventManager` 新增 `TryExecuteCommand`（回傳 `Raise()` 結果，`ExecuteCommand` 行為不變）。
 - `MCP.Tests` 429 → 479（+50）。
+
+---
+
+## 追記：對齊網站端（imv4a）版本包 API 的實際合約（2026-10-25，分支 v4b2）
+
+**背景**：網站端 4A 實作後與客戶端副本有 16 項差異（網站端 `docs/plans/evidence/imv4a/handoff.md` §4）。以下是需要取捨的決定；其餘（201、錯誤碼訊息、kind、limits 等）是單純對齊。
+
+**決策**
+
+15. **finalize 驗證失敗＝bundle 作廢，重試一律重建 bundle。** 網站端為了「暫存已清」與 Supabase 搬移不可還原，400／413 當下就把 bundle 標成 `failed`。客戶端不再對舊 bundle 重送 finalize（只會得到 409）；`UploadFlow.ResumeAsync` 在沒有可用 bundle 時用已匯出的本機檔重新 `POST /bundles` 並整批重傳。**內容被拒**（`invalid_manifest`、`page_count_mismatch`、`invalid_pdf`、413）不重試：同樣的檔案只會再被拒，直接放棄暫存比讓使用者白等一輪上傳好。取捨：`invalid_file`／`checksum_mismatch` 仍給重試（可能是分段在傳輸中壞掉）。
+16. **finalize 之後不能取消，如實告知。** 網站端 `DELETE` 已 finalize 回 409 `already_finalized`（不刪版本）。客戶端不在 finalize 開始後鎖住取消按鈕（取消仍可能在 finalize 還沒做完時生效），而是以 `DELETE` 的回應決定訊息：200 才說「已取消」，409 就說「已經上傳完成，無法取消；請到網站刪除」。
+17. **沒有狀態端點，用「重送 finalize」代替查詢。** 網站端沒有 `GET /bundles/:id`（`revit-addin-export.md` §5.2「實作回寫」）。finalize 冪等＋`finalize_in_progress` 409 足以表達狀態：等不到回應（逾時、502／504）就隔 5 秒重送，上限 10 分鐘（與網站端「認領逾 10 分鐘視為當掉」一致）。連線被拒／中斷（非逾時）不輪詢。
+18. **只勾視圖不能上傳。** 伺服器要求 PDF 與 GLB 至少一個；視圖只是附屬資料。在勾選視窗就停用並說明，不等匯出完才被拒。
+19. **schema 以網站端權威檔為準，客戶端不自行放寬或收緊。** `docs/schemas/web-authoritative/` 放原樣副本，兩邊測試比對差異清單只有 `$id`／`description`。`ManifestBuilder` 對顯示用文字截斷、對警告超量收尾、對無法截斷者提前失敗。
+20. **伺服器回傳的上傳網址是 `localhost` 而 Issue Manager 不在本機 → 中止**（`ADDIN_PUBLIC_URL` 沒設）；Bearer 仍只送給 Issue Manager 自己的主機。
+
+**後果**
+
+- `AddinApiClient` 新增 `finalizeHttp` 參數與 `DeleteBundleDetailedAsync`（`BundleDeleteOutcome`）；`UploadFlow` 新增 `FinalizePollInterval`／`FinalizeMaxWait`；`MCP.Tests` 479 → 547。
+- 未做：finalize 開始後鎖住取消按鈕（見 16）；網站端若日後加 `GET /bundles/:id`，輪詢可改成查詢。

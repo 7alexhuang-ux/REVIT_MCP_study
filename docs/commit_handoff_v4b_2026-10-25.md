@@ -199,3 +199,75 @@
 - **T10**：再做一次「`accessTtlSec:10` → 登入 → 等 15 秒 → 登出」，預期 `/__state.revokedTokens` 比登出前多 2。
 - **新增 T13**：上傳失敗出現「重試上傳」後直接按視窗右上角 X → 預期跳出「放棄這次上傳並清除？」，選「是」後 `bundles\` 下該資料夾消失、`/__state.deleted` 增加；選「否」視窗留著且可重試。
 - **新增 T14**：Revit 中開一個會卡住的對話框（例如未關閉的屬性對話框）後按上傳 → 約 2 分鐘後出現「Revit 目前沒有回應…」，關掉對話框後可立刻再上傳，不需重開 Revit。
+
+
+---
+
+## 9. 對齊網站端合約（2026-10-25，分支 `v4b2`，從 `v4b`（`4720a2e`）開出）
+
+> 建置者：Claude Sonnet 5.5（Claude Code）。起因：網站端 4A（Issue Manager `imv4a`，HEAD 以其交班單為準）完成後，其交班單 §4 列了 16 項與客戶端副本的差異，另有審查者的補充清單。**仍只做離線驗證**：未啟動或操作 Revit、未安裝外掛（`%APPDATA%\Autodesk\Revit\Addins` 沒動，另一個 session 正在用 `v4b` 工作樹的安裝版做實機驗證，本批全在新工作樹 `C:\temp\revit_v4b2\wt`）、未連真實 Issue Manager、未 push。網站端 repo 全程唯讀。
+
+### 9.1 Commit
+
+| Commit | 內容 |
+|---|---|
+| `a31fd2b` | 修正：對齊網站端版本包 API 的實際合約（`UploadFlow`／`AddinApiClient`／`AddinHttp`／`ManifestBuilder`／勾選檢視模型、schema、假伺服器、測試；21 個檔） |
+| `37415a8` | 新增：磁碟模式分段帶 `X-Part-Sha256`（網站端可選標頭）＋測試 |
+| （本檔所在 commit） | 文件：功能說明 §3／§4／§6／§7／§8、ADR D-011 追記（決策 15～20）、CHANGELOG、log、本段 |
+
+### 9.2 逐項處理（任務書編號 → 網站端交班單 §4 編號）
+
+| # | 項目 | 修法 | 主要測試（`ServerContractAlignmentTests` 除非另註） |
+|---|---|---|---|
+| 1（§4#1） | 建立回 201（舊假伺服器 200） | `IsSuccessStatusCode` 本來就接受；補測試證明 201／200 都可，並新增讀取 `limits` | `CreateBundleAccepts201AndTheOlder200`、`CreateBundleReadsLimitsAndOnlyTheThreeFileKinds` |
+| 2（§4#2） | 階段錯誤碼 `invalid_input`（附 `field`） | `ToExceptionAsync` 讀 `field`；`RejectedMessage(code, field)`，`invalid_input`＋`stage` →「請選擇設計階段」 | `InvalidInputWithStageFieldIsShownAsTheStageMessage`、`EveryServerErrorCodeHasAPlainChineseMessage…`（22 組） |
+| 3（§4#3） | `DELETE` 已 finalize 回 409 | `DeleteBundleDetailedAsync` 回 `BundleDeleteOutcome`；取消流程遇 `AlreadyFinalized`／`FinalizeInProgress` 丟白話 `AddinApiException`：「已經上傳完成，無法取消；請到 Issue Manager 網站刪除該版本。」（視窗 `ShowError` 顯示，不假裝取消成功；本機暫存仍清） | `CancelWhileFinalizingAfterTheServerFinished…`、`CancelWhileTheServerIsStillFinalizingSaysSo`、視窗 `CancelAfterTheServerAlreadyCreatedTheVersion…`、Node 整合 `DeleteAfterFinalizeIsRefused…`、`CancelWhileTheRealServerIsFinalizing…` |
+| 4（§4#4） | `files[].kind` 只有 pdf／glb／namedViews | `ManifestBuilder` 不再輸出 `viewPositions`（即使傳入該種檔案）；ticket 查不到的 kind 仍明確失敗；假伺服器只核發三種 | `ManifestNeverContainsViewPositions…`、Node `bundles：建立回 201…`、整合 `TheRealServerAnswers201AndOnlyThreeFileKinds` |
+| 5（§4#7） | finalize 驗證失敗即作廢 | 見 9.3 | `ResumeAfterAValidationFailureRecreates…`、`RecreatedBundleReportsTheRealTotalBytes…`、`ContentRejectedByTheServer…`（3 碼）、`FinalizeFailedBundleExpiredAndGone…`、`ABundleThatExpiredOnTheServer…`、視窗 `RetryAfterTheServerVoidedTheBundle…`／`ContentRejectedByTheServerOffersNoRetry…`、整合 `ServerSideFinalizeFailureVoids…` |
+| 6（§4#8） | 只勾視圖 → 400 `invalid_manifest` | `HasAnySelection` 改為「圖紙 ≥ 1 或勾模型」；`BlockReason`＝「請至少勾選一張圖紙或 3D 模型（只勾視圖不能上傳）」；另加圖紙 ≤ 1,000、視圖 ≤ 5,000 的停用原因 | `ViewsAloneCannotBeUploaded…`、`MoreThanTheServerSheetLimitBlocks…`、整合 `AViewsOnlyPackageIsRejectedAsInvalidManifest…`；既有 `X06_UploadNeedsLogin…` 更新 |
+| 7（§4#12） | schema 更嚴格 | `docs/schemas/bundle-manifest.schema.json` 改成與網站端權威檔逐欄一致（只有 `$id`／`description` 不同）；`docs/schemas/web-authoritative/` 放原樣副本；`ManifestBuilder` 依上限處理（截斷／警告收尾／提前失敗，見功能說明 §8）；`MiniJsonSchema` 補 `maxLength`／`maximum` | Node `bundle-manifest.schema.test.mjs`（42：差異清單＋`diffPaths` 自測＋與本機網站端工作樹比對＋24 個上限變異）、C# `ClientSchemaDiffersFromTheWebsiteAuthoritativeCopy…`、`ManifestWarningsAreCapped…`、`LongNamesAreClipped…`、`ThingsThatCannotBeClipped…` |
+| 8（§4 補充） | finalize 逾時 | `AddinApiClient(…, finalizeHttp)`：`IssueManagerSession` 的 finalize 專用 `HttpClient` 逾時 330 秒（`AddinApiClient.FinalizeTimeout`），其餘維持 60 秒；網站端**沒有**狀態端點（`revit-addin-export.md` §5.2 實作回寫），所以逾時、502／504、409 `finalize_in_progress` 後每 5 秒重送 finalize（冪等），上限 10 分鐘；視窗顯示「伺服器處理中：…（已等待 N 秒）」；超過上限停止等待並指引到網站確認，bundle 保留可「重試上傳」。連線被拒／中斷不輪詢 | `FinalizeUsesTheDedicatedLongTimeoutClient`、`FinalizeInProgressIsPolled…`、`ATimedOutFinalizeIsRetried…`、`GatewayTimeoutsAreTreatedLikeATimeout`、`AConnectionFailureDuringFinalize…`、`PollingStopsAfterTheMaximumWait…`、`CancelWhilePollingIsAllowed`、視窗 `WhileTheServerIsProcessingTheWindowSaysSo`、整合 `FinalizeThatOutlastsTheHttpTimeout…`（真的 500 ms 逾時） |
+| 9（§4#2 延伸） | `RejectedMessage` 補白話 | 補 `bundle_failed`、`bundle_expired`（含無 code 的 410）、`finalize_in_progress`、`already_finalized`、`bundle_closed`、`page_count_mismatch`、`invalid_pdf`、`invalid_part`、`too_many_open_bundles`、`server_misconfigured`（500）、`finalize_failed`、`upload_failed`、`bundle_create_failed`、`uploads_paused`（503）、`invalid_manifest`、`client_too_old`／426；伺服器錯誤（≥500）也依 code 取訊息 | 同 #2 |
+| 10（§4#5、#11） | 分段大小 | 一律以回應 `partBytes` 為準；`MaxPartBytes` 128 MB 只當合理性上限（註解明寫）；`limits` 超限在上傳前中止；另加 `X-Part-Sha256`（§4#10 建議）只對 Issue Manager 自己的主機 | `PartSizeComesFromTheServerResponse`（8 MiB 切成 8＋2 MiB；129 MiB 被擋）、`FilesOverTheServerLimits…`、`MoreSheetsThanTheServerPageLimit…`、`PartHashHeaderIsSentOnlyTo…` |
+| 11 | 上傳網址主機 | 權杖只在 host:port 等於 BaseUrl 時才帶（兩邊都是 loopback 時 host 名稱不同但埠相同也視為同主機）；**目標是 loopback 而 BaseUrl 不是 → 一個位元組都不送，丟「伺服器回傳的上傳網址不是 Issue Manager 的主機，已中止；請通知管理員設定 ADDIN_PUBLIC_URL。」**（`AddinErrorKind.Other`，不被上傳器重試） | `ALocalhostUploadUrlFromARemoteServerIsRefused…`（`localhost`、`127.0.0.1` 兩種）、`BearerIsStillOnlySentToTheIssueManagerHost` |
+
+網站端交班單 §4 的其餘項目：#6 `limits`（已讀取使用）、#9 版本連結（直接開啟，無需改）、#13 manifest 語意（`ManifestBuilder` 本來就產生頁序 1…N、圖號不重複、有圖紙有 PDF）、#14 426 本文（`upgrade_required`／`client_too_old` 都走 426 訊息）、#15 `warnings` 字串陣列（已顯示在結果區）、#16 非 3D 視口（無需改）。
+
+### 9.3 #5 的設計（`UploadFlow`）
+
+| 情況 | 伺服器 | 客戶端 |
+|---|---|---|
+| finalize 400（非 `invalid_request`）、413、404、410、409 `bundle_failed`／`bundle_closed`、500 `finalize_failed` | bundle 已作廢／過期／不存在 | `_pendingBundle=null`；保留匯出檔與請求；視窗出現「重試上傳」→ `RecreateBundleAsync`（確認檔案未被改動 → 刪 `upload_state.json` → `POST /bundles`，summary 帶實際 bytes）→ 整批重傳 → finalize。不 `DELETE` 舊 bundle |
+| 其中內容被拒：`invalid_manifest`、`page_count_mismatch`、`invalid_pdf`、413 | 同上 | 另外放棄本機暫存、不提供重試 |
+| 逾時、502／504、409 `finalize_in_progress` | 可能還在做 | 輪詢（見 #8），不重建 |
+| 401 | bundle 仍 open | 保留；重新登入後重試同一個 bundle |
+| 連線被拒／中斷 | 不明 | 保留同一個 bundle；重試時續傳＋finalize（冪等） |
+| 重試時 `ExpiresAt` 已過 | 已過期 | 自動重建（以前是丟「請重新按上傳」並丟掉本機檔） |
+
+### 9.4 測試與建置數字
+
+| 項目 | 基線（`4720a2e`） | 現在 |
+|---|---|---|
+| `dotnet build -c Release.R24 MCP/RevitMCP.csproj` | 0 錯誤、1184 警告 | 0 錯誤、**1184 警告**（不超過） |
+| `dotnet test MCP.Tests` | 477 通過＋2 略過（總計 479） | **545 通過＋2 略過**（總計 547；+68）；略過的 2 項與基線相同（`GlbMergeRunnerTests.FindScript_*`，這台機器已部署合併腳本，測試內 `Assert.Ignore`） |
+| MCP-Server `npm test` | 38 ＋ Node 34 | 38 ＋ Node **68** |
+
+新增分布：`ServerContractAlignmentTests` 約 60（含參數化）、視窗流程測試 +4、整合測試（真的 Node 假伺服器）+6、Node `fake-issue-manager.test.mjs` +7、`bundle-manifest.schema.test.mjs` +27。變異檢查：把 `IsBundleUnusable` 對 400 改成 `false` → 6 項測試失敗（還原後全過）。連跑多次穩定。
+
+### 9.5 需實機觀察／仍未驗證
+
+| # | 項目 | 為什麼 |
+|---|---|---|
+| P1 | 真實 Issue Manager 的 finalize 實際耗時與 330 秒逾時是否足夠（伺服器上限約 300 秒，磁碟模式更久；網站端交班單 §6 #3 說大檔耗時未實測） | 沒連過真實伺服器 |
+| P2 | 「伺服器處理中」文字在 Revit 內的實際顯示與重繪 | 取決於 WPF 在 Revit 內的訊息處理（只用假 Dispatcher 測過） |
+| P3 | 輪詢期間按「取消上傳」：Revit 內實際行為（程式碼路徑已測：取消 → `DELETE` → 409 → 白話訊息） | UI 行為 |
+| P4 | PDF 頁序（R1）仍未知；網站端也在待實機（X08～X10） | 同交班單 §5 |
+| P5 | `X-Part-Sha256` 對真實網站端（Next dev／磁碟模式）的行為只依規格寫（不符 400 且不保存）；Supabase 簽名網址路徑沒帶標頭 | 沒連過真實伺服器 |
+| P6 | 網站端的 `proxy.ts` 10 MB 緩衝（網站端交班單 §6 #1）：分段 8 MiB 以內沒事；如果管理員把 `ADDIN_BUNDLE_PART_BYTES` 調大，客戶端會照回應切，但伺服器端可能收到截斷的分段（`X-Part-Sha256` 會讓它在該段就被發現） | 網站端設定問題，非本分支 |
+
+### 9.6 未做／取捨
+
+- **finalize 開始後鎖住取消按鈕**：沒有做（見 ADR D-011 決策 16）；取消仍送出 `DELETE`，由回應決定訊息。
+- 網站端將新增 `too_many_open_bundles`（429）的修正任務：訊息已先備好；`POST /bundles` 回 429 時客戶端不重試（`Rejected`）。
+- `server.mjs` 的 `urlsPerFile` 預設從固定 64 改為「依大小上限 ÷ partBytes、最多 256」（真實伺服器給足，假伺服器為輕量設上限）；`--part-bytes 64` 時 PDF 會得到 256 個網址（夠測試用）。
+- 與網站端 `docs/spec/schemas` 的原樣副本是**手動複製**的（`docs/schemas/web-authoritative/`）；網站端 schema 再改時要重新複製（Node 測試在本機找得到網站端工作樹時會偵測過期，找不到就略過）。

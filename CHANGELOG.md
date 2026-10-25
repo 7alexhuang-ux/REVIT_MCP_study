@@ -8,6 +8,18 @@
 
 ## [Unreleased]
 
+### 🔧 修正 — 上傳到 Issue Manager 外掛端：對齊網站端（imv4a）版本包 API 的實際合約（2026-10-25，分支 v4b2，commit `a31fd2b`、`37415a8`）
+
+- 起因：網站端 4A（Issue Manager `imv4a`）實作後，交班單列出 16 項與客戶端副本的差異；本批逐項處理，細節與測試對照見 [交班單 §9](docs/commit_handoff_v4b_2026-10-25.md)。
+- **finalize 驗證失敗即作廢**：400／413／409 `bundle_failed`／410／500 `finalize_failed`／404 時，重試改為「重新建立 bundle、整批重傳、再 finalize」（不重新匯出，先確認本機檔未被改動）；版本包過期同樣自動重建；`invalid_manifest`／`page_count_mismatch`／`invalid_pdf`／413（內容本身被拒）不提供重試並清掉本機暫存。
+- **finalize 逾時與處理中**：finalize 專用 `HttpClient` 逾時 330 秒（其餘 60 秒）；逾時、502／504、409 `finalize_in_progress` 時顯示「伺服器處理中」，每 5 秒重送 finalize（冪等），上限 10 分鐘（網站端沒有 `GET /bundles/:id`）。
+- **取消**：`DELETE` 回 409 `already_finalized`／`finalize_in_progress` 時如實顯示「已經上傳完成，無法取消；請到 Issue Manager 網站刪除該版本」，不假裝取消成功。
+- **勾選條件**：只勾視圖（沒有圖紙也沒有模型）不能上傳（伺服器回 400 `invalid_manifest`）；圖紙 > 1,000 或視圖 > 5,000 時停用並說明。
+- **manifest schema 與網站端權威檔逐欄一致**（`warnings` ≤ 200 等）；`ManifestBuilder` 截斷顯示用文字、警告超量收成一項、不能截斷的在匯出前失敗；不再輸出 `viewPositions`；新增 `docs/schemas/web-authoritative/` 原樣副本與兩邊（Node ajv、C#）差異清單測試。
+- **API 細節**：建立成功 201／200 都接受並讀取 `limits`（超過上限上傳前中止）；`invalid_input`（`field:"stage"`）等 14 個錯誤碼補白話訊息；分段大小以回應 `partBytes` 為準；磁碟模式分段帶 `X-Part-Sha256`；伺服器回 `http://localhost` 上傳網址而 Issue Manager 不在本機時中止並提示設定 `ADDIN_PUBLIC_URL`。
+- 假伺服器（Node）與 C# 假 API 改成網站端行為（201、`invalid_input`、三種 kind、作廢狀態機、409／410／429、finalize 延遲與失敗注入）。
+- 測試：`dotnet test MCP.Tests` 479 → 547（545 通過、2 略過與基線相同）；MCP-Server `npm test` 38＋Node 68 通過；R24 建置 0 錯誤、警告 1184 同基線。**僅離線驗證（含對 Node 假伺服器的真實 HTTP 逾時／取消／作廢測試）；未連 Revit、未安裝外掛、未連真實 Issue Manager、未 push。**
+
 ### 🔧 修正 — 上傳到 Issue Manager 外掛端：獨立安全審查後修正（2026-10-25，分支 v4b，commit `fba7a60`）
 
 - **登出／切換帳號真的撤銷伺服器端授權**：access 已過期或被 401 時改用 `refresh_token` 走撤銷端點（舊版拿過期 access 當 Bearer、伺服器端一族權杖沒被撤銷，審查探針 `revokedTokens` 0 → 2）；`LogoutAsync` 回傳 `LogoutOutcome`，失敗時視窗如實顯示「伺服器端撤銷未完成」並指引到網站帳號頁手動撤銷。

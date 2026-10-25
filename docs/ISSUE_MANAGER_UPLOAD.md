@@ -1,7 +1,7 @@
 # 上傳到 Issue Manager（Revit 外掛端，任務書 V4 的 4B）
 
 > 文件性質：人類與 AI 共用的功能說明與合約摘要（繁中）。日期：2026-10-25，分支 `v4b`。
-> 網站端（任務書 4A：版本包 API、授權頁、`bundle-manifest.schema.json` 正式版）**尚未實作**；本檔描述外掛端依 Issue Manager repo 的規格（`docs/spec/revit-addin-export.md`、`docs/spec/addin-auth.md`、`docs/spec/sheet-sets.md`）寫成的客戶端。**全部只做到建置與離線測試，沒有在 Revit 內實跑**；實機項目見 [commit_handoff_v4b_2026-10-25.md](commit_handoff_v4b_2026-10-25.md) 的清單。
+> 網站端（任務書 4A：版本包 API、`bundle-manifest.schema.json` 正式版）已在 Issue Manager 的 `imv4a` 分支實作；本檔描述外掛端依 Issue Manager repo 的規格（`docs/spec/revit-addin-export.md` §5／§5.2、`docs/spec/addin-auth.md`、`docs/spec/sheet-sets.md`）寫成的客戶端，**2026-10-25 已依網站端實際合約對齊**（見交班單 §9 與本檔 §8）。**全部只做到建置與離線測試（含對假伺服器的真實 HTTP 測試），沒有在 Revit 內實跑，也沒有連過真實的 Issue Manager**；實機項目見 [commit_handoff_v4b_2026-10-25.md](commit_handoff_v4b_2026-10-25.md) 的清單。
 > 決策與取捨見 [ADR D-011](adr/D-011-issue-manager-upload-addin.md)。
 
 ## 1. 它做什麼
@@ -40,7 +40,7 @@
 | 模型 | 「匯出 3D 模型（GLB）」預設勾；「含設計選項」預設勾 |
 | 摘要 | 「將上傳 N 張圖紙、M 個視圖、K 個模型」；沒圖紙或沒模型時提示「這個版本將缺圖／缺模型」（允許送出） |
 
-「上傳」啟用條件：已登入、專案、階段（非預設列）、說明、至少勾一項（圖紙、視圖或模型）。滑鼠移到停用的按鈕上會顯示原因。
+「上傳」啟用條件：已登入、專案、階段（非預設列）、說明、**至少勾一張圖紙或一個模型**（只勾視圖會被伺服器拒絕：finalize 回 400 `invalid_manifest`，視圖只是圖紙／模型的附屬資料，所以按鈕停用並說明原因）、圖紙 ≤ 1,000 張、視圖 ≤ 5,000 個（網站端 schema 上限）。滑鼠移到停用的按鈕上會顯示原因。
 
 不列入的視圖：樣板、圖例、明細表、製圖視圖、漫遊、渲染（它們不對應模型位置）。
 
@@ -51,8 +51,8 @@
 3. 匯出 GLB（`export_design_options`；有選項分件時以 `merge-option-glbs.mjs` 合併成 `model.glb`）。
 4. 匯出 `named_views.json`（`export_named_views`，原點與 GLB 相同）。
 5. 產生 `manifest.json`（檔案 sha256、圖紙號取自 Revit）。
-6. 背景分段 PUT 到簽名網址（可重試、不重傳已完成的檔案）。
-7. `POST …/finalize`（冪等）→ 顯示版本連結。
+6. 背景分段 PUT 到簽名網址（可重試、不重傳已完成的檔案）。分段大小**以建立回應的 `partBytes` 為準**（網站端磁碟模式目前 ≤ 8 MiB、Supabase 模式 45 MB，客戶端不寫死；只擋明顯不合理的值，> 128 MB）。磁碟模式（上傳網址在 Issue Manager 自己的主機）每段另帶 `X-Part-Sha256`，網站端不符就在該段回 400 `checksum_mismatch`；簽名網址不加額外標頭。上傳前先用回應的 `limits`（PDF／GLB／命名視圖檔大小、PDF 頁數）檢查，超過就不傳（並 `DELETE` 該版本包）。
+7. `POST …/finalize`（冪等）→ 顯示版本連結。見下面「finalize 的處理」。
 
 步驟 2～5 的**每個 Revit 步驟各自是一次 ExternalEvent**（文件資訊、PDF、GLB、命名視圖各一次，經 `QueuedApiThreadRunner` 排進與 MCP 指令共用的佇列）；步驟之間回到 UI 執行緒更新進度、檢查取消旗標，不再在 API 呼叫中途跑巢狀訊息迴圈。檔案雜湊、manifest 等不需要 Revit API 的工作在背景執行緒，不佔用 Revit。**GLB 匯出是單一長呼叫，無法中途取消**（CPC 案實測 631～1,175 秒）。步驟 6、7 在背景執行緒。
 
@@ -61,11 +61,15 @@
 - **開始執行前的等待逾時 120 秒**（外部事件一直沒被處理，例如 Revit 停在對話框）→「Revit 目前沒有回應，請關掉 Revit 裡的對話框後重試」。逾時只算「開始前」，開始後的長呼叫不受限。
 - 任何結束路徑（成功、取消、逾時、例外）都在 `finally` 釋放「同一時間只允許一個上傳」的旗標，不需要重開 Revit。
 
-- 取消：呼叫 `DELETE /bundles/:id`、刪本機暫存、不再上傳。
+- 取消：呼叫 `DELETE /bundles/:id`、刪本機暫存、不再上傳。**finalize 之後不能取消**：伺服器對已 finalize 的 bundle 回 409 `already_finalized`（版本已建立，什麼都不刪）、finalize 進行中回 409 `finalize_in_progress`。客戶端據此顯示「已經上傳完成，無法取消；請到 Issue Manager 網站刪除該版本。」（或「伺服器正在建立版本，已無法取消…」），不假裝取消成功。
 - 失敗：顯示白話原因；伺服器端 bundle 保持 open 至過期自動清；若匯出已完成，視窗出現「重試上傳」（從未完成的檔案／分段繼續）。
+- **finalize 的處理（2026-10-25 對齊網站端）**：
+  - **驗證失敗即作廢**：伺服器對 400／413 立即把 bundle 標成 `failed` 並清暫存，之後再送 finalize 一律 409 `bundle_failed`；500 `finalize_failed`、410 過期、404 同樣表示這個 bundle 不能用了。客戶端**不再對舊 bundle 重送 finalize**：按「重試上傳」時重新 `POST /bundles`（用已匯出的本機檔案，先確認檔案沒被改動，清掉舊的上傳進度）、整批重傳、再 finalize，**不重新匯出**。版本包過期（到期時間已過）也是同樣處理。
+  - **內容本身被拒**（`invalid_manifest`、`page_count_mismatch`、`invalid_pdf`、413）：同樣的檔案重傳只會再被拒，所以直接放棄本機暫存、不提供重試，請使用者調整勾選後重新上傳。
+  - **逾時與處理中**：finalize 專用 `HttpClient` 逾時 **330 秒**（伺服器最長約 300 秒，磁碟模式更久；其餘 JSON 呼叫維持 60 秒、上傳分段 15 分鐘）。等不到回應（逾時）、502／504、或 409 `finalize_in_progress` → 視窗顯示「伺服器處理中…」，每 5 秒重送 finalize（伺服器端冪等：做完了就回同一個 `setId`），**上限 10 分鐘**；超過就停止等待並請使用者稍後到網站確認，「重試上傳」仍可用。網站端沒有 `GET /bundles/:id` 狀態端點，所以用重送 finalize 代替查詢。連線被拒／中斷（不是逾時）不輪詢，直接報錯並保留 bundle 供重試。
 - 同一時間只允許一個進行中的上傳。
 - **關閉視窗（含右上角 X）**：進行中 → 送出取消，流程自己清伺服器與本機暫存；閒置但有可重試的 bundle → 詢問「放棄這次上傳並清除？」，同意就先刪本機 PDF／GLB 暫存、再盡力通知伺服器 `DELETE`（伺服器連不上也不會留下本機檔），選「否」回到視窗可繼續重試。
-- **舊暫存清理**：外掛啟動時背景刪除 `%LOCALAPPDATA%\RevitMCP\issue-managerundles\` 下超過 3 天（常數 `BundleTempCleaner.DefaultMaxAgeDays`）沒有任何檔案更新的資料夾；清不掉的（被占用）下次再清，不影響啟動。
+- **舊暫存清理**：外掛啟動時背景刪除 `%LOCALAPPDATA%\RevitMCP\issue-manager\bundles\` 下超過 3 天（常數 `BundleTempCleaner.DefaultMaxAgeDays`）沒有任何檔案更新的資料夾；清不掉的（被占用）下次再清，不影響啟動。
 - **PDF 頁數檢查**：以串流掃描（每次 1 MB）估計 PDF 頁數；頁數與勾選圖紙數不符 → **中止**（避免網站上圖紙與頁面對錯）。例外：頁數少於圖紙數、且 PDF 含物件串流（`/ObjStm`，頁面物件可能被壓縮而漏數）時估計不可靠，只警告。
 - **續傳前驗證**：重試（狀態檔已存在）時重新計算磁碟上每個要送的檔案的 sha256；檔案被改動或損毀 → 拒絕續傳並請使用者放棄後重新匯出（第一次上傳不重算，避免大 GLB 多花時間）。
 - 「含設計選項」未勾：只匯出主模型與各選項集合的**主要選項**（`isPrimary`），不含其他選項（這是本案的解讀，見 ADR D-011）。
@@ -80,7 +84,7 @@
 - refresh 輪替：新 refresh 立刻落檔；refresh 以單一鎖序列化（並行使用同一份 refresh 會被伺服器判成外洩而撤銷整族）；`invalid_grant` → 清本機並要求重新登入；暫時性錯誤（5xx、斷網）不清登入。
 - 登出（審查後修正）：先撤銷伺服器端這一族授權，再刪本機檔（不論撤銷成不成功，本機一定刪）。access 尚未過期用 `Authorization: Bearer`；**access 已過期、被伺服器回 401、或重開 Revit 後只剩 DPAPI 檔裡的 refresh** 時，改用 `{"refresh_token": …}` 走同一個 `POST /api/addin/token/revoke`（`addin-auth.md` §4.4）。撤銷沒成功時 `LogoutAsync` 回傳 `ServerRevokeFailed`，視窗顯示「伺服器端撤銷未完成」並指引到網站「帳號 › 已授權的外掛」手動撤銷。「切換帳號」走同一條路（舊帳號撤銷失敗時，重新登入完成後仍顯示警告）。
 - 權杖、授權碼、verifier、state 不寫日誌、不進例外訊息（單元測試以全部祕密字串搜尋日誌與訊息驗證）。
-- Bearer 只送給 Issue Manager 自己的主機；簽名上傳網址若在別的主機，不附 Authorization。上傳網址必須是 https（本機例外）。HttpClient 不自動跟隨轉址。
+- Bearer 只送給 Issue Manager 自己的主機；簽名上傳網址若在別的主機，不附 Authorization。上傳網址必須是 https（本機例外）。HttpClient 不自動跟隨轉址。**伺服器若回傳 `http://localhost:<埠>` 之類的本機上傳網址、而 Issue Manager 本身不在本機**（磁碟模式沒設 `ADDIN_PUBLIC_URL` 時伺服器用請求的 origin 組網址，反向代理後可能組出本機位址），客戶端中止並顯示「伺服器回傳的上傳網址不是 Issue Manager 的主機，已中止；請通知管理員設定 ADDIN_PUBLIC_URL。」，一個位元組都不會送到本機。
 
 ## 6. 檔案與程式位置
 
@@ -96,10 +100,11 @@
 | `…/UploadWindow.cs` | WPF 勾選視窗（程式碼建構，不引用 Revit API） | 否 |
 | `…/RevitSelectionCollector.cs`、`RevitBundleExportSteps.cs`、`IssueManagerSession.cs` | 讀 Revit 清單、經分派器匯出、工作階段 | **是** |
 | `MCP/Commands/UploadToIssueManagerCommand.cs`、`MCP/Application.cs` | 功能區按鈕與指令 | 是 |
-| `docs/schemas/bundle-manifest.schema.json`、`docs/schemas/fixtures/bundle-manifest.sample.json` | manifest schema（客戶端副本）與共用 fixture | — |
-| `tools/fake-issue-manager/server.mjs` | 假 Issue Manager（Node，無相依） | — |
-| `MCP.Tests/IssueManager/` | 165 個 NUnit 測試（審查前 115） | — |
-| `tools/*.test.mjs`（`bundle-manifest.schema.test.mjs`、`fake-issue-manager.test.mjs`） | ajv 驗 schema／fixture；假伺服器合約 | — |
+| `docs/schemas/bundle-manifest.schema.json`、`docs/schemas/fixtures/bundle-manifest.sample.json` | manifest schema（與網站端權威檔逐欄一致，只有 `$id`／`description` 不同）與共用 fixture | — |
+| `docs/schemas/web-authoritative/bundle-manifest.schema.json` | 網站端權威 schema 的原樣副本（比對用；更新時與上一列一起換） | — |
+| `tools/fake-issue-manager/server.mjs` | 假 Issue Manager（Node，無相依；行為對齊網站端 §5.2） | — |
+| `MCP.Tests/IssueManager/` | 約 230 個 NUnit 測試（IssueManager 命名空間 231 通過、2 略過）（含 `ServerContractAlignmentTests`：對齊網站端合約） | — |
+| `tools/*.test.mjs`（`bundle-manifest.schema.test.mjs`、`fake-issue-manager.test.mjs`） | ajv 驗 schema／fixture 與網站端上限、schema 差異清單；假伺服器合約 | — |
 
 ## 7. 假伺服器與試跑
 
@@ -108,15 +113,16 @@ node tools/fake-issue-manager/server.mjs --auto-approve --part-bytes 65536   # �
 $env:ISSUE_MANAGER_URL = "http://127.0.0.1:<印出的埠>"                          # 再啟動 Revit
 ```
 
-不加 `--auto-approve` 時授權頁會顯示「授權／取消」按鈕（手動走一遍瀏覽器流程）。`GET /__state` 看 bundle、刪除紀錄、PUT 次數；`POST /__config {"failNextPuts":2}` 讓接下來的 PUT 回 503。資料只存在記憶體。
+不加 `--auto-approve` 時授權頁會顯示「授權／取消」按鈕（手動走一遍瀏覽器流程）。`GET /__state` 看 bundle（含狀態 open／finalizing／finalized／failed／deleted／expired）、刪除紀錄、PUT 與 finalize 次數；`POST /__config` 可調：`{"failNextPuts":2}`（接下來的 PUT 回 503）、`{"finalizeDelayMs":20000}`（finalize 慢慢做，用來看「伺服器處理中」）、`{"failNextFinalize":1}`（下一次 finalize 回 500 並作廢 bundle）、`{"expireOpenBundles":true}`（讓開著的 bundle 過期，之後 410）、`{"maxOpenBundles":1}`（回 429）、`{"uploadOrigin":"http://localhost:9"}`（上傳網址改成本機位址，看「不是 Issue Manager 的主機」訊息）。資料只存在記憶體。
 
-## 8. 與網站端 schema 的對齊（必做）
+## 8. 與網站端合約的對齊（2026-10-25 已做）
 
-`docs/schemas/bundle-manifest.schema.json` 是**客戶端依規格 §5.1 寫的副本**。網站端 4A 建立正式的 `docs/spec/schemas/bundle-manifest.schema.json` 後：
+網站端 `imv4a` 的實際行為與原先依規格寫的客戶端有 16 項差異（網站端 `docs/plans/evidence/imv4a/handoff.md` §4），本分支已逐項處理，細節與測試對照在交班單 §9。重點：
 
-1. 逐欄比對（尤其 `viewKind`／`kind` 列舉：本案用 `3d`、`plan`、`ceiling`、`section`、`elevation`、`detail`；`files.*.bytes` 最小 1；`additionalProperties:false`）。
-2. 兩邊測試改載入**同一份** fixture（`docs/schemas/fixtures/bundle-manifest.sample.json`），C# 的 golden 比對與 ajv 測試都已經是這樣用。
-3. 規格裡尚有兩個合約缺口，見交班單「風險」：建立 bundle 時尚不知各檔大小（簽名網址數量如何決定）、合併 PDF 的頁序保證。
+1. **manifest schema**：`docs/schemas/bundle-manifest.schema.json` 改成與網站端權威檔**逐欄一致**（只有 `$id`／`description` 不同）：`warnings` ≤ 200 項（每項 ≤ 500 字）、`sheets` ≤ 1,000、單張圖紙視口 ≤ 200、`views` ≤ 5,000、各名稱字數上限、檔名須以 .pdf／.glb／.json 結尾且不含路徑、`bytes` 上限（PDF 300 MiB、GLB 500 MiB、JSON 4 MiB）與下限（GLB 20、JSON 2）、`originOffsetMeters` 絕對值 ≤ 1e9。`ManifestBuilder` 依這些上限處理：**顯示用文字截斷**（圖名、視圖名、警告；警告超過 200 項時收成一項「另有 N 則警告已省略」，不讓整個版本被拒），**不能截斷的**（圖紙號／識別碼過長、圖紙或視圖數超過上限、原點過大）在匯出前就以白話訊息失敗或讓「上傳」鈕停用，不等匯出完才發現。
+2. **差異清單測試**：`docs/schemas/web-authoritative/` 放權威檔的原樣副本；`tools/bundle-manifest.schema.test.mjs` 與 C# `ClientSchemaDiffersFromTheWebsiteAuthoritativeCopy…` 比對兩份 schema，差異清單必須只有 `$id`、`description`；Node 測試另在本機找得到網站端工作樹時（或設 `IM_WEB_SCHEMA`）比對原樣副本與網站端現況（找不到就略過，不算通過）。**網站端 schema 更新時**：把新檔複製成 `web-authoritative/` 副本，再用 `$id`／`description` 以外的內容覆寫客戶端 schema，跑兩邊測試。
+3. **API 行為**：建立成功 201（也接受 200）；階段錯誤碼 `invalid_input`（`field:"stage"`）；`files[].kind` 只有 `pdf`／`glb`／`namedViews`，`ManifestBuilder` 不輸出 `viewPositions`；回應多的 `limits` 已讀取使用；錯誤碼的白話訊息涵蓋 `bundle_failed`、`bundle_expired`（410）、`finalize_in_progress`、`already_finalized`、`bundle_closed`、`page_count_mismatch`、`invalid_pdf`、`too_many_open_bundles`（429）、`server_misconfigured`、`finalize_failed`、`invalid_manifest`、`client_too_old`／426、`uploads_paused`。
+4. 原先列為「合約缺口」的兩項：簽名網址數量（R5）網站端已解（依「大小上限 ÷ 分段大小」給足）；合併 PDF 的頁序保證仍待實機（交班單 R1／T5）。
 
 ## 9. 已知限制
 
