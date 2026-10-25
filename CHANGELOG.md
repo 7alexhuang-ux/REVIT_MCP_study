@@ -8,6 +8,15 @@
 
 ## [Unreleased]
 
+### 🔧 修正 — 上傳到 Issue Manager 外掛端：獨立審查（opus）後的三項必修與建議項（2026-10-25，分支 v4b3，從 v4b2 開出）
+
+- 起因：v4b2 的獨立審查指出三個 🟡 與數個建議；細節、測試對照與變異驗證見[交班單 §11](docs/commit_handoff_v4b_2026-10-25.md)。
+- **未完成上傳不再占名額**（網站端每人最多 5 個未完成 bundle、24 小時才過期）：匯出失敗、500 `finalize_failed` 後重建、簽名網址失效重建、新上傳取代待重試的舊 bundle 時，對舊 bundle 盡力 `DELETE` 一次（失敗不阻擋、不顯示，日誌一行不含編號）；`DELETE` 回 409 已 finalize 時不重建、改取回同一個 setId；429 `too_many_open_bundles` 訊息說明 24 小時自動清除。網站端沒有列出自己未完成 bundle 的端點，所以沒做「清除我的未完成上傳」。
+- **上傳分段被拒也能重建**：分段 PUT 回 410／409 `bundle_failed`／`bundle_closed`／404，或簽名網址主機回 4xx（Supabase 簽名 2 小時失效），同一次上傳內自動重建一次並整批重傳；分段本身的 400（雜湊不符）仍續傳同一個 bundle；過期以伺服器回應為準，移除本機時鐘判斷。
+- **`bundle_closed` 先確認再作廢**：收到 409 `bundle_closed` 時先對同一個 bundle 再送一次 finalize（冪等回同一個 setId），成功就完成、不會多出第二個工作版本；仍失敗才重建。
+- 建議項：未知伺服器錯誤代碼顯示前過濾並截斷（≤ 120 字元）；`ADDIN_PUBLIC_URL` 指到不同主機／埠時給明確訊息（不再被當成 426「請更新外掛」）；上傳網址主機比對改為嚴格（`localhost`／`127.0.0.1`／`[::1]` 互為不同主機）；每次按上傳清掉先前量到的視口大小，匯出時重量（視窗開著時改版面不再用舊快取）；測試：偶發失敗 `WhileTheServerIsProcessingTheWindowSaysSo`（根因＝`Progress<T>` 讓最後一段上傳進度晚於 Stage 文字送達而蓋掉它，已改為直接呼叫）與 `CancellingWhileWaitingForBrowserLogin…`（`Cancel()` 同步執行延續後才設「正在取消」文字，改為先設再取消）、`FinalizeErrorsAreExplicitlySplitIntoRetryableAndNot` 明確列出可重試／不可重試的錯誤、schema 測試新增 `.sha256` 把關與略過原因。
+- 測試：`dotnet test MCP.Tests` 562 → 596（594 通過、2 略過同基線，連跑 3 次穩定；視窗流程測試另連跑 20 次無失敗）；MCP-Server `npm test` 38＋Node 70；R24 建置 0 錯誤、警告 1184 同基線。**僅離線驗證，未啟動 Revit、未連真實 Issue Manager。**
+
 ### 🔧 修正 — 上傳到 Issue Manager 外掛端：開視窗效能（2026-10-25，分支 v4b2）
 
 - 起因：實機在 55 張圖紙的範例專案按功能區按鈕後 Revit 凍結 12～15 分鐘。讀碼確認 `Viewport.GetBoxOutline()` 在開視窗路徑的「圖紙 × 視口」迴圈內（推測的熱點，**耗時尚未實機量測**）。

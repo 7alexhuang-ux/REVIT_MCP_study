@@ -62,7 +62,10 @@
 - 任何結束路徑（成功、取消、逾時、例外）都在 `finally` 釋放「同一時間只允許一個上傳」的旗標，不需要重開 Revit。
 
 - 取消：呼叫 `DELETE /bundles/:id`、刪本機暫存、不再上傳。**finalize 之後不能取消**：伺服器對已 finalize 的 bundle 回 409 `already_finalized`（版本已建立，什麼都不刪）、finalize 進行中回 409 `finalize_in_progress`。客戶端據此顯示「已經上傳完成，無法取消；請到 Issue Manager 網站刪除該版本。」（或「伺服器正在建立版本，已無法取消…」），不假裝取消成功。
-- 失敗：顯示白話原因；伺服器端 bundle 保持 open 至過期自動清；若匯出已完成，視窗出現「重試上傳」（從未完成的檔案／分段繼續）。
+- 失敗：顯示白話原因；若匯出已完成，視窗出現「重試上傳」（從未完成的檔案／分段繼續）。
+- **未完成的 bundle 不佔名額（2026-10-25，v4b3）**：網站端每人最多 5 個「未完成」bundle、24 小時才過期。以下情況外掛會對舊 bundle **盡力送一次 `DELETE`**（15 秒逾時；失敗不阻擋流程、不顯示給使用者，日誌只記一行不含編號的文字）：①匯出失敗（PDF／GLB 失敗、Revit 無回應 120 秒逾時）；②500 `finalize_failed` 後重建新包之前；③簽名網址失效而重建之前；④新的上傳取代了待重試的舊 bundle。`DELETE` 若回 409 `already_finalized`／`finalize_in_progress`（其實已建立／正在建立版本），**不重建**，改對同一個 bundle 再問一次 finalize 取回結果。仍遇到 429 `too_many_open_bundles` 時訊息說明「24 小時內會自動清除，請稍後再試；若急需請通知管理員」。目前網站端**沒有**列出或清除自己未完成 bundle 的端點，所以視窗沒有「清除我的未完成上傳」按鈕（待網站端補列表端點再做）。
+- **上傳分段被拒也會重建（v4b3）**：分段 PUT 回 410 `bundle_expired`、409 `bundle_failed`／`bundle_closed`、404（已被清除），或簽名網址所在主機（Supabase，簽名約 2 小時失效）回 4xx（408／429 與 5xx 除外，仍照原本重試），都視為這個 bundle 不能用 → 同一次上傳內**自動重建一次**（先確認本機檔案沒被改動、清掉上傳進度、`POST /bundles`、整批重傳）；新 bundle 也被拒才把錯誤交給使用者，之後按「重試上傳」會再重建。分段本身的 400（`checksum_mismatch`、`invalid_part`）只代表該分段要重送，仍續傳同一個 bundle。是否過期**一律以伺服器回應為準**，不用本機時鐘判斷。
+- **`bundle_closed` 不直接當作廢（v4b3）**：第一個 finalize 等滿 10 分鐘、使用者按重試而讓伺服器重新認領時，第二個 finalize 可能在第一個提交後收到 409 `bundle_closed`。外掛收到後先對**同一個 bundle** 再送一次 finalize（冪等，已完成回同一個 `setId`），成功就顯示完成、不重建；仍失敗才視為作廢重建，避免多出第二個工作版本。
 - **finalize 的處理（2026-10-25 對齊網站端）**：
   - **驗證失敗即作廢**：伺服器對 400／413 立即把 bundle 標成 `failed` 並清暫存，之後再送 finalize 一律 409 `bundle_failed`；500 `finalize_failed`、410 過期、404 同樣表示這個 bundle 不能用了。客戶端**不再對舊 bundle 重送 finalize**：按「重試上傳」時重新 `POST /bundles`（用已匯出的本機檔案，先確認檔案沒被改動，清掉舊的上傳進度）、整批重傳、再 finalize，**不重新匯出**。版本包過期（到期時間已過）也是同樣處理。
   - **內容本身被拒**（`invalid_manifest`、`page_count_mismatch`、`invalid_pdf`、413）：同樣的檔案重傳只會再被拒，所以直接放棄本機暫存、不提供重試，請使用者調整勾選後重新上傳。
@@ -85,6 +88,7 @@
 - 登出（審查後修正）：先撤銷伺服器端這一族授權，再刪本機檔（不論撤銷成不成功，本機一定刪）。access 尚未過期用 `Authorization: Bearer`；**access 已過期、被伺服器回 401、或重開 Revit 後只剩 DPAPI 檔裡的 refresh** 時，改用 `{"refresh_token": …}` 走同一個 `POST /api/addin/token/revoke`（`addin-auth.md` §4.4）。撤銷沒成功時 `LogoutAsync` 回傳 `ServerRevokeFailed`，視窗顯示「伺服器端撤銷未完成」並指引到網站「帳號 › 已授權的外掛」手動撤銷。「切換帳號」走同一條路（舊帳號撤銷失敗時，重新登入完成後仍顯示警告）。
 - 權杖、授權碼、verifier、state 不寫日誌、不進例外訊息（單元測試以全部祕密字串搜尋日誌與訊息驗證）。
 - Bearer 只送給 Issue Manager 自己的主機；簽名上傳網址若在別的主機，不附 Authorization。上傳網址必須是 https（本機例外）。HttpClient 不自動跟隨轉址。**伺服器若回傳 `http://localhost:<埠>` 之類的本機上傳網址、而 Issue Manager 本身不在本機**（磁碟模式沒設 `ADDIN_PUBLIC_URL` 時伺服器用請求的 origin 組網址，反向代理後可能組出本機位址），客戶端中止並顯示「伺服器回傳的上傳網址不是 Issue Manager 的主機，已中止；請通知管理員設定 ADDIN_PUBLIC_URL。」，一個位元組都不會送到本機。
+- **主機比對改為嚴格（v4b3）**：協定、主機名稱、埠都相同才算 Issue Manager 自己的主機；`localhost`、`127.0.0.1`、`[::1]` 彼此視為不同主機，除非 BaseUrl 本身就是那個名稱（否則另一個迴圈名稱上的程式就能收到 Bearer）。上傳網址長得像 Issue Manager 自己接收分段的路徑（`/api/addin/v1/bundles/:id/parts/:kind/:index`）、主機或埠卻和 BaseUrl 不同（管理員把 `ADDIN_PUBLIC_URL` 設成別的主機／埠）時，外掛一個位元組都不送，顯示「上傳網址與 Issue Manager 主機不同，請通知管理員檢查 ADDIN_PUBLIC_URL。」（原本會不帶權杖也不帶 `X-Addin-Api` 而收到 426，被誤認成「請更新外掛」）；別的主機回 426 時也是這個訊息。伺服器自己給的未知錯誤代碼顯示前先過濾（只留英數底線點橫線、最多 120 字元），不再原樣貼最長 8 KB 的字串。
 
 ## 6. 檔案與程式位置
 

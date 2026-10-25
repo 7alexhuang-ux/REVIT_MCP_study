@@ -336,3 +336,65 @@
 - **只有一個視口的圖紙不量**：它必然是主要視口，面積無關（manifest 內容與舊版一致）。
 - **主要視口判斷改在匯出時**，因此「面積」不再存在於開窗後的檢視模型；目前沒有任何 UI 使用面積。
 - 若實機證明 `GetBoxOutline` 單次也要數秒，量測階段本身仍可能累積數分鐘（雖然已分批、可取消、且只量多視口圖紙）；進一步可改為「以視圖裁剪框尺寸×比例估算」，會改變主要視口的判斷精準度，需 Alex 決定。
+
+---
+
+## 11. v4b3 審查後修正（2026-10-25，分支 `v4b3`，從 `v4b2`（`9d2c69c`）開出）
+
+> 建置者：Claude Sonnet 5.5（Claude Code，effort high）。起因：v4b2 的獨立審查（opus）指出三個 🟡 與數個建議項。**仍只做離線驗證**：未啟動或操作 Revit、未安裝外掛、未連真實 Issue Manager、未 push；全程在新工作樹 `C:\temp\revit_v4b3\wt`（`C:\temp\revit_v4b2\wt` 沒動）。網站端 repo（`C:\temp\imv4a\wt`）唯讀。
+
+### 11.1 Commit
+
+| Commit | 內容 |
+|---|---|
+| `f712128` | 修正：三項必修與建議項（`UploadFlow`／`AddinApiClient`／`AddinHttp`／`ExportSelectionViewModel`／`UploadWindow`、測試、schema 的 `.sha256`） |
+| （本檔所在 commit） | 文件：功能說明 §4／§5、CHANGELOG、log、本段 |
+
+### 11.2 三項必修
+
+| # | 問題 | 修法 | 主要測試（`ServerContractAlignmentTests` 除非另註） |
+|---|---|---|---|
+| 1 | 未完成上傳占名額（網站端每人最多 5 個未完成 bundle、24 小時才過期；匯出失敗舊包刻意留到過期、500 `finalize_failed` 重建新包卻不刪舊包） | 新增 `UploadFlow.TryDeleteServerBundleAsync`：盡力 `DELETE` 一次（15 秒逾時 `BestEffortDeleteTimeout`；吞掉所有例外、不顯示給使用者；`UploadFlow.Log` 記一行「盡力清除伺服器上未完成的版本包：<結果>」，不含編號）。呼叫點：①匯出失敗（非取消，`RunAsync` 的 catch）②500 `finalize_failed`③簽名網址失效（`upload_url_rejected`）④新上傳取代待重試的舊 bundle（`RunAsync` 開頭）。`DELETE` 回 409 `already_finalized`／`finalize_in_progress` 時**不重建**，改對同一個 bundle 再問一次 finalize 取回 setId。400／410／409 `bundle_failed` 等伺服器已標 `failed`／`expired` 的情況不佔名額（規格：放棄、過期、失敗、完成不佔額度），所以**不**多送 DELETE（保留原有「作廢的 bundle 不用 DELETE」測試）。429 訊息改為「您有太多未完成的上傳…24 小時內會自動清除，請稍後再試；若急需上傳，請通知管理員清除。」 | `Finalize500FailedDeletesTheOldBundleBeforeRecreatingIt`、`ABestEffortDeleteThatFailsIsSilentAndDoesNotReplaceTheRealError`、`WhenTheBestEffortDeleteSaysAlreadyFinalizedTheFlowFinishesInsteadOfRecreating`、`StartingANewUploadDeletesTheBundleOfThePreviousUnfinishedOne`、`ThePlainMessageForTooManyOpenBundlesExplainsThe24HourCleanup`、`BundlePipelineTests.ExportFailureDeletesTheServerBundleBestEffort…`（取代原「匯出失敗保留 open」測試） |
+| 2 | 分段上傳被拒按重試永遠不好（`IsBundleUnusable` 只套用 finalize） | 新增 `IsUploadBundleUnusable`（PUT 專用）：410、404、409 `bundle_failed`／`bundle_closed`／`already_finalized`、簽名網址主機 4xx（新代碼 `upload_url_rejected`，`PutPartAsync` 在非 Issue Manager 主機回 400～499、408／429 除外時丟出；401 不再被解讀成登入失效）。命中時**同一次上傳內自動重建一次**（確認本機檔案未改動 → 清上傳進度 → `POST /bundles` → 整批重傳），新 bundle 也被拒才丟錯誤給使用者，之後按「重試上傳」會再重建。分段本身的 400（`checksum_mismatch`、`invalid_part`）與 413 不算，仍續傳同一個 bundle。**移除 `ResumeAsync` 的本機時鐘過期判斷**，一律以伺服器回應為準 | `AnUploadPartRejectedBecauseTheBundleIsGoneRecreatesTheBundleAndResendsEverything`（410／409×2／404）、`WhenTheBundleExpiresHalfWayThroughTheWholeBatchIsSentAgainToTheNewBundle`、`WhenEveryNewBundleIsAlsoRejected…`、`AnUploadPartRejectedForItsOwnContentKeepsTheSameBundle`、`AFourXxFromTheSignedUploadHost…`（400／401／403／404）、`ThrottlingOrServerErrorsFromTheSignedUploadHostAreStillJustRetried`、`ASignedUrlThatExpiredAfterTwoHours…`、`TheLocalClockNeverDecidesThatABundleExpired` |
+| 3 | `bundle_closed` 被當作廢可能重複建立 W | 收到 409 `bundle_closed`（或 PUT 的 `already_finalized`）時，先對**同一個 bundle** 再送一次 finalize（`TryFinalizeAgainAsync`，含輪詢；冪等：已完成回同一個 setId）；成功就照完成處理（不重建、不重傳、不 DELETE）；仍是作廢類錯誤才重建 | `BundleClosedBecauseOurOwnFinalizeAlreadyCommittedResendsFinalize…`、`BundleClosedThatStaysClosedAfterTheResendIsTreatedAsVoidedAndRecreated`、`FinalizeErrorsAreExplicitlySplitIntoRetryableAndNot`（409 `bundle_closed` 兩次） |
+
+### 11.3 建議項（做或沒做）
+
+| 項目 | 狀態 |
+|---|---|
+| `AddinHttp` 預設訊息原樣貼伺服器 `error` 字串（最長 8 KB） | ✅ 做了：`AddinHttp.SanitizeCode`——只留英數底線點橫線、最多 120 字元；含空白、換行、HTML、非 ASCII 的字串一律不顯示。`AddinApiException` 的代碼正則順手用 `\z` 取代 `$`（`$` 會放行結尾換行） |
+| `ADDIN_PUBLIC_URL` 設成不同主機／埠時誤導成 426「請更新外掛」 | ✅ 做了：上傳網址是 Issue Manager 的分段路徑（`/api/addin/v1/bundles/:id/parts/:kind/:index`）卻和 BaseUrl 不同主機／埠 → 一個位元組都不送，丟「上傳網址與 Issue Manager 主機不同，請通知管理員檢查 ADDIN_PUBLIC_URL。」（`upload_host_mismatch`）；別的主機回 426 也是同一訊息 |
+| loopback 主機名稱不同、埠相同視為同主機 | ✅ 改為嚴格：協定、主機名稱、埠都相同才帶權杖；`localhost`／`127.0.0.1`／`[::1]` 互為不同主機，除非 BaseUrl 本身就是該名稱 |
+| 視口寬高只量一次的快取 | ✅ 擇「匯出開始時清掉快取重量」：`ExportSelectionViewModel.BuildRequest` 每次（＝每次按上傳）把有 `ViewportElementId` 的視口 `SizeMeasured` 重設為 false、寬高歸 0；匯出時仍只量「同圖紙兩個以上視口」的視口，同一次上傳的「重試」不走 `BuildRequest`，不會重量。沒有加「版面變更請重新開啟」的視窗提示。測試 `EachNewUploadRequestClearsTheViewportSizesMeasuredEarlier` |
+| `UploadWindowFlowTests` 約 471 偶發失敗 | ✅ 做了，且找到**產品碼的根因**：`Progress<T>` 把回報 Post 到建立當下的 SynchronizationContext（執行緒集區），最後一段的上傳進度可能比後面的 Stage 文字（finalize／「伺服器處理中」）更晚送達而蓋掉它——使用者實際會看到「上傳中」卡在 finalize 期間。改為直接呼叫（`DirectProgress<T>`）；測試也改為比對「已等待」。另外抓到並修了第二個偶發失敗：`CancellingWhileWaitingForBrowserLogin…`（`CancelOrClose` 先 `Cancel()` 才設「正在取消」，`Cancel()` 同步執行延續會先寫入「已取消登入。」再被蓋掉；改為先設文字再取消） |
+| `ServerContractAlignmentTests` 約 325 用 `if (retryable)` 帶過 | ✅ 改為 `[TestCase]` 明確列：可重試＝500 `finalize_failed`、410、409 `bundle_failed`、409 `bundle_closed`（再問仍 closed）、404；不可重試＝413。斷言 `CanResume` 與重建行為 |
+| `bundle-manifest.schema.test.mjs` 約 98 只在有網站端工作樹才偵測過期 | ✅ 新增 `docs/schemas/web-authoritative/bundle-manifest.schema.json.sha256`（LF 正規化後的 SHA-256＋來源 `imv4a` `6b844d77`）：①副本雜湊與記錄相符（一定執行）②客戶端與副本的「語意雜湊」（扣掉 `$id`、`description`）一致③有網站端工作樹時另比對差異清單與雜湊。沒有工作樹時測試輸出一行 `# 略過原因：…` 並以 skip 標示。已實測略過路徑（暫時把候選路徑改成不存在的檔案）。**限制**：雜湊只能發現「副本被誤改／重新複製後沒更新 `.sha256`」，無法在沒有網站端工作樹時發現「網站端已改版」 |
+
+### 11.4 測試與建置數字
+
+| 項目 | 基線（v4b2 `9d2c69c`） | 現在 |
+|---|---|---|
+| `dotnet build -c Release.R24 MCP/RevitMCP.csproj` | 0 錯誤、1184 警告 | 0 錯誤、**1184 警告**（不超過） |
+| `dotnet test MCP.Tests` | 560 通過＋2 略過（562） | **594 通過＋2 略過**（596；+34）。連跑 3 次全過；`UploadWindowFlowTests` 另連跑 20 次無失敗（修之前約每 8～14 次失敗 1 次） |
+| MCP-Server `npm test` | 38 ＋ Node 68 | 38 ＋ Node **70**（+2：雜湊把關、語意雜湊）。新工作樹需先 `npm ci`（沒有 `node_modules`） |
+
+**變異驗證**（各自還原後全過）：
+1. 把 `TryRecoverUnusableBundleAsync` 的 bundle_closed 重送 finalize 拿掉（`if (false && …)`）→ 3 項轉紅（`BundleClosedBecauseOurOwn…`、`BundleClosedThatStaysClosed…`、`FinalizeErrorsAreExplicitlySplit…(409,bundle_closed)`）。
+2. 把盡力 `DELETE` 拿掉（`TryDeleteServerBundleAsync` 直接回傳）→ 10 項轉紅（匯出失敗、500 `finalize_failed`、簽名網址×5、取代舊 bundle、DELETE 失敗靜默、DELETE 回 already_finalized）。
+
+### 11.5 未做／取捨
+
+- **「清除我的未完成上傳」**：網站端 `revit-addin-export.md` §5.2 沒有列出自己未完成 bundle 的端點（只有 `POST`／`PUT`／`finalize`／`DELETE :id`），外掛不知道舊 bundle 的編號就刪不掉，所以只改了 429 訊息。**待網站端補一個「列出我的未完成 bundle」端點（例如 `GET /api/addin/v1/bundles?status=open`），再於視窗加按鈕。** 另外，任務書建議的訊息含「或到網站刪除」——網站端規格沒有提到網頁上能看到或刪除未完成 bundle（B20：半成品不出現在版本清單），所以訊息改成「請通知管理員清除」，不承諾網站端沒有的功能；網站端若有該頁面，只要改 `AddinHttp.RejectedMessage("too_many_open_bundles")`。
+- 取消按鈕在 finalize 開始後鎖住（§8.6）：仍未做，與 §9.6 相同。
+- 其他 Revit 年份建置、`CommandExecutor.Walkthrough.cs` 的 `FindNodeExecutable`：同前，不屬本案。
+
+### 11.6 需實機／真實伺服器觀察（未宣稱通過）
+
+| # | 項目 | 為什麼只能實機 |
+|---|---|---|
+| Q1 | 真實 Supabase 簽名網址過期（約 2 小時）時實際回的狀態碼與本文（400？403？）；外掛對所有 4xx（408／429 除外）都當作「簽名網址被拒」重建，若真實行為是別的碼（例如 5xx）就會走原本的重試而不重建 | 沒有 Supabase 環境；網站端交班單也標示未端到端實跑 |
+| Q2 | 真實 `DELETE` 對 `open` 但已有分段的 bundle 是否真的釋放「未完成」名額（連續讓匯出失敗 6 次，確認第 6 次不再回 429） | 沒連過真實伺服器 |
+| Q3 | 等滿 10 分鐘後按重試造成兩個 finalize 並行的情境（本修正的 `bundle_closed` 重送路徑）在真實伺服器上是否回同一個 setId | 需要真實 finalize 耗時與認領逾時 |
+| Q4 | 視窗在「自動重建」期間的文字（`Strings.RecreateBundleStage`）與進度條顯示 | UI 行為 |
+| Q5 | 關閉視窗再開、`BuildRequest` 清快取後量測是否仍在批次內即時（O1／T-B 同） | Revit 實機 |
+
