@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tools 索引（192 個）· BIM_MCP</title>
-<meta property="og:title" content="RevitMCP Tools 索引：192 個執行層工具">
-<meta property="og:description" content="192 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
+<title>Tools 索引（201 個）· BIM_MCP</title>
+<meta property="og:title" content="RevitMCP Tools 索引：201 個執行層工具">
+<meta property="og:description" content="201 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@300;400;600;700;800&display=swap">
@@ -89,17 +89,17 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">192 個</span></div>
+  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">201 個</span></div>
   <h1 class="bim-hero-title">Tools · <span class="accent">執行層</span><br>模型上真正被動到的那一下</h1>
-  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 192 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
+  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 201 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
 </header>
 
 <section class="bim-section">
   <h2 class="bim-section-title">先看懂三個標記</h2>
   <p>每張卡右上角的標記來自工具自己宣告的 <code>annotations</code>，不是這一頁另外標的——閘門 <code>9-1</code> 會驗證它們與程式碼一致。</p>
   <ul>
-    <li><strong>唯讀</strong>（85 個）——只讀不寫。跑錯了不會留下痕跡，可以放心探索。</li>
-    <li><strong>會寫入</strong>（104 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
+    <li><strong>唯讀</strong>（86 個）——只讀不寫。跑錯了不會留下痕跡，可以放心探索。</li>
+    <li><strong>會寫入</strong>（112 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
     <li><strong>破壞性</strong>（3 個）——刪除或不可逆地取代既有內容：<code>curate_mep_sizes · dedup_detail_elements_in_view · delete_element</code>。這份名單是白名單，程式碼裡多一個就會被閘門擋下。</li>
   </ul>
   <p style="color:var(--text-muted);font-size:13px;">「唯讀」是工具作者的宣告，不是執行時的沙箱。它告訴你這支工具<em>設計上</em>不寫入，不是保證它<em>不可能</em>寫入。</p>
@@ -113,7 +113,7 @@
     </thead>
     <tbody>
         <tr><td><strong>A</strong></td><td>基礎與查詢</td><td class="num">26</td><td>讀模型、找元素、問參數，也含少數寫入前置（載入共用參數）。</td></tr>
-        <tr><td><strong>B</strong></td><td>建模與構件</td><td class="num">47</td><td>產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</td></tr>
+        <tr><td><strong>B</strong></td><td>建模與構件</td><td class="num">56</td><td>產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</td></tr>
         <tr><td><strong>C</strong></td><td>房間與空間</td><td class="num">18</td><td>房間邊界、編號、面積、走廊、施工架周長。</td></tr>
         <tr><td><strong>D</strong></td><td>MEP 與碰撞</td><td class="num">17</td><td>風管系統、空間代表點、套管開孔、CSA 干涉。</td></tr>
         <tr><td><strong>E</strong></td><td>法規檢核</td><td class="num">13</td><td>排煙、偵煙、樓梯——有法源、有判準的檢查。</td></tr>
@@ -122,11 +122,11 @@
         <tr><td><strong>H</strong></td><td>視覺化</td><td class="num">20</td><td>上色、覆寫、隱藏顯示，也含材質與 Type 建構。</td></tr>
     </tbody>
   </table>
-  <p style="color:var(--text-muted);font-size:13px;">分類是 40 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 192。這一頁由 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
+  <p style="color:var(--text-muted);font-size:13px;">分類是 41 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 201。這一頁由 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
 </section>
 
 <section class="bim-section">
-  <h2 class="bim-section-title">192 個工具 · 依用途分組</h2>
+  <h2 class="bim-section-title">201 個工具 · 依用途分組</h2>
 
     <div class="cat-header">A · 基礎與查詢（26 個）</div>
     <p class="cat-blurb">讀模型、找元素、問參數，多數工作的第一步；也包含少數寫入型前置工具（如載入共用參數檔 load_shared_parameters）。</p>
@@ -390,7 +390,7 @@
         <div class="tool-desc">將視圖縮放至指定元素，讓使用者可以快速定位。</div>
       </div>
     </div>
-    <div class="cat-header">B · 建模與構件（47 個）</div>
+    <div class="cat-header">B · 建模與構件（56 個）</div>
     <p class="cat-blurb">產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</p>
     <div class="tool-card" id="analyze_beam_penetration" data-tool="analyze_beam_penetration">
       <div>
@@ -400,6 +400,16 @@
       </div>
       <div>
         <div class="tool-desc">分析特定結構梁上的套管穿孔。回傳精確的幾何數據，如距離柱心長度、梁深度、開孔直徑等。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="annotate_grading_scheme" data-tool="annotate_grading_scheme">
+      <div>
+        <div class="tool-name">annotate_grading_scheme</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">grading-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">整地方案標高標註：在鎖定 3D 方案視圖為控制樓板頂面（中心＋角點內縮 300mm）與設計地形 daylight 取樣點建立 Spot Elevation；逐點容錯並回報成敗數。</div>
       </div>
     </div>
     <div class="tool-card" id="apply_panel_pattern" data-tool="apply_panel_pattern">
@@ -485,6 +495,16 @@
         <div class="tool-desc">批次建立每一道帷幕牆的永久外立面視圖，建立/套用名為「帷幕立面」的視圖樣板，保留 crop box 與 far clip depth 可由各視圖自行控制，並回傳方向與 crop 診斷欄位。這個工具建立的是持久成果，不需要 cleanup；除非使用者明確要求清理，AI client 不得呼叫 delete_element 刪除這些 generated views。未指定 wallIds/maxWalls 時處理專案內全部帷幕牆；專案帷幕牆數量多時（例如數百道）建議用 maxWalls 分批處理，避免超過回應時限，可搭配回傳的 RemainingWallIds 續跑下一批。</div>
       </div>
     </div>
+    <div class="tool-card" id="create_cutfill_heatmap" data-tool="create_cutfill_heatmap">
+      <div>
+        <div class="tool-name">create_cutfill_heatmap</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">grading-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">挖填熱區圖：在方案視圖上以 AVF 為設計地形頂面著色，值＝原地形Z−設計Z（公尺，正=挖紅、負=填藍）。僅視覺化定位挖填集中區，土方量以登記簿為準。</div>
+      </div>
+    </div>
     <div class="tool-card" id="create_dimension" data-tool="create_dimension">
       <div>
         <div class="tool-name">create_dimension</div>
@@ -545,6 +565,16 @@
         <div class="tool-desc">在 Revit 中建立樓板。需要指定邊界點座標。</div>
       </div>
     </div>
+    <div class="tool-card" id="create_grading_scheme_view" data-tool="create_grading_scheme_view">
+      <div>
+        <div class="tool-name">create_grading_scheme_view</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">grading-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">為整地方案建立鎖定 3D 視圖：隔離顯示設計地形與控制樓板、鎖定方位（可放 Spot Elevation）、可選匯出 PNG 截圖；視圖 ID 與截圖路徑回寫方案記錄，視圖即方案書籤。</div>
+      </div>
+    </div>
     <div class="tool-card" id="create_wall" data-tool="create_wall">
       <div>
         <div class="tool-name">create_wall</div>
@@ -593,6 +623,36 @@
       </div>
       <div>
         <div class="tool-desc">Batch, non-destructive curtain wall elevation direction diagnostic. Compares wall.Orientation and -wall.Orientation candidate sides for selected or all curtain walls; temporary markers/views are created inside rollback transactions.</div>
+      </div>
+    </div>
+    <div class="tool-card" id="export_earthwork_gridsheet" data-tool="export_earthwork_gridsheet">
+      <div>
+        <div class="tool-name">export_earthwork_gridsheet</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">grading-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">方格法土方計算書：固定格徑對原/設計地形取樣，輸出原GL、設計GL、挖填深三張矩陣工作表與總表；方格法加總與 Revit 正式 CUT/FILL 並列、差額（離散誤差）誠實揭露。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="export_grading_comparison" data-tool="export_grading_comparison">
+      <div>
+        <div class="tool-name">export_grading_comparison</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">grading-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">把整地方案登記簿匯出為 Excel 比較表（.xlsx，一列一方案，含鬆實方三本帳欄位與方案截圖）；未指定 outputPath 時存於專案目錄。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="generate_window_family" data-tool="generate_window_family">
+      <div>
+        <div class="tool-name">generate_window_family</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">window-family-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">萬用窗族生成器（Phase 1，固定尺寸）。依規格 JSON（幾排 × 幾樘、每格幾扇、每扇怎麼開）在 Revit 2024 生成一個可直接出圖、可上門窗表、帶台灣送審參數（UW_ 系列共用參數）的鋁窗族（.rfa），並可選擇載入目前專案。拓樸（rows/cols/cells 的扇數與開啟方式）在生成時決定死，不是活參數——換組合需重新呼叫本工具生成新族或新型別。typeParams（框料尺寸、玻璃厚、交疊量）寫入為 Type 參數值；instanceParams（尺寸、窗台高、MO 切透）Phase 1 為固定值＋型別參數紀錄，幾何不會隨後續修改參數而跟動（Phase 2 才會）。所有長度單位為公分（cm）。一格內混用 sliding 與其他開啟型式視為無效規格，會回錯誤。</div>
       </div>
     </div>
     <div class="tool-card" id="get_all_grids" data-tool="get_all_grids">
@@ -745,6 +805,16 @@
         <div class="tool-desc">批次將多個 CAD 檔連結到對應樓層的平面視圖，並把每個 CAD 平移對齊到指定的 Revit Grid 交點。自動從 CAD 檔名抽樓層代碼（支援 FL1/FL2、B1/B1F、RF、1F/2F、地下1樓、3樓 等格式）→ 找名稱含該代碼的 FloorPlan。對齊方式：Link 後做 ElementTransformUtils.MoveElement，translation = (Revit Grid 交點 − CAD 錨點)。強制 Placement=Origin、不旋轉、不支援自訂 referencePoint / orientToView / customScale（會干擾對齊）。全部在單一 Transaction 內，失敗會 commit 已成功的部分並回報每筆狀態。</div>
       </div>
     </div>
+    <div class="tool-card" id="list_grading_schemes" data-tool="list_grading_schemes">
+      <div>
+        <div class="tool-name">list_grading_schemes</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">grading-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">列出目前模型的整地方案登記簿：每筆含方案名稱、時間、模式與參數、元素 ID、CUT/FILL/淨土方、最大挖深/填高、擾動面積、樓板指標與警告。</div>
+      </div>
+    </div>
     <div class="tool-card" id="place_furniture" data-tool="place_furniture">
       <div>
         <div class="tool-name">place_furniture</div>
@@ -805,6 +875,16 @@
         <div class="tool-desc">恢復先前由 unjoin_wall_joins / unjoin_column_joins / unjoin_element_joins 取消的接合關係（共用 pair 儲存，限同一 Revit session）。</div>
       </div>
     </div>
+    <div class="tool-card" id="restore_grading_scheme" data-tool="restore_grading_scheme">
+      <div>
+        <div class="tool-name">restore_grading_scheme</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">grading-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">方案還原：把方案記錄的樓板「自標高偏移」寫回模型（僅支援樓板高程不同型方案；輪廓不同型會拒絕並引導 Design Option）；可選重跑整地落成新方案。</div>
+      </div>
+    </div>
     <div class="tool-card" id="scan_penetrated_beams_in_view" data-tool="scan_penetrated_beams_in_view">
       <div>
         <div class="tool-name">scan_penetrated_beams_in_view</div>
@@ -813,6 +893,16 @@
       </div>
       <div>
         <div class="tool-desc">掃描目前視圖中所有被套管（Sleeves）穿過的結構梁。回傳包含梁 ID、連結模型 ID 及穿過該梁的套管數量的清單。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="solve_balanced_elevation" data-tool="solve_balanced_elevation">
+      <div>
+        <div class="tool-name">solve_balanced_elevation</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">grading-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">平衡高程反求：以二分法試算控制樓板的統一升降量，使整地淨土方逼近目標（預設 0＝挖填平衡）。每次試算完整跑整地管線後回滾、不留痕；apply=true 且收斂時把偏移寫入樓板並落成方案（含登記簿）。</div>
       </div>
     </div>
     <div class="tool-card" id="sync_ifc_structural_to_native" data-tool="sync_ifc_structural_to_native">
@@ -2078,7 +2168,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / tools-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">192 個 MCP 工具完整索引，由 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">201 個 MCP 工具完整索引，由 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
 </footer>
 
 <script src="../shared.js"></script>

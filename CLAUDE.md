@@ -35,7 +35,7 @@ These counts must be derived from source, not copied by memory.
 
 | Item | Current Count | Source of Truth |
 |---|---:|---|
-| Runtime MCP tools | 192 | `registerRevitTools()` from `MCP-Server/src/tools/index.ts` |
+| Runtime MCP tools | 201 | `registerRevitTools()` from `MCP-Server/src/tools/index.ts` |
 | Domain SOP files | 83 | `domain/*.md` except `domain/README.md`, plus `domain/references/*.md` |
 | Claude skills | 61 | `.claude/skills/*/SKILL.md` |
 
@@ -120,6 +120,7 @@ If pulling the 2026-07-17 cleanup commit fails with "local changes would be over
 | `MCP-Server/src/socket.ts` | WebSocket client to Revit |
 | `MCP-Server/src/tools/index.ts` | Tool module registry and `MCP_PROFILE` filtering |
 | `MCP-Server/src/tools/revit-tools.ts` | Execution bridge from tool name to Revit command |
+| `MCP-Server/src/tools/window-family-tools.ts` | `generate_window_family` (Universal Window Family Generator, Phase 1) — schema per `docs/universal-window/SPEC.md` §8 |
 | `MCP-Server/src/tools/annotations.ts` | Central `title` + `readOnlyHint`/`destructiveHint` injection for every registered tool (MCP 2026-07-28 metadata layer) |
 | `MCP-Server/src/apps/register-apps.ts` | MCP Apps (`io.modelcontextprotocol/ui`) resource wiring: `listAppResources` / `readAppResource` / `withAppUi` |
 | `MCP-Server/src/apps/clash-viewer/` | The first MCP App: `app.ts` (ext-apps client) + `template.html`, bundled by `scripts/build-apps.mjs` into a self-contained `ui://clash-viewer/index.html` served for `detect_clashes` |
