@@ -40,5 +40,8 @@
     <Compile Include="..\MCP\Core\Walkthrough\WebCompareMath.cs" Link="Core\Walkthrough\WebCompareMath.cs" />
     <Compile Include="..\MCP\Core\Walkthrough\ViewPositionsMath.cs" Link="Core\Walkthrough\ViewPositionsMath.cs" />
     <Compile Include="..\MCP\Core\Walkthrough\DesignOptionNoGeometryPolicy.cs" Link="Core\Walkthrough\DesignOptionNoGeometryPolicy.cs" />
+    <Compile Include="..\MCP\Core\ViewSync\ViewSyncSecurity.cs" Link="Core\ViewSync\ViewSyncSecurity.cs" />
+    <Compile Include="..\MCP\Core\ViewSync\ViewSyncMath.cs" Link="Core\ViewSync\ViewSyncMath.cs" />
+    <Compile Include="..\MCP\Core\ViewSync\ViewSyncRequest.cs" Link="Core\ViewSync\ViewSyncRequest.cs" />
   </ItemGroup>
 </Project>

@@ -319,7 +319,7 @@ namespace RevitMCP.Core
         private static JObject ExportDesignOptionGeometry(Document doc, DesignOption option, string outputDir, Vec3 offset,
             int maxTriangles, int maxElementTriangles, WebCompareHeavyOptions heavy, List<string> excludedCategories, List<string> excludedElements)
         {
-            var builder = new GltfBuilder();
+            var builder = new GltfBuilder { RevitModel = ViewSync.ViewSyncModelInfo.FromDocument(doc) };
             var members = new FilteredElementCollector(doc).WhereElementIsNotElementType().WherePasses(new ElementDesignOptionFilter(option.Id)).ToList();
             var exported = new JArray();
             var excluded = new JArray();

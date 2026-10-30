@@ -29,6 +29,13 @@ namespace RevitMCP.Models
         /// </summary>
         [JsonIgnore]
         public Guid ConnectionId { get; set; }
+
+        /// <summary>
+        /// 內部使用：請求來自瀏覽器連線（帶 Origin 標頭）。只由 SocketService 在授權通過後設定，不從 JSON 讀取；
+        /// CommandExecutor 對瀏覽器請求再檢查一次指令白名單（縱深防禦）。
+        /// </summary>
+        [JsonIgnore]
+        public bool IsBrowser { get; set; }
     }
 
     /// <summary>
@@ -51,6 +58,10 @@ namespace RevitMCP.Models
         /// 錯誤訊息
         /// </summary>
         public string Error { get; set; }
+
+        /// <summary>機器可讀錯誤碼（目前只有 viewsync_* 指令會帶，例如 model_mismatch）；沒有時不輸出。</summary>
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        public string ErrorCode { get; set; }
 
         /// <summary>
         /// 請求 ID

@@ -64,6 +64,23 @@ namespace RevitMCP
                 settingsButtonData.ToolTip = "開啟 MCP 設定視窗";
                 panel.AddItem(settingsButtonData);
 
+                // 4–5. 網頁配對（issue-manager 網頁 3D 視角／剖面聯動，D-710）
+                PushButtonData pairButtonData = new PushButtonData(
+                    "MCPWebPair",
+                    "網頁\n配對",
+                    assemblyPath,
+                    "RevitMCP.Commands.WebPairCommand");
+                pairButtonData.ToolTip = "顯示 6 位數配對碼（5 分鐘有效），在議題管理網頁輸入後，網頁才能把 3D 視角／剖面送進這台電腦的 Revit";
+                panel.AddItem(pairButtonData);
+
+                PushButtonData revokeButtonData = new PushButtonData(
+                    "MCPWebRevoke",
+                    "撤銷\n網頁配對",
+                    assemblyPath,
+                    "RevitMCP.Commands.WebRevokeCommand");
+                revokeButtonData.ToolTip = "撤銷所有已配對的網頁裝置（網頁需重新配對才能再連線）";
+                panel.AddItem(revokeButtonData);
+
 #if REVIT2024_OR_GREATER
                 // 整地圖說面板（Revit 2024+），掛在自訂頁籤「黃道資訊」：
                 // 核心入口（新整地方案／方案總覽）優先，樓板準備備板工具其後。

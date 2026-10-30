@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using Newtonsoft.Json;
+using RevitMCP.Core.ViewSync;
 
 namespace RevitMCP.Configuration
 {
@@ -47,6 +50,18 @@ namespace RevitMCP.Configuration
         /// 命令執行逾時時間（毫秒）
         /// </summary>
         public int CommandTimeout { get; set; } = 30000;
+
+        /// <summary>
+        /// 允許連線的瀏覽器網域（Origin 白名單，網頁 3D 視角聯動 D-710）。可在 config.json 增刪；
+        /// 沒有 Origin 的本機連線（MCP Server、tools/revit-command.mjs）不受此清單影響。
+        /// Replace：反序列化時整份取代預設值，避免預設網域每次載入重複累加。
+        /// </summary>
+        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+        public List<string> AllowedOrigins { get; set; } = new List<string>(OriginPolicy.DefaultAllowedOrigins);
+
+        /// <summary>已配對的網頁裝置（只存 token 的 SHA-256 與配對時的 Origin；Revit 功能區「撤銷網頁配對」會清空）。</summary>
+        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+        public List<PairedWebClient> PairedWebClients { get; set; } = new List<PairedWebClient>();
 
         /// <summary>
         /// 驗證並修正設定值。回傳 true 表示有修正（需存檔）。

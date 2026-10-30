@@ -67,8 +67,32 @@ namespace RevitMCP.Core
                 var parameters = request.Parameters as JObject ?? new JObject();
                 object result = null;
 
+                // 縱深防禦：瀏覽器請求（SocketService 已授權）也只能執行 viewsync_* 白名單指令。
+                if (request.IsBrowser && (ViewSync.ViewSyncCommands.IsPair(request.CommandName) || !ViewSync.ViewSyncCommands.IsBrowserAllowed(request.CommandName)))
+                    throw new ViewSync.ViewSyncException("command_not_allowed", "瀏覽器不能呼叫這個指令。");
+
                 switch (request.CommandName.ToLower())
                 {
+                    case "viewsync_status":
+                        result = ViewSyncStatus(parameters);
+                        break;
+
+                    case "viewsync_apply_temp":
+                        result = ViewSyncApplyTemp(parameters);
+                        break;
+
+                    case "viewsync_open_view":
+                        result = ViewSyncOpenView(parameters);
+                        break;
+
+                    case "viewsync_create_view":
+                        result = ViewSyncCreateView(parameters);
+                        break;
+
+                    case "viewsync_debug_fov":
+                        result = ViewSyncDebugFov(parameters);
+                        break;
+
                     case "create_wall":
                         result = CreateWall(parameters);
                         break;
@@ -623,6 +647,7 @@ namespace RevitMCP.Core
                 {
                     Success = false,
                     Error = ex.Message,
+                    ErrorCode = (ex as ViewSync.ViewSyncException)?.Code,
                     RequestId = request.RequestId
                 };
             }

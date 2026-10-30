@@ -37,6 +37,14 @@ namespace RevitMCP.Core.Walkthrough
         public GltfDesignOptionInfo DesignOption;
     }
 
+    /// <summary>GLB 對應的 Revit 檔識別（scenes[0].extras.revitModel）。guid＝Document.CreationGUID 字串。</summary>
+    public sealed class RevitModelInfo
+    {
+        public string Title;
+        public string Path;
+        public string Guid;
+    }
+
     /// <summary>One embedded texture image (JPEG/PNG bytes).</summary>
     public sealed class GltfImage
     {
@@ -89,6 +97,12 @@ namespace RevitMCP.Core.Walkthrough
         /// 網頁上傳基地範圍時可自動對齊。null＝不輸出。
         /// </summary>
         public Vec3? OriginOffsetMeters { get; set; }
+
+        /// <summary>
+        /// 這份 GLB 對應的 Revit 檔（D-710 imrevitsync）：寫進 scenes[0].extras.revitModel = { title, path, guid }，
+        /// 網頁送視角回 Revit 前據此核對「Revit 目前開的是不是這個模型」。null＝不輸出。
+        /// </summary>
+        public RevitModelInfo RevitModel { get; set; }
 
         /// <summary>
         /// 連結模型分檔（splitLinks）的檔案識別：兩者皆非空時寫進 scenes[0].extras.part = { key, label }。
@@ -669,6 +683,13 @@ namespace RevitMCP.Core.Walkthrough
             {
                 sceneExtraFields.Add(string.Format(CultureInfo.InvariantCulture, "\"originOffsetMeters\":[{0},{1},{2}]",
                     Num(OriginOffsetMeters.Value.X), Num(OriginOffsetMeters.Value.Y), Num(OriginOffsetMeters.Value.Z)));
+            }
+
+            if (RevitModel != null)
+            {
+                sceneExtraFields.Add("\"revitModel\":{\"title\":" + JsonString(RevitModel.Title ?? string.Empty)
+                    + ",\"path\":" + JsonString(RevitModel.Path ?? string.Empty)
+                    + ",\"guid\":" + JsonString(RevitModel.Guid ?? string.Empty) + "}");
             }
 
             if (!string.IsNullOrEmpty(PartKey))

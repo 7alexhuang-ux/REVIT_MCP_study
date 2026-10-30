@@ -915,7 +915,7 @@ namespace RevitMCP.Core
                 tx.Commit();
             }
 
-            var builder = new GltfBuilder();
+            var builder = new GltfBuilder { RevitModel = ViewSync.ViewSyncModelInfo.FromDocument(doc) };
             RevitGltfExportContext context;
             try
             {
