@@ -515,6 +515,25 @@ if (Test-Path (Join-Path $sourceViewer "index.html")) {
 }
 
 # ============================================================================
+# 共用資源：萬用窗共用參數檔（與 Revit 版本無關）
+# ============================================================================
+# WindowFamilyBuilder 依 dll 同層 -> 開發樹 -> %APPDATA%\RevitMCP\shared-parameters 尋找；
+# 找不到會依 C# 正本（GUID 相同）自動重建，因此此步驟失敗不影響功能，只是讓 repo 版本優先。
+$sourceSharedParams = Join-Path $projectRoot "MCP\Resources\shared-parameters\universal-window.txt"
+if (Test-Path $sourceSharedParams) {
+    $spDir = Join-Path (Join-Path $appDataPath "RevitMCP") "shared-parameters"
+    try {
+        if (-not (Test-Path $spDir)) { New-Item -ItemType Directory -Path $spDir -Force | Out-Null }
+        Copy-Item -Path $sourceSharedParams -Destination (Join-Path $spDir "universal-window.txt") -Force -ErrorAction Stop
+        Write-Host "已部署 universal-window.txt（萬用窗共用參數）到 $spDir" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[警告] 無法部署 universal-window.txt（生成器會依內建正本自動重建，非關鍵）" -ForegroundColor Yellow
+    }
+    Write-Host ""
+}
+
+# ============================================================================
 # 摘要
 # ============================================================================
 Write-Host "============================================================================" -ForegroundColor Cyan

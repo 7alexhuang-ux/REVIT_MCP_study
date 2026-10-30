@@ -49,6 +49,8 @@ These must remain understandable by both sides.
 | `domain/README.md` | domain catalog | Bilingual preferred |
 | `log/README.md` | logging policy | Bilingual acceptable |
 | `log/YYYY-MM.md` | append-only history | Preserve existing entries; new entries should be UTF-8 readable |
+| `docs/universal-window/SPEC.md` | Universal Window Family Generator spec | Traditional Chinese; regulator/BIM-manager and AI shared reference — see `CLAUDE.md` Key Source Files and `docs/ADR.md` |
+| `docs/ADR.md` | architecture decision records | Traditional Chinese; append-only D-NNN entries, shared by humans (design rationale) and AI (must-follow decisions) |
 
 ## Human-Facing Documents
 
@@ -77,6 +79,8 @@ These must remain understandable by both sides.
 | `docs/camera-manager/spec.zh-TW.md`, `adr.zh-TW.md`, `changelog.zh-TW.md`, `roadmap.zh-TW.md` | Camera Manager users, the maintainer, and AI agents working on the pane | Traditional Chinese; the Revit camera-manager dockable pane and Key Plan feature. `spec` = current behaviour only; `adr` = decision records D-001+ (context → decision → rationale → consequences, append-only); `changelog` = dated changes, newest first; `roadmap` = phase status and the list of behaviours not yet verified in Revit. |
 | `docs/camera-manager-spec.zh-TW.md` | redirect | Former single-file spec, kept only so existing links do not rot; points to `docs/camera-manager/`. Do not add content. |
 | `docs/claude-code-cheatsheet.html`, `docs/karpathy-gist-zh-tw.html` | readers | Reference pages |
+| `docs/universal-window/ROADMAP.md` | Universal Window Family Generator roadmap | Traditional Chinese; phase tracking for `docs/universal-window/SPEC.md` |
+| `docs/universal-window/configurator-demo.html` | Universal Window Family Generator interactive demo | Traditional Chinese UI; Phase 0 reference — the shape of the `generate_window_family` spec JSON follows this demo |
 | other `docs/*.md` topic guides | mixed | Per-topic guides (agent handoff, guard rails, architecture, slope analysis, docs structure); classify individually if promoted to canonical |
 | root-level Chinese notes (`HJPLUS *.md`, `[好學生筆記]*.md`) | community readers | Event notes and adoption guides |
 

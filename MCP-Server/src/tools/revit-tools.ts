@@ -47,8 +47,9 @@ export async function executeRevitTool(
     const CROSS_DOC_COMMANDS = new Set(["read_source_file_sheets", "copy_sheets_from_file", "sync_sheet_parameters_from_source", "inject_green_material_into_family"]);
 
     // 開檔、存檔、重載連結、匯出影像都可能遠超過 30 秒（大模型存檔、地形連結重載尤其明顯）。
+    // generate_window_family：建幾何、空心切割、載入專案較費時（萬用窗）。
     // 逾時斷在中途會讓使用者以為失敗，實際上 Revit 還在跑 —— 所以一律給長 timeout。
-    const SLOW_COMMANDS = new Set(["open_document", "save_document", "reload_links", "capture_view_image", "run_camera_keyplan", "list_cameras", "run_camera_overview", "create_camera_sheet"]);
+    const SLOW_COMMANDS = new Set(["open_document", "save_document", "reload_links", "capture_view_image", "run_camera_keyplan", "list_cameras", "run_camera_overview", "create_camera_sheet", "generate_window_family"]);
 
     // 全模型檢討（含連結模型逐點射線 / 逐段實體過濾）與影像輸出在大型專案可能超過 120 秒；
     // 逾時後 Revit 仍會繼續跑，重跑會重複放標記，所以給 300 秒。
