@@ -68,6 +68,25 @@ namespace RevitMCP.Tests.ViewSync
                 Assert.That(ViewSyncCommands.IsBrowserAllowed(c), Is.False, c ?? "(null)");
         }
 
+        [Test]
+        public void Commands_CameraManagerCommandsAreBrowserAllowed_AndNeedToken()
+        {
+            foreach (var c in new[] { "list_cameras", "set_camera_pose", "copy_camera_to_level", "run_camera_keyplan",
+                                      "run_camera_overview", "create_camera_sheet", "camera_version", "get_view_extents", "LIST_CAMERAS" })
+                Assert.That(ViewSyncCommands.IsBrowserAllowed(c), Is.True, c);
+            // get_camera_info 只給 MCP 內部用；pair 之外不得靠相機指令繞過 token
+            Assert.That(ViewSyncCommands.IsBrowserAllowed("get_camera_info"), Is.False);
+            Assert.That(ViewSyncCommands.IsBrowserAllowed("list_cameras "), Is.False);
+            Assert.That(ViewSyncCommands.IsPair("list_cameras"), Is.False);
+
+            var token = TokenUtil.GenerateToken();
+            var clients = new[] { Client(token, "http://localhost:3600") };
+            Assert.That(ViewSyncAuthorizer.Check("http://localhost:3600", "set_camera_pose", token, Allowed, clients), Is.EqualTo(AuthDecision.Allowed));
+            Assert.That(ViewSyncAuthorizer.Check("http://localhost:3600", "set_camera_pose", null, Allowed, clients), Is.EqualTo(AuthDecision.TokenMissing));
+            Assert.That(ViewSyncAuthorizer.Check("http://localhost:3600", "set_camera_pose", token + "0", Allowed, clients), Is.EqualTo(AuthDecision.TokenInvalid));
+            Assert.That(ViewSyncAuthorizer.Check("https://evil.com", "list_cameras", token, Allowed, clients), Is.EqualTo(AuthDecision.OriginRejected));
+        }
+
         // ---------------------------------------------------------------- 授權決策
 
         [Test]

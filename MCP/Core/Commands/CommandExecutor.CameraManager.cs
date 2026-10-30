@@ -162,6 +162,24 @@ namespace RevitMCP.Core
             CameraManagerSnapshot snap = CameraManagerService.ReadSnapshot(doc);
             if (!string.IsNullOrEmpty(snap.ErrorMessage)) throw new Exception(snap.ErrorMessage);
 
+            List<object> cameras = BuildCameraList(doc, snap, nameContains);
+            return new
+            {
+                Success = true,
+                snap.DocumentTitle,
+                Count = cameras.Count,
+                Note = "長度為內部原點座標系 mm；樓層（2026-09-26）：室內＝{房間 Level}∪{房間垂直範圍內有樓層平面的 Level} 中高程 ≤ 眼睛−300mm 的最高者（LevelSource=room／roomSpan）；室外＝往下射線打到的站立面 +300mm 以下、有平面的最高 Level（LevelSource=surface），沒打到＝眼睛下方建築樓層（elevation）；離樓板高度以該樓層計算；水平角 0°=+Y、順時針為正。",
+                StoreyLevels = snap.Levels.Select(l => new { Id = l.LevelId.GetIdValue(), l.Name, ElevationMm = CmMm(l.ProjectElevationFeet) }).ToList(),
+                Cameras = cameras
+            };
+        }
+
+        /// <summary>
+        /// 組出 list_cameras 回應裡 Cameras 的每一列。抽成 static，讓「相機變動推送」（camera_changed，見 CameraChangePush）
+        /// 與 list_cameras 共用同一份欄位，網頁端只需要處理一種相機列格式。須在 Revit API context 內呼叫。
+        /// </summary>
+        internal static List<object> BuildCameraList(Document doc, CameraManagerSnapshot snap, string nameContains)
+        {
             List<Level> storeys = CameraMath.GetStoreyLevelsSorted(doc);
             CameraSectionOrientationMode configuredMode = CameraKeyPlanService.GetConfiguredSectionOrientationMode();
 
@@ -274,15 +292,7 @@ namespace RevitMCP.Core
                 });
             }
 
-            return new
-            {
-                Success = true,
-                snap.DocumentTitle,
-                Count = cameras.Count,
-                Note = "長度為內部原點座標系 mm；樓層（2026-09-26）：室內＝{房間 Level}∪{房間垂直範圍內有樓層平面的 Level} 中高程 ≤ 眼睛−300mm 的最高者（LevelSource=room／roomSpan）；室外＝往下射線打到的站立面 +300mm 以下、有平面的最高 Level（LevelSource=surface），沒打到＝眼睛下方建築樓層（elevation）；離樓板高度以該樓層計算；水平角 0°=+Y、順時針為正。",
-                StoreyLevels = snap.Levels.Select(l => new { Id = l.LevelId.GetIdValue(), l.Name, ElevationMm = CmMm(l.ProjectElevationFeet) }).ToList(),
-                Cameras = cameras
-            };
+            return cameras;
         }
 
         // ══════════════════════════════════════════════════════════
@@ -482,6 +492,8 @@ namespace RevitMCP.Core
             string refreshed = fast.RefreshHow;
 
             CameraRow after = CameraManagerService.BuildCameraRow(camera, storeys);
+            // 網頁版相機管理：改成功就推送最新相機列給已配對的瀏覽器（沒連線不做事；失敗只寫 log，不影響回應）。
+            if (fast.Changed) CameraChangePush.Notify(doc, "set_camera_pose");
             object Pose(CameraRow r) => new
             {
                 Level = r.LevelName,

@@ -38,6 +38,8 @@ namespace RevitMCP.Core
             public string Origin;
             public readonly SemaphoreSlim SendLock = new SemaphoreSlim(1, 1);
             public int AuthFailures;
+            /// <summary>已通過配對 token 驗證（或剛配對成功）；只有這種連線會收到伺服器主動推送的事件（camera_changed）。</summary>
+            public volatile bool Paired;
         }
 
         private readonly object _browserLock = new object();
@@ -606,6 +608,7 @@ namespace RevitMCP.Core
                     return;
                 }
 
+                connection.Paired = true;
                 Logger.Info($"[Socket] 網頁配對成功 Origin={connection.Origin}");
                 _ = SendBrowserAsync(connection, new RevitCommandResponse
                 {
@@ -616,6 +619,7 @@ namespace RevitMCP.Core
                 return;
             }
 
+            connection.Paired = true; // 走到這裡＝token 已驗證通過
             parameters.Remove("token"); // token 不往下傳，也不進日誌
             request.Parameters = parameters;
             request.ConnectionId = connectionId;
@@ -637,8 +641,13 @@ namespace RevitMCP.Core
 
         private static async Task SendBrowserAsync(BrowserConnection connection, RevitCommandResponse response)
         {
+            await SendBrowserTextAsync(connection, JsonConvert.SerializeObject(response), $"回應 RequestId: {response.RequestId}");
+        }
+
+        private static async Task SendBrowserTextAsync(BrowserConnection connection, string json, string what)
+        {
             if (connection.Socket.State != WebSocketState.Open) return;
-            var bytes = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(response));
+            var bytes = Encoding.UTF8.GetBytes(json);
             await connection.SendLock.WaitAsync();
             try
             {
@@ -647,12 +656,33 @@ namespace RevitMCP.Core
             }
             catch (Exception ex)
             {
-                Logger.Error($"[Socket] 發送瀏覽器回應失敗 (RequestId: {response.RequestId})", ex);
+                Logger.Error($"[Socket] 發送瀏覽器訊息失敗 ({what})", ex);
             }
             finally
             {
                 connection.SendLock.Release();
             }
+        }
+
+        /// <summary>目前是否有已配對、仍連線中的瀏覽器連線（沒有就不必組推送內容）。</summary>
+        public bool HasPairedBrowserConnections()
+        {
+            lock (_browserLock)
+                return _browserConnections.Values.Any(c => c.Paired && c.Socket.State == WebSocketState.Open);
+        }
+
+        /// <summary>
+        /// 對所有已配對的瀏覽器連線推送一則事件（例如 camera_changed）。沒有連線時什麼都不做；
+        /// 送出失敗只寫 log，不丟例外（推送是盡力而為，網頁下次連線會用 list_cameras 補同步）。回傳實際送出的連線數。
+        /// </summary>
+        public int BroadcastToPairedBrowsers(string json, string what)
+        {
+            BrowserConnection[] targets;
+            lock (_browserLock)
+                targets = _browserConnections.Values.Where(c => c.Paired && c.Socket.State == WebSocketState.Open).ToArray();
+            foreach (var connection in targets)
+                _ = SendBrowserTextAsync(connection, json, what);
+            return targets.Length;
         }
 
         /// <summary>關閉所有瀏覽器連線（撤銷配對、停止服務時）。</summary>
