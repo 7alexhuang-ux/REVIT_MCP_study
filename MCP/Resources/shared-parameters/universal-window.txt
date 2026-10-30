@@ -1,0 +1,26 @@
+﻿# This is a Revit shared parameter file.
+# Do not edit manually.
+# 正本：MCP/Core/WindowFamily/UniversalWindowParameters.cs（GUID 凍結，勿改）
+*META	VERSION	MINVERSION
+META	2	1
+*GROUP	ID	NAME
+GROUP	1	UniversalWindow
+*PARAM	GUID	NAME	DATATYPE	DATACATEGORY	GROUP	VISIBLE	DESCRIPTION	USERMODIFIABLE	HIDEWHENNOVALUE
+PARAM	7a1e0001-9c4b-4f2a-9d3e-b0d500000001	UW_排數	INTEGER		1	1	排數 R（上到下）	1	0
+PARAM	7a1e0002-9c4b-4f2a-9d3e-b0d500000002	UW_樘數	INTEGER		1	1	樘數 C（自室外看，左到右）	1	0
+PARAM	7a1e0003-9c4b-4f2a-9d3e-b0d500000003	UW_扇數	INTEGER		1	1	扇總數	1	0
+PARAM	7a1e0004-9c4b-4f2a-9d3e-b0d500000004	UW_可開扇數	INTEGER		1	1	可開扇數（非固定扇）	1	0
+PARAM	7a1e0005-9c4b-4f2a-9d3e-b0d500000005	UW_開啟方式	TEXT		1	1	開啟方式摘要，例 R1: F | R2: CL,CR	1	0
+PARAM	7a1e0006-9c4b-4f2a-9d3e-b0d500000006	UW_玻璃面積	AREA		1	1	玻璃面積合計	1	0
+PARAM	7a1e0007-9c4b-4f2a-9d3e-b0d500000007	UW_有效採光面積	AREA		1	1	有效採光面積（扣 FL+75 cm 以下）	1	0
+PARAM	7a1e0008-9c4b-4f2a-9d3e-b0d500000008	UW_可開口面積	AREA		1	1	可開口面積（橫拉以半扇計）	1	0
+PARAM	7a1e0009-9c4b-4f2a-9d3e-b0d500000009	UW_MO寬	LENGTH		1	1	開口寬（框外緣每側加預留）	1	0
+PARAM	7a1e000a-9c4b-4f2a-9d3e-b0d50000000a	UW_MO高	LENGTH		1	1	開口高（框外緣每側加預留）	1	0
+PARAM	7a1e000b-9c4b-4f2a-9d3e-b0d50000000b	UW_氣密等級	TEXT		1	1	氣密等級 CNS 11527，預設 8 級	1	0
+PARAM	7a1e000c-9c4b-4f2a-9d3e-b0d50000000c	UW_水密等級	TEXT		1	1	水密等級 CNS 11528，預設 35 級	1	0
+PARAM	7a1e000d-9c4b-4f2a-9d3e-b0d50000000d	UW_耐風壓	NUMBER		1	1	耐風壓 CNS 11526，kgf/m²，預設 280	1	0
+PARAM	7a1e000e-9c4b-4f2a-9d3e-b0d50000000e	UW_玻璃種類	TEXT		1	1	玻璃種類，留白給使用者	1	0
+PARAM	7a1e000f-9c4b-4f2a-9d3e-b0d50000000f	UW_防火時效	TEXT		1	1	防火時效，留白給使用者	1	0
+PARAM	7a1e0010-9c4b-4f2a-9d3e-b0d500000010	UW_廠牌系列	TEXT		1	1	廠牌系列，留白給使用者	1	0
+PARAM	7a1e0011-9c4b-4f2a-9d3e-b0d500000011	UW_Uaf	NUMBER		1	1	外殼平均熱傳透率用 Uaf，留白	1	0
+PARAM	7a1e0012-9c4b-4f2a-9d3e-b0d500000012	UW_SF	NUMBER		1	1	遮陽係數 SF，留白	1	0

@@ -6,6 +6,22 @@
 
 ---
 
+## [Unreleased] — universal-window 分支
+
+### 🆕 新增 — 萬用窗族生成器（Phase 1，進行中）
+
+- **文件**：`docs/universal-window/SPEC.md`（規格 v0.1）、`docs/universal-window/ROADMAP.md`、`docs/universal-window/configurator-demo.html`（互動示意，Phase 0）、`docs/ADR.md`（D-001～D-007：拓樸生成時決定／幾何程式直接畫／Phase 1 固定尺寸／圖面慣例／交疊＝扇框寬／MO 空心切透／worktree 分支）。
+- **工具**：`generate_window_family`（規格 JSON → Revit 2024 生成 .rfa 並載入專案）。TS：`MCP-Server/src/tools/window-family-tools.ts`（full／architect profile，120 s timeout）；C#：`MCP/Core/WindowFamily/{WindowFamilySpec,WindowLayoutMath,UniversalWindowParameters,WindowFamilyBuilder}.cs`、`MCP/Core/Commands/CommandExecutor.WindowFamily.cs`、共用參數檔 `MCP/Resources/shared-parameters/universal-window.txt`。狀態：**已編譯、單元測試 85 pass、未在 Revit 內實測**；工具回傳 `templateProbe`（參考平面名、視圖名、室外方向）供首次實測回填 SPEC §10。
+- **安裝腳本**：`scripts/install-addon.ps1` 一併部署共用參數檔到 `%APPDATA%\RevitMCP\shared-parameters\`。
+- **計數同步**：Runtime MCP tools 181 → 182（main 的 CLAUDE.md／README／inventory／docs/BIM_MCP 公開頁原本漂移在 173，一併修正）。
+- **已知未處理**：`revit-tools.ts` 在 full／architect／structural profile 會把 grading 工具重複註冊（既有 bug，另案處理）；ADR D-006 專案端「放窗後自動切割相交飾板」留待 Phase 3。
+
+### 📚 調查（2026-09-13～14，見 SPEC §10 未查證清單）
+
+- 社群族群標準（NBS BIM Object Standard、Autodesk Content Style Guide、IFC4.3 IfcWindow 枚舉）、台灣送審三軌（節能 §310、EEWH、建照 §41/§43/§79/§110＋消防 §188–189）、踩坑 20 條、台灣鋁窗框料預設值（框深 8/10 cm 有型錄來源，框寬類估值未查證）。
+
+---
+
 ## [1.6.0] - 2026-07-31
 
 ### 🆕 新增 — MCP 2026-07-28 升級（Path-A dual-era + WP-F Apps）

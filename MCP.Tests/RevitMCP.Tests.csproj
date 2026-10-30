@@ -8,6 +8,8 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="NUnit" Version="3.14.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+    <!-- 萬用窗規格解析用（與 MCP/RevitMCP.csproj 同版） -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\MCP\Core\Grading\GradingModels.cs" Link="Core\Grading\GradingModels.cs" />
@@ -17,5 +19,9 @@
     <Compile Include="..\MCP\Core\Grading\EarthworkLedger.cs" Link="Core\Grading\EarthworkLedger.cs" />
     <Compile Include="..\MCP\Core\Grading\BalanceSolver.cs" Link="Core\Grading\BalanceSolver.cs" />
     <Compile Include="..\MCP\Core\Grading\EarthworkGrid.cs" Link="Core\Grading\EarthworkGrid.cs" />
+    <!-- 萬用窗純 C# 可測層（不依賴 Revit API） -->
+    <Compile Include="..\MCP\Core\WindowFamily\WindowFamilySpec.cs" Link="Core\WindowFamily\WindowFamilySpec.cs" />
+    <Compile Include="..\MCP\Core\WindowFamily\WindowLayoutMath.cs" Link="Core\WindowFamily\WindowLayoutMath.cs" />
+    <Compile Include="..\MCP\Core\WindowFamily\UniversalWindowParameters.cs" Link="Core\WindowFamily\UniversalWindowParameters.cs" />
   </ItemGroup>
 </Project>

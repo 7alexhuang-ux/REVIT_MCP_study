@@ -379,6 +379,11 @@ namespace RevitMCP.Core
                         result = ExportFamilies(parameters);
                         break;
 
+                    // === 萬用窗族生成器 (Phase 1，docs/universal-window/SPEC.md) ===
+                    case "generate_window_family":
+                        result = GenerateWindowFamily(parameters);
+                        break;
+
                     case "list_categories":
                         result = ListCategories(parameters);
                         break;

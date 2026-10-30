@@ -48,6 +48,8 @@ These must remain understandable by both sides.
 | `domain/README.md` | domain catalog | Bilingual preferred |
 | `log/README.md` | logging policy | Bilingual acceptable |
 | `log/YYYY-MM.md` | append-only history | Preserve existing entries; new entries should be UTF-8 readable |
+| `docs/universal-window/SPEC.md` | Universal Window Family Generator spec | Traditional Chinese; regulator/BIM-manager and AI shared reference — see `CLAUDE.md` Key Source Files and `docs/ADR.md` |
+| `docs/ADR.md` | architecture decision records | Traditional Chinese; append-only D-NNN entries, shared by humans (design rationale) and AI (must-follow decisions) |
 
 ## Human-Facing Documents
 
@@ -71,6 +73,8 @@ These must remain understandable by both sides.
 | `docs/mep-design-playbook-ch3.zh-TW.md` | junior MEP engineers continuing from Chapter 2 | Traditional Chinese; teaching companion to `domain/mep-space-demand-matrix.md` 4-1/4-2. Chapter 3 covers grouping air terminals and equipment into systems (traceable-vs-decided grouping basis, equipment identity by geometry vs by decision, type-vs-instance system labels), and the checks that only unlock once ductwork is drawn (system flow validity, the supply/exhaust-vs-endpoint-sum leak check, and three same-shape boolean-flag traps). Derived from the same course-model exercise as Chapters 1-2, not a client project; carries its own honesty-boundary section flagging which post-routing figures postdate the log. |
 | `docs/mep-design-playbook-ch1-model-guide.zh-TW.md` | learners opening the Chapter 1 closing model | Traditional Chinese; orientation for the Revit model that Chapter 1 ends at — what each schedule column teaches, the four opening-verification numbers, what the model has NOT done yet, and common misreadings. Paired with `mep-design-playbook-ch1.zh-TW.md`. |
 | `docs/claude-code-cheatsheet.html`, `docs/karpathy-gist-zh-tw.html` | readers | Reference pages |
+| `docs/universal-window/ROADMAP.md` | Universal Window Family Generator roadmap | Traditional Chinese; phase tracking for `docs/universal-window/SPEC.md` |
+| `docs/universal-window/configurator-demo.html` | Universal Window Family Generator interactive demo | Traditional Chinese UI; Phase 0 reference — the shape of the `generate_window_family` spec JSON follows this demo |
 | other `docs/*.md` topic guides | mixed | Per-topic guides (agent handoff, guard rails, architecture, slope analysis, docs structure); classify individually if promoted to canonical |
 | root-level Chinese notes (`HJPLUS *.md`, `[好學生筆記]*.md`) | community readers | Event notes and adoption guides |
 

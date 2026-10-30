@@ -1,0 +1,685 @@
+<title>萬用窗組態器</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+:root{
+  --paper:#F2F3F0; --sheet:#FBFBF8; --panel:#E9EBE7;
+  --ink:#1C232B; --ink2:#5C6670; --ink3:#8A939C;
+  --line:#C5CBCF; --line2:#DDE1E3;
+  --accent:#B8432B; --accent-soft:rgba(184,67,43,.12);
+  --glass:rgba(110,165,200,.26); --frame:#59636E; --frame-fill:#D7DCE0;
+  --rc:#B9BFC4; --rc-fill:rgba(120,130,140,.18); --clad:#8C7B6B; --clad-fill:rgba(140,123,107,.35);
+  --ok:#2F7D4F;
+  --ff-display:"Barlow Condensed","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  --ff-body:"Noto Sans TC","Microsoft JhengHei","PingFang TC",sans-serif;
+  --ff-mono:"IBM Plex Mono",Consolas,"Courier New",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#14181C; --sheet:#1C2227; --panel:#1A1F24;
+    --ink:#E4E8EB; --ink2:#9AA5AF; --ink3:#6E7883;
+    --line:#3B444D; --line2:#2C343B;
+    --accent:#E0664A; --accent-soft:rgba(224,102,74,.16);
+    --glass:rgba(110,165,200,.2); --frame:#B6BFC8; --frame-fill:#3A434C;
+    --rc:#6B7680; --rc-fill:rgba(160,170,180,.14); --clad:#B59F8C; --clad-fill:rgba(181,159,140,.3);
+    --ok:#5FB582;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#14181C; --sheet:#1C2227; --panel:#1A1F24;
+  --ink:#E4E8EB; --ink2:#9AA5AF; --ink3:#6E7883;
+  --line:#3B444D; --line2:#2C343B;
+  --accent:#E0664A; --accent-soft:rgba(224,102,74,.16);
+  --glass:rgba(110,165,200,.2); --frame:#B6BFC8; --frame-fill:#3A434C;
+  --rc:#6B7680; --rc-fill:rgba(160,170,180,.14); --clad:#B59F8C; --clad-fill:rgba(181,159,140,.3);
+  --ok:#5FB582;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--ff-body);font-size:14px;line-height:1.55;padding-inline:16px;padding-block:0 40px}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-block:10px 8px;border-bottom:1px solid var(--line)}
+header h1{font-family:var(--ff-display);font-weight:600;font-size:24px;letter-spacing:.01em;margin:0;line-height:1}
+header h1 small{font-family:var(--ff-mono);font-size:12px;color:var(--ink2);margin-left:10px;letter-spacing:.06em}
+header p{margin:0;color:var(--ink2);max-width:60ch;font-size:12.5px}
+.eyebrow{font-family:var(--ff-display);text-transform:uppercase;letter-spacing:.12em;font-size:12px;color:var(--ink2);font-weight:600}
+main{display:grid;grid-template-columns:330px minmax(0,1fr);gap:16px;margin-top:12px;align-items:start}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+
+/* controls */
+.ctl{background:var(--panel);padding:12px;display:flex;flex-direction:column;gap:12px;position:sticky;top:8px;max-height:calc(100vh - 16px);overflow-y:auto}
+@media (max-width:900px){.ctl{position:static;max-height:none}}
+.grp{display:flex;flex-direction:column;gap:8px}
+.grp h3{margin:0;font-size:12px;font-family:var(--ff-display);text-transform:uppercase;letter-spacing:.12em;color:var(--ink2);font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:6px}
+.grp h3 .tier{font-family:var(--ff-mono);font-size:10px;letter-spacing:.04em;text-transform:none;padding:1px 6px;border:1px solid var(--line);border-radius:2px;color:var(--ink3)}
+.grp h3 .tier.gen{border-color:var(--accent);color:var(--accent)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.rowN{display:flex;gap:6px;flex-wrap:wrap}
+.rowN label.f{flex:1 1 60px}
+label.f{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--ink2)}
+label.f span b{font-family:var(--ff-mono);font-weight:400;color:var(--ink3);font-size:11px}
+input[type=number],select{font:inherit;font-family:var(--ff-mono);font-size:13px;padding:5px 7px;border:1px solid var(--line);background:var(--sheet);color:var(--ink);border-radius:2px;width:100%}
+input[readonly]{color:var(--ink3);background:var(--panel)}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+button.chip{font:inherit;font-size:12px;padding:4px 9px;border:1px solid var(--line);background:var(--sheet);color:var(--ink);border-radius:2px;cursor:pointer}
+button.chip.on{background:var(--ink);color:var(--sheet);border-color:var(--ink)}
+button.chip.acc{border-color:var(--accent);color:var(--accent)}
+button.chip.acc.on{background:var(--accent);color:#fff}
+button.small{font:inherit;font-size:11px;padding:3px 7px;border:1px solid var(--line);background:none;color:var(--ink2);cursor:pointer;border-radius:2px}
+button.small:hover{color:var(--ink);border-color:var(--ink2)}
+.hint{font-size:11.5px;color:var(--ink3);line-height:1.45;margin:0}
+/* grid map */
+.gridmap{display:grid;gap:4px;background:var(--sheet);border:1px solid var(--line);padding:6px}
+.gridmap button{font:inherit;font-family:var(--ff-mono);font-size:11px;line-height:1.25;padding:6px 4px;border:1px solid var(--line2);background:var(--panel);color:var(--ink2);cursor:pointer;border-radius:2px;min-height:40px}
+.gridmap button.on{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
+.gridmap button b{display:block;font-family:var(--ff-body);font-weight:500;color:var(--ink);font-size:12px}
+.seg{border:1px solid var(--line);background:var(--sheet);padding:10px;display:flex;flex-direction:column;gap:8px}
+.seg h4{margin:0;font-size:12px;display:flex;justify-content:space-between;align-items:center;color:var(--ink2)}
+.seg h4 b{color:var(--ink);font-weight:500;font-family:var(--ff-mono)}
+.sash{display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;font-size:12px}
+.sash .n{font-family:var(--ff-mono);color:var(--ink3);width:22px}
+.sash select{padding:3px 5px;font-size:12px}
+
+/* drawings */
+.sheets{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.sheet{background:var(--sheet);border:1px solid var(--line);padding:12px 12px 8px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.sheet.wide{grid-column:1/-1}
+.sheet .cap{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.sheet .cap .t{font-family:var(--ff-display);font-size:17px;font-weight:600;letter-spacing:.03em}
+.sheet .cap .m{font-family:var(--ff-mono);font-size:11px;color:var(--ink3);letter-spacing:.04em}
+.sheet svg{display:block;max-width:100%;height:auto;margin-inline:auto}
+.sheet.wide svg{max-height:42vh}
+.sheet:not(.wide) svg{max-height:38vh}
+.sheet .note{font-size:11.5px;color:var(--ink3)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-block:0 12px}
+.tile{background:var(--sheet);border-top:2px solid var(--line);padding:5px 10px}
+.tile .k{font-size:11px;color:var(--ink2);letter-spacing:.04em}
+.tile .v{font-family:var(--ff-mono);font-size:17px;font-variant-numeric:tabular-nums;line-height:1.2}
+.tile .v small{font-size:11px;color:var(--ink3);margin-left:3px}
+.tile.acc{border-top-color:var(--accent)}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11.5px;color:var(--ink2);margin-top:14px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:22px;height:0;border-top:1.5px solid var(--ink)}
+.legend i.d{border-top-style:dashed}
+.legend i.a{border-top-color:var(--accent);border-top-style:dashed}
+.legend i.g{height:10px;background:var(--glass);border:1px solid var(--frame)}
+.legend i.rc{height:10px;background:var(--rc-fill);border:1px solid var(--rc)}
+.legend i.cl{height:10px;background:var(--clad-fill);border:1px solid var(--clad)}
+.box{background:var(--sheet);border:1px solid var(--line);margin-top:16px}
+.box .cap{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--line2)}
+.box pre{margin:0;padding:12px;font-family:var(--ff-mono);font-size:12px;line-height:1.5;overflow-x:auto;color:var(--ink2);max-height:420px}
+.box pre .k{color:var(--ink)}
+.box pre .s{color:var(--accent)}
+.tbl{overflow-x:auto}
+.box table{border-collapse:collapse;width:100%;font-size:12.5px;min-width:640px}
+.box th{text-align:left;font-weight:500;color:var(--ink2);font-size:11.5px;letter-spacing:.04em;padding:6px 10px;border-bottom:1px solid var(--line)}
+.box td{padding:6px 10px;border-bottom:1px solid var(--line2);vertical-align:top}
+.box td.y{color:var(--ok);font-weight:500}
+.box td.gen{color:var(--accent);font-weight:500}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--sheet);padding:6px 14px;font-size:12px;border-radius:2px;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+</style>
+
+<header>
+  <h1>萬用窗組態器 <small>UW-DEMO · Revit 2024 · 單位 cm</small></h1>
+  <p>整組窗＝「幾排 × 幾樘」的格子。每一格決定幾扇、怎麼開。紅框標「生成時」的參數：改了就是另一個型別；其餘是族內活參數，放進專案後可直接調。</p>
+</header>
+
+<main>
+<aside class="ctl">
+  <div class="grp">
+    <h3>快速範例</h3>
+    <div class="chips" id="presets"></div>
+  </div>
+
+  <div class="grp">
+    <h3>格子 <span class="tier gen">生成時</span></h3>
+    <div class="row">
+      <label class="f"><span>排數（上中下）<b>R</b></span><select id="R"><option>1</option><option>2</option><option>3</option></select></label>
+      <label class="f"><span>樘數（橫向）<b>C</b></span><select id="C"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+    </div>
+    <div class="gridmap" id="gridmap"></div>
+    <div id="cell"></div>
+  </div>
+
+  <div class="grp">
+    <h3>整組尺寸 <span class="tier">族內活參數</span></h3>
+    <div class="row3">
+      <label class="f"><span>總寬 <b>W</b></span><input type="number" id="W" min="40" max="800" step="5"></label>
+      <label class="f"><span>總高 <b>H</b></span><input type="number" id="H" min="40" max="400" step="5"></label>
+      <label class="f"><span>窗台高 <b>FL+</b></span><input type="number" id="sill" min="0" max="250" step="5"></label>
+    </div>
+    <div id="ratios"></div>
+  </div>
+
+  <div class="grp">
+    <h3>框料尺寸 <span class="tier">型別參數</span></h3>
+    <div class="rowN" id="frameInputs"></div>
+    <p class="hint">框深 8 cm 有型錄來源（YKK AP YRB-A 70/100 mm、大同 896/1096 系列 8/10 cm）。外框寬、中框寬、扇框寬各家型錄不公開，目前是估值，要以你們常用鋁窗廠的斷面圖為準。橫拉交疊預設＝扇框寬（兩支勾企完全重疊），這是事務所慣例。</p>
+  </div>
+
+  <div class="grp">
+    <h3>牆體與 MO 切透 <span class="tier">族內活參數</span></h3>
+    <div class="rowN" id="wallInputs"></div>
+    <p class="hint">MO 空心切透範圍＝框外緣每側加 MO 預留，深度自外飾板外再外切、自內飾板內再內切。外飾板與內飾板若是另外的元素，要在專案裡用「切割幾何」或由 MCP 工具自動套用。</p>
+  </div>
+
+  <div class="grp">
+    <h3>圖面表示</h3>
+    <div class="chips" id="detail"></div>
+    <div class="chips" id="apex"></div>
+    <div class="chips" id="swing"></div>
+    <p class="hint">粗略對應 1:100 配置圖、中等 1:50、細緻 1:20 大樣。已拍板：外推平面 30° 實線；立面三角形頂點頂到鉸鏈實際位置。開關保留給其他事務所調整。</p>
+  </div>
+</aside>
+
+<section>
+  <div class="tiles" id="tiles"></div>
+  <div class="sheets">
+    <div class="sheet wide">
+      <div class="cap"><span class="t">立面 ELEVATION</span><span class="m" id="elevCap"></span></div>
+      <div id="elev"></div>
+    </div>
+    <div class="sheet">
+      <div class="cap"><span class="t">平面 PLAN</span><span class="m" id="planCap"></span></div>
+      <div id="plan"></div>
+      <div class="note">剖切最下排窗扇中高。上方為室外。紅色虛線是 MO 切透範圍，穿過 RC 與內外飾板。</div>
+    </div>
+    <div class="sheet">
+      <div class="cap"><span class="t">剖面 SECTION</span><span class="m" id="secCap"></span></div>
+      <div id="sec"></div>
+      <div class="note">左側為室外。紅色點線是建築技術規則第 41 條的 75 cm 採光下限。</div>
+    </div>
+  </div>
+  <div class="legend">
+    <span><i></i>實線：向室外開啟</span>
+    <span><i class="d"></i>虛線：開啟軌跡 / 隱藏線</span>
+    <span><i class="g"></i>玻璃</span>
+    <span><i class="rc"></i>RC 牆</span>
+    <span><i class="cl"></i>內外飾板</span>
+    <span><i class="a"></i>MO 切透 / 法規基準線</span>
+  </div>
+
+  <div class="box">
+    <div class="cap"><span class="eyebrow">參數怎麼控制：兩層</span><span class="hint">格子拓樸在生成時定死，尺寸在專案裡活調。這樣避開 Revit 2024 陣列不能為 1、巢狀族切型別會破壞約束兩個坑。</span></div>
+    <div class="tbl"><table>
+      <thead><tr><th>層</th><th>參數</th><th>誰改、什麼時候改</th><th>在 Revit 裡是什麼</th></tr></thead>
+      <tbody>
+        <tr><td class="gen">生成時（拓樸）</td><td>排數 R、樘數 C、每格扇數、每扇開啟方式、鉸鏈側、橫拉內外軌</td><td>建族者或 MCP 工具，產生族時決定。同事要換組合＝從型別目錄挑另一個型別</td><td>Type Catalog 一列＝一種拓樸；零件族用程式擺放，不用陣列</td></tr>
+        <tr><td>族內活參數（型別）</td><td>框料：外框寬、中框寬、扇框寬、框深、玻璃厚、交疊量</td><td>BIM Manager 依鋁窗廠系列設一次</td><td>Type 參數，公司標準鎖在型別</td></tr>
+        <tr><td>族內活參數（實例）</td><td>總寬 W、總高 H、窗台高、各排高度比、各樘寬度比、MO 預留、外切透、內切透</td><td>同事放窗時依現場調</td><td>Instance 參數，公式把格子尺寸自動算出</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="box">
+    <div class="cap"><span class="eyebrow">規格 JSON（MCP 工具輸入）</span><button class="chip" id="copy">複製</button></div>
+    <pre id="json"></pre>
+  </div>
+
+  <div class="box">
+    <div class="cap"><span class="eyebrow">檢核會看的參數（族群一開始就要帶）</span><span class="hint">查證日期 2026-09-14。標「未查證」者是調查時抓不到官方原文，送件前請自行覆核。</span></div>
+    <div class="tbl"><table>
+      <thead><tr><th>參數</th><th>單位</th><th>誰在檢核</th><th>依據</th><th>Demo 已算</th></tr></thead>
+      <tbody>
+        <tr><td>採光面積（扣 FL+75 cm 以下）</td><td>㎡</td><td>建照：居室採光 1/8、教室 1/5</td><td>建築技術規則設計施工編 §41</td><td class="y">有效採光</td></tr>
+        <tr><td>有效通風開口面積</td><td>㎡ / %</td><td>建照：居室 5%、廚房 10% 且 ≥0.8 ㎡</td><td>§43</td><td class="y">可開口（橫拉以半扇計）</td></tr>
+        <tr><td>排煙有效開口、距天花板高度、開啟角度</td><td>㎡ / cm / °</td><td>消防：防煙區劃 2%、天花板下 80 cm</td><td>各類場所消防安全設備設置標準 §188–189</td><td>開啟角度待補</td></tr>
+        <tr><td>開啟方式（每扇）</td><td>類別</td><td>門窗表、排煙判定、IFC OperationType</td><td>實務慣例；IFC4.3 IfcWindowPanelOperationEnum</td><td class="y">JSON 已對應</td></tr>
+        <tr><td>窗平均熱傳透率 Uaf（玻璃 Ug、框 Uf、框比 rf）</td><td>W/(㎡·K)</td><td>節能：外殼基準、等效開窗率</td><td>§310；建築物節約能源設計技術規範公式 6（公式全文未逐字查證）</td><td>欄位留空</td></tr>
+        <tr><td>遮蔽係數 SF（玻璃 K 值 × 遮陽係數 η）</td><td>無因次</td><td>節能；EEWH 日常節能 EEV</td><td>§310；規範公式 7</td><td>欄位留空</td></tr>
+        <tr><td>窗面積 / 所屬外牆面積 / 方位</td><td>㎡ / °</td><td>等效開窗率 WWR（北 13、中 15、南 18%）</td><td>§310</td><td>玻璃面積已算，方位由專案給</td></tr>
+        <tr><td>防火時效（防火窗 / 一般窗）</td><td>小時</td><td>防火區劃開口、鄰地防火間隔</td><td>§79、§110</td><td>欄位留空</td></tr>
+        <tr><td>玻璃種類（強化 / 膠合 / 一般）</td><td>類別</td><td>門窗表、安全</td><td>CNS 2217、CNS 1183（強制條號未查證）</td><td>欄位留空</td></tr>
+        <tr><td>氣密 / 水密 / 耐風壓等級</td><td>級</td><td>產品性能；節能滲透計算</td><td>CNS 11527 / 11528 / 11526（是否為送審必要欄位未查證）</td><td>欄位留空</td></tr>
+        <tr><td>窗編號、樘數、扇數、數量、MO 尺寸</td><td>—</td><td>門窗表與平面圖一致性</td><td>實務慣例</td><td class="y">已算</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+</main>
+<div class="toast" id="toast">已複製</div>
+
+<script>
+(function(){
+const TYPES={fixed:'固定',casement:'外推',sliding:'橫拉',awning:'上懸'};
+const ABBR={fixed:'F',casement:'C',sliding:'S',awning:'A'};
+const $=id=>document.getElementById(id);
+const clone=o=>JSON.parse(JSON.stringify(o));
+const f1=v=>Math.round(v*10)/10;
+let FW=5,MW=5,SW=4,D=10; // 由 S.frame 帶入
+const OV=()=> S.ovAuto ? S.frame.SW*10 : S.ov; // mm；預設＝扇框寬（兩支勾企完全重疊）
+
+const FRAME_DEF={FW:4.5,MW:4.4,SW:5,D:8,glass:8};
+const WALL_DEF={rc:15,ext:3,int:2,moGap:2.5,cutOut:5,cutIn:5,off:0};
+
+/* presets: cells[r][c] = list of sashes (row 0 = top) */
+const PRESETS={
+  ufl:{name:'上固定下外推',W:240,H:180,sill:90,rows:[35,65],cols:[50,50],cells:[[[{t:'fixed'}],[{t:'fixed'}]],[[{t:'casement',h:'L'},{t:'casement',h:'R'}],[{t:'casement',h:'L'},{t:'casement',h:'R'}]]]},
+  sl:{name:'橫拉窗',W:180,H:150,sill:90,rows:[100],cols:[100],cells:[[[{t:'sliding'},{t:'sliding'}]]]},
+  fx:{name:'固定窗',W:120,H:150,sill:90,rows:[100],cols:[100],cells:[[[{t:'fixed'}]]]},
+  up:{name:'上窗（上懸）',W:180,H:210,sill:60,rows:[30,70],cols:[100],cells:[[[{t:'awning'}]],[[{t:'fixed'}]]]},
+  dn:{name:'下窗（橫拉）',W:180,H:210,sill:60,rows:[40,60],cols:[100],cells:[[[{t:'fixed'}]],[[{t:'sliding'},{t:'sliding'}]]]},
+  tri:{name:'三樘組合',W:360,H:180,sill:90,rows:[100],cols:[30,40,30],cells:[[[{t:'fixed'}],[{t:'sliding'},{t:'sliding'}],[{t:'fixed'}]]]},
+  three:{name:'上中下三排',W:240,H:240,sill:45,rows:[25,50,25],cols:[50,50],cells:[[[{t:'awning'}],[{t:'awning'}]],[[{t:'sliding'},{t:'sliding'}],[{t:'sliding'},{t:'sliding'}]],[[{t:'fixed'}],[{t:'fixed'}]]]},
+};
+function fromPreset(p){
+  return {W:p.W,H:p.H,sill:p.sill,ov:25,rows:p.rows.slice(),cols:p.cols.slice(),
+    cells:p.cells.map(r=>r.map(c=>({sashes:c.map(s=>({t:s.t,h:s.h||'L'}))}))),
+    frame:clone(FRAME_DEF),wall:clone(WALL_DEF),ovAuto:true,detail:'fine',apexHinge:true,swing:30,active:{r:0,c:0}};
+}
+let S=null;
+try{const raw=localStorage.getItem('uw-spec-v3');if(raw)S=JSON.parse(raw);}catch(e){}
+if(!S||!S.cells)S=fromPreset(PRESETS.ufl);
+if(S.wall.off===undefined)S.wall.off=0;
+if(S.ovAuto===undefined)S.ovAuto=true;
+function save(){try{localStorage.setItem('uw-spec-v3',JSON.stringify(S));}catch(e){}}
+
+/* ---------- geometry ---------- */
+function layout(){
+  const R=S.rows.length, C=S.cols.length, ov=OV()/10;
+  const availW=S.W-2*FW-(C-1)*MW, availH=S.H-2*FW-(R-1)*MW;
+  const rowH=S.rows.map(p=>availH*p/100), colW=S.cols.map(p=>availW*p/100);
+  const bays=[]; let x=FW;
+  for(let c=0;c<C;c++){
+    const x0=x, w=colW[c]; x+=w+MW;
+    const segs=[]; let y=FW;
+    for(let r=0;r<R;r++){
+      const y0=y, h=rowH[r]; y+=h+MW;
+      const list=S.cells[r][c].sashes, m=list.length, sliding=list.every(s=>s.t==='sliding');
+      const sw=sliding?(w+(m-1)*ov)/m:w/m;
+      const sashes=list.map((s,k)=>({t:s.t,h:s.h||'L',x:x0+k*(sliding?sw-ov:sw),y:y0,w:sw,hgt:h,outer:sliding?(k%2===0):false,idx:k,count:m,sliding,r,c}));
+      segs.push({y0,h,x0,w,sashes,sliding,r});
+    }
+    bays.push({x0,w,segs,i:c});
+  }
+  return bays;
+}
+
+/* ---------- SVG helpers ---------- */
+const NS='vector-effect="non-scaling-stroke"';
+const L=(x1,y1,x2,y2,c)=>`<line x1="${f1(x1)}" y1="${f1(y1)}" x2="${f1(x2)}" y2="${f1(y2)}" class="${c}" ${NS}/>`;
+const R_=(x,y,w,h,c)=>`<rect x="${f1(x)}" y="${f1(y)}" width="${f1(w)}" height="${f1(h)}" class="${c}" ${NS}/>`;
+const T=(x,y,s,c,extra='')=>`<text x="${f1(x)}" y="${f1(y)}" class="${c}" ${extra}>${s}</text>`;
+const STYLE=`<style>
+ .h{stroke:var(--ink);stroke-width:1.7px;fill:none}
+ .m{stroke:var(--ink);stroke-width:1px;fill:none}
+ .t{stroke:var(--frame);stroke-width:.6px;fill:none}
+ .fr{stroke:var(--ink);stroke-width:1px;fill:var(--frame-fill)}
+ .frt{stroke:var(--frame);stroke-width:.6px;fill:var(--frame-fill)}
+ .g{fill:var(--glass);stroke:none}
+ .gl{stroke:var(--frame);stroke-width:.6px;fill:none}
+ .sym{stroke:var(--ink);stroke-width:.9px;fill:none}
+ .symd{stroke:var(--ink);stroke-width:.9px;fill:none;stroke-dasharray:3 2}
+ .dim{stroke:var(--accent);stroke-width:.7px;fill:none}
+ .dimd{stroke:var(--accent);stroke-width:.8px;fill:none;stroke-dasharray:1.5 2}
+ .mo{stroke:var(--accent);stroke-width:1px;fill:none;stroke-dasharray:5 3}
+ .rc{stroke:var(--rc);stroke-width:.8px;fill:url(#rcHatch)}
+ .rcl{stroke:var(--rc);stroke-width:1.2px;fill:none}
+ .cl{stroke:var(--clad);stroke-width:.7px;fill:var(--clad-fill)}
+ .arrow{fill:var(--ink);stroke:none}
+ text{font-family:var(--ff-mono);fill:var(--ink2);font-size:var(--fs)}
+ text.d{fill:var(--accent)}
+ text.big{font-family:var(--ff-display);fill:var(--ink3);letter-spacing:.08em}
+</style>
+<defs><pattern id="rcHatch" patternUnits="userSpaceOnUse" width="4" height="4" patternTransform="rotate(45)"><rect width="4" height="4" fill="var(--rc-fill)"/><line x1="0" y1="0" x2="0" y2="4" stroke="var(--rc)" stroke-width=".5"/></pattern></defs>`;
+function svg(vb,fs,body){return `<svg viewBox="${vb.map(f1).join(' ')}" style="--fs:${f1(fs)}px" xmlns="http://www.w3.org/2000/svg">${STYLE}${body}</svg>`;}
+function dimH(x1,x2,y,label,fs){
+  return L(x1,y,x2,y,'dim')+L(x1,y-fs*.5,x1,y+fs*.5,'dim')+L(x2,y-fs*.5,x2,y+fs*.5,'dim')+
+    L(x1-fs*.3,y+fs*.3,x1+fs*.3,y-fs*.3,'dim')+L(x2-fs*.3,y+fs*.3,x2+fs*.3,y-fs*.3,'dim')+
+    T((x1+x2)/2,y-fs*.35,label,'d','text-anchor="middle"');
+}
+function dimV(y1,y2,x,label,fs){
+  return L(x,y1,x,y2,'dim')+L(x-fs*.5,y1,x+fs*.5,y1,'dim')+L(x-fs*.5,y2,x+fs*.5,y2,'dim')+
+    L(x-fs*.3,y1+fs*.3,x+fs*.3,y1-fs*.3,'dim')+L(x-fs*.3,y2+fs*.3,x+fs*.3,y2-fs*.3,'dim')+
+    T(x+fs*.4,(y1+y2)/2,label,'d',`transform="rotate(-90 ${f1(x+fs*.4)} ${f1((y1+y2)/2)})" text-anchor="middle"`);
+}
+function arrowH(x1,x2,y){
+  const dir=x2>x1?1:-1, a=Math.min(6,Math.abs(x2-x1)*.25);
+  return L(x1,y,x2,y,'sym')+`<polygon points="${f1(x2)},${f1(y)} ${f1(x2-dir*a)},${f1(y-a*.45)} ${f1(x2-dir*a)},${f1(y+a*.45)}" class="arrow"/>`;
+}
+
+/* ---------- elevation ---------- */
+function drawElev(lay){
+  const W=S.W,H=S.H, fs=Math.max(4,W/38), pad=fs*4, det=S.detail, g=S.wall.moGap;
+  let o='';
+  o+=R_(-g,-g,W+2*g,H+2*g,'mo'); // MO
+  o+=T(-g,-g-fs*.4,`MO ${f1(W+2*g)}×${f1(H+2*g)}`,'d');
+  if(det==='coarse'){o+=R_(0,0,W,H,'h');}
+  else{o+=R_(0,0,W,H,'h');o+=R_(FW,FW,W-2*FW,H-2*FW,det==='fine'?'m':'t');}
+  lay.forEach((b,i)=>{
+    const bx1= i>0? b.x0-MW/2 : 0, bx2= i<lay.length-1? b.x0+b.w+MW/2 : W;
+    if(i>0){const mx=b.x0-MW; o+= det==='coarse'?L(mx+MW/2,0,mx+MW/2,H,'m'):R_(mx,FW,MW,H-2*FW,'fr');}
+    b.segs.forEach((sg,j)=>{
+      const segTop= j>0? sg.y0-MW/2 : 0, segBot= j<b.segs.length-1? sg.y0+sg.h+MW/2 : H;
+      if(j>0){const ty=sg.y0-MW; o+= det==='coarse'?L(bx1,ty+MW/2,bx2,ty+MW/2,'m'):R_(b.x0,ty,b.w,MW,'fr');}
+      const order=[...sg.sashes].sort((a,c)=>(a.outer?1:0)-(c.outer?1:0));
+      order.forEach(s=>{
+        const sw= s.t==='fixed'?SW*.5:SW;
+        if(det==='coarse'){
+          if(s.idx>0)o+=L(s.x+(s.sliding?OV()/20:0),segTop,s.x+(s.sliding?OV()/20:0),segBot,'m');
+        }else{
+          if(s.sliding&&s.outer){o+=R_(s.x,s.y,s.w,s.hgt,'fr');}
+          o+=R_(s.x,s.y,s.w,s.hgt,det==='fine'?'m':'t');
+          o+=R_(s.x+sw,s.y+sw,s.w-2*sw,s.hgt-2*sw,'g');
+          o+=R_(s.x+sw,s.y+sw,s.w-2*sw,s.hgt-2*sw,'gl');
+          if(det==='fine'&&s.t!=='fixed'){o+=R_(s.x+sw*.45,s.y+sw*.45,s.w-sw*.9,s.hgt-sw*.9,'t');}
+        }
+        const cx=s.x+s.w/2, cy=s.y+s.hgt/2, ins=sw+1;
+        if(s.t==='casement'){ // 拍板：頂點頂到實際鉸鏈位置（扇框外緣），不是玻璃邊
+          const hx = s.h==='L'? s.x : s.x+s.w, ox = s.h==='L'? s.x+s.w : s.x;
+          const apexX = S.apexHinge? hx: ox, baseX = S.apexHinge? ox: hx;
+          o+=L(baseX,s.y,apexX,cy,'sym')+L(baseX,s.y+s.hgt,apexX,cy,'sym');
+        }else if(s.t==='awning'){
+          const apexY=S.apexHinge? s.y+ins : s.y+s.hgt-ins, baseY=S.apexHinge? s.y+s.hgt-ins : s.y+ins;
+          o+=L(s.x+ins,baseY,cx,apexY,'sym')+L(s.x+s.w-ins,baseY,cx,apexY,'sym');
+        }else if(s.t==='sliding'){
+          const len=s.w*.35, dir=(s.idx%2===0)?1:-1;
+          if(s.count===1){o+=arrowH(cx-len/2,cx+len/2,cy);}
+          else o+=arrowH(cx-dir*len/2,cx+dir*len/2,cy);
+        }
+      });
+    });
+  });
+  const yb=H+g+fs*1.6;
+  lay.forEach(b=>{const l=b.i?MW/2:FW, r=b.i<lay.length-1?MW/2:FW; o+=dimH(b.x0-l,b.x0+b.w+r,yb,f1(b.w+l+r),fs);});
+  o+=dimH(0,W,yb+fs*1.6,W,fs);
+  const xr=W+g+fs*1.6;
+  o+=dimV(0,H,xr,H,fs);
+  const segs=lay[0].segs;
+  if(segs.length>1)segs.forEach((sg,j)=>{const t=j?MW/2:FW, bt=j<segs.length-1?MW/2:FW; o+=dimV(sg.y0-t,sg.y0+sg.h+bt,xr+fs*1.6,f1(sg.h+t+bt),fs);});
+  o+=T(0,-g-fs*2,'OUTSIDE 室外側','big');
+  // cell labels
+  if(det!=='coarse')lay.forEach(b=>b.segs.forEach(sg=>{o+=T(b.x0+2,sg.y0+fs*1.1,`R${sg.r+1}C${b.i+1}`,'', 'opacity=".55"');}));
+  return svg([-pad*.3-g,-fs*3.4-g,W+pad+fs*3+2*g,H+fs*6.5+2*g],fs,o);
+}
+
+/* ---------- plan ---------- */
+function drawPlan(lay){
+  const W=S.W, fs=Math.max(4,W/38), det=S.detail, ov=OV()/10, wl=S.wall;
+  const swing = det==='coarse'? 0 : (S.swing??30), ang=swing*Math.PI/180;
+  let o='', maxOut=D/2;
+  const yc=0; // frame centre line; outside = negative y
+  // wall: RC centred on frame, cladding outside/inside; wall runs beyond window each side
+  const ext=30, yo=-wl.rc/2+wl.off, yi=wl.rc/2+wl.off;
+  const wallBand=(x1,x2)=>{
+    if(det==='coarse'){return L(x1,yo-wl.ext,x2,yo-wl.ext,'rcl')+L(x1,yi+wl.int,x2,yi+wl.int,'rcl');}
+    return R_(x1,yo,x2-x1,wl.rc,'rc')+(wl.ext>0?R_(x1,yo-wl.ext,x2-x1,wl.ext,'cl'):'')+(wl.int>0?R_(x1,yi,x2-x1,wl.int,'cl'):'');
+  };
+  o+=wallBand(-ext,-wl.moGap)+wallBand(W+wl.moGap,W+ext);
+  // MO void
+  const moTop=yo-wl.ext-wl.cutOut, moBot=yi+wl.int+wl.cutIn;
+  o+=R_(-wl.moGap,moTop,W+2*wl.moGap,moBot-moTop,'mo');
+  maxOut=Math.max(maxOut,-moTop);
+  if(det==='coarse'){
+    o+=L(0,yc-D/2,W,yc-D/2,'h')+L(0,yc+D/2,W,yc+D/2,'h');
+    o+=L(0,yc-D/2,0,yc+D/2,'h')+L(W,yc-D/2,W,yc+D/2,'h');
+  }
+  lay.forEach((b,i)=>{
+    const seg=b.segs[b.segs.length-1];
+    if(det==='coarse'){
+      if(i>0){const mx=b.x0-MW/2;o+=L(mx,yc-D/2,mx,yc+D/2,'h');}
+    }else{
+      if(i===0)o+=R_(0,yc-D/2,FW,D,'fr');
+      if(i===lay.length-1)o+=R_(W-FW,yc-D/2,FW,D,'fr');
+      if(i>0)o+=R_(b.x0-MW,yc-D/2,MW,D,'fr');
+      o+=L(b.x0,yc-D/2,b.x0+b.w,yc-D/2,'t')+L(b.x0,yc+D/2,b.x0+b.w,yc+D/2,'t');
+    }
+    seg.sashes.forEach(s=>{
+      const gw=det==='fine'?1.2:0;
+      if(s.t==='sliding'){
+        const y = s.outer? yc-D*.22 : yc+D*.22;
+        if(det==='coarse'){o+=L(s.x,y,s.x+s.w,y,'m');}
+        else{o+=R_(s.x,y-gw-SW*.35,s.w,SW*.7+2*gw,'frt');o+=L(s.x,y,s.x+s.w,y,'h');}
+        if(det==='fine'&&s.idx>0){
+          const mx=s.x, my=yc-D*.62;
+          o+=L(mx,my,mx+ov,my,'dim')+L(mx,my-1.2,mx,my+1.2,'dim')+L(mx+ov,my-1.2,mx+ov,my+1.2,'dim')+T(mx+ov/2,my-1.4,`交疊 ${f1(OV())}`,'d','text-anchor="middle"');
+        }
+        return;
+      }
+      if(det==='coarse'){o+=L(s.x,yc,s.x+s.w,yc,'m');if(s.idx>0)o+=L(s.x,yc-D/2,s.x,yc+D/2,'m');return;}
+      if(det==='fine'){o+=R_(s.x,yc-D*.2,SW*.5,D*.4,'frt')+R_(s.x+s.w-SW*.5,yc-D*.2,SW*.5,D*.4,'frt');}
+      else if(s.idx>0){o+=L(s.x,yc-D/2,s.x,yc+D/2,'m');}
+      o+=L(s.x,yc,s.x+s.w,yc,'h');
+      if(s.t==='casement'&&swing>0){
+        const hx=s.h==='L'?s.x:s.x+s.w, dir=s.h==='L'?1:-1, stop=yc-D/2;
+        const tx=hx+dir*Math.cos(ang)*s.w, ty=stop-Math.sin(ang)*s.w;
+        maxOut=Math.max(maxOut,D/2+Math.sin(ang)*s.w);
+        o+=L(hx,stop,tx,ty,'sym'); // 拍板 2026-09-14：30° 實線示意，不畫成門
+        o+=`<path d="M ${f1(tx)} ${f1(ty)} A ${f1(s.w)} ${f1(s.w)} 0 0 ${dir>0?1:0} ${f1(hx+dir*s.w)} ${f1(stop)}" class="symd" ${NS}/>`;
+      }
+      if(s.t==='awning'&&det!=='coarse'){o+=L(s.x+SW,yc-D*.9,s.x+s.w-SW,yc-D*.9,'symd');maxOut=Math.max(maxOut,D*.9);}
+    });
+  });
+  o+=T(-ext,-maxOut-fs*1.3,'OUTSIDE 室外','big');
+  o+=T(-ext,moBot+fs*1.6,'INSIDE 室內','big');
+  o+=dimH(-wl.moGap,W+wl.moGap,moBot+fs*3.4,`MO ${f1(W+2*wl.moGap)}`,fs);
+  o+=dimH(0,W,moBot+fs*5,W,fs);
+  const top=-maxOut-fs*2.6;
+  return svg([-ext-fs*1.5,top,W+2*ext+fs*3,(moBot+fs*6.2)-top],fs,o);
+}
+
+/* ---------- section ---------- */
+function drawSec(lay){
+  const b=lay[S.active.c], H=S.H, sill=S.sill, det=S.detail, wl=S.wall;
+  const fs=Math.max(4,(H+sill)/40);
+  const xc=0; // frame centre; outside = negative x
+  const yTop=-(sill+H), yFL=0;
+  const xo=-wl.rc/2+wl.off, xi=wl.rc/2+wl.off, above=40;
+  let o='';
+  // wall above and below
+  const wallV=(y1,y2)=>{
+    if(det==='coarse')return L(xo-wl.ext,y1,xo-wl.ext,y2,'rcl')+L(xi+wl.int,y1,xi+wl.int,y2,'rcl');
+    return R_(xo,y1,wl.rc,y2-y1,'rc')+(wl.ext>0?R_(xo-wl.ext,y1,wl.ext,y2-y1,'cl'):'')+(wl.int>0?R_(xi,y1,wl.int,y2-y1,'cl'):'');
+  };
+  o+=wallV(yTop-above,yTop-wl.moGap)+wallV(yTop+H+wl.moGap,yFL);
+  // MO void
+  const moL=xo-wl.ext-wl.cutOut, moR=xi+wl.int+wl.cutIn;
+  o+=R_(moL,yTop-wl.moGap,moR-moL,H+2*wl.moGap,'mo');
+  // floor & 75 datum
+  o+=L(moL-D,yFL,moR+D*1.2,yFL,'h')+T(moR+D*1.4,yFL+fs*.35,'FL','');
+  o+=L(moL-D,-75,moR+D*1.2,-75,'dimd')+T(moR+D*1.4,-75+fs*.35,'75 cm 採光下限','d');
+  const frame=(y,h)=> det==='coarse'?L(xc-D/2,y+h/2,xc+D/2,y+h/2,'h'):R_(xc-D/2,y,D,h,'fr');
+  if(det==='coarse'){o+=R_(xc-D/2,yTop,D,H,'h');}
+  else{o+=frame(yTop,FW); o+=frame(yTop+H-FW,FW); o+=L(xc-D/2,yTop,xc-D/2,yTop+H,'t')+L(xc+D/2,yTop,xc+D/2,yTop+H,'t');}
+  b.segs.forEach((sg,j)=>{
+    const y0=yTop+sg.y0, h=sg.h;
+    if(j>0)o+=frame(y0-MW,MW);
+    const s=sg.sashes[0];
+    if(sg.sliding){
+      sg.sashes.slice(0,2).forEach(ss=>{
+        const x= ss.outer? xc-D*.22 : xc+D*.22;
+        if(det==='coarse')o+=L(x,y0,x,y0+h,'m');
+        else{o+=R_(x-SW*.35,y0,SW*.7,SW,'frt')+R_(x-SW*.35,y0+h-SW,SW*.7,SW,'frt')+L(x,y0+SW,x,y0+h-SW,'h');}
+      });
+    }else if(s.t==='awning'){
+      const ang=35*Math.PI/180, hy=y0+SW, len=h-SW*2;
+      const tx=xc-Math.sin(ang)*len, ty=hy+Math.cos(ang)*len;
+      if(det==='coarse'){o+=L(xc,y0,xc,y0+h,'m');}
+      else{o+=R_(xc-SW*.35,y0,SW*.7,SW,'frt')+L(xc,hy,tx,ty,'h')+L(xc-SW*.9,hy,tx-SW*.9,ty,'m');
+        o+=`<path d="M ${f1(tx)} ${f1(ty)} A ${f1(len)} ${f1(len)} 0 0 0 ${f1(xc)} ${f1(hy+len)}" class="symd" ${NS}/>`;
+        o+=L(xc,hy,xc,y0+h,'t');}
+    }else{
+      if(det==='coarse')o+=L(xc,y0,xc,y0+h,'m');
+      else{o+=R_(xc-SW*.35,y0,SW*.7,SW,'frt')+R_(xc-SW*.35,y0+h-SW,SW*.7,SW,'frt')+L(xc,y0+SW,xc,y0+h-SW,'h');}
+      if(s.t==='casement'&&det==='fine'){o+=`<circle cx="${f1(xc-SW*.5)}" cy="${f1(y0+h/2)}" r="1.2" class="sym" ${NS}/>`;}
+    }
+  });
+  const xd=moR+D*1.2;
+  o+=dimV(yTop,yTop+H,xd,H,fs);
+  o+=dimV(yTop+H,yFL,xd,sill,fs);
+  if(b.segs.length>1)b.segs.forEach((sg,j)=>{const t=j?MW/2:FW, bt=j<b.segs.length-1?MW/2:FW; o+=dimV(yTop+sg.y0-t,yTop+sg.y0+sg.h+bt,moL-fs*1.2,f1(sg.h+t+bt),fs);});
+  o+=T(moL-D,yTop-above-fs*.6,'OUT','big')+T(xi+wl.int+2,yTop-above-fs*.6,'IN','big');
+  return svg([moL-D-fs*2.4,yTop-above-fs*2.2,(xd+fs*11)-(moL-D-fs*2.4),(yFL+fs*1.2)-(yTop-above-fs*2.2)],fs,o);
+}
+
+/* ---------- summary & JSON ---------- */
+function summary(lay){
+  let sashes=0, openable=0, glass=0, daylight=0, openArea=0;
+  lay.forEach(b=>b.segs.forEach(sg=>sg.sashes.forEach(s=>{
+    sashes++;
+    const sw=s.t==='fixed'?SW*.5:SW;
+    const gw=s.w-2*sw, gh=s.hgt-2*sw, a=gw*gh/1e4;
+    glass+=a;
+    const top=S.sill+S.H-(s.y+sw), bot=top-gh;
+    const eff=Math.max(0,top-Math.max(bot,75));
+    daylight+=gw*eff/1e4;
+    if(s.t!=='fixed'){openable++; openArea+= s.t==='sliding'? a*.5 : a;}
+  })));
+  return {rows:S.rows.length,cols:S.cols.length,sashes,openable,glass,daylight,openArea};
+}
+function ifcPartition(){
+  const R=S.rows.length, C=S.cols.length;
+  if(R===1&&C===1){const n=S.cells[0][0].sashes.length;return n===1?'SINGLE_PANEL':n===2?'DOUBLE_PANEL_VERTICAL':n===3?'TRIPLE_PANEL_VERTICAL':'USERDEFINED';}
+  if(R===2&&C===1){const a=S.cells[0][0].sashes.length,b=S.cells[1][0].sashes.length;if(a===1&&b===1)return 'DOUBLE_PANEL_HORIZONTAL';if(a===1&&b===2)return 'TRIPLE_PANEL_TOP';if(a===2&&b===1)return 'TRIPLE_PANEL_BOTTOM';}
+  if(R===1&&C===2&&S.cells[0].every(c=>c.sashes.length===1))return 'DOUBLE_PANEL_VERTICAL';
+  return 'USERDEFINED';
+}
+function specJSON(lay){
+  const sum=summary(lay), wl=S.wall, g=wl.moGap;
+  const spec={
+    family:`UW-R${S.rows.length}C${S.cols.length}-${S.W}x${S.H}`, revitVersion:2024, units:'cm',
+    generation:{ // 拓樸：生成時決定，Type Catalog 一列
+      rows:S.rows.length, cols:S.cols.length,
+      cells:S.cells.map((row,r)=>row.map((cell,c)=>({id:`R${r+1}C${c+1}`,sashes:cell.sashes.map((s,k)=>{
+        const x={type:s.t}; if(s.t==='casement')x.hinge=s.h; if(s.t==='sliding')x.track=k%2===0?'outer':'inner';
+        x.ifcOperationType={fixed:'FIXEDCASEMENT',casement:s.h==='L'?'SIDEHUNGLEFTHAND':'SIDEHUNGRIGHTHAND',sliding:'SLIDINGHORIZONTAL',awning:'TOPHUNG'}[s.t]; return x;})})))
+    },
+    typeParams:{frameOuter:FW,mullion:MW,sash:SW,frameDepth:D,glass_mm:S.frame.glass,meetingRailOverlap_mm:f1(OV()),meetingRailOverlapMode:S.ovAuto?'equalsSashFrameWidth':'manual'},
+    instanceParams:{width:S.W,height:S.H,sillHeight:S.sill,rowRatios:S.rows.slice(),colRatios:S.cols.slice(),
+      frameOffsetFromWallCentre:wl.off,mo:{gapPerSide:g,width:f1(S.W+2*g),height:f1(S.H+2*g),cutBeyondExterior:wl.cutOut,cutBeyondInterior:wl.cutIn,
+          voidDepth:f1(wl.rc+wl.ext+wl.int+wl.cutOut+wl.cutIn),cutTargets:['host wall','exterior cladding','interior lining']}},
+    derived:{rowHeights:lay[0].segs.map(s=>f1(s.h)),colWidths:lay.map(b=>f1(b.w)),sashCount:sum.sashes,openableCount:sum.openable,glassArea_m2:+sum.glass.toFixed(3),daylightArea_m2:+sum.daylight.toFixed(3),openableArea_m2:+sum.openArea.toFixed(3)},
+    ifc:{entity:'IfcWindow',partitioningType:ifcPartition(),psetWindowCommon:{ThermalTransmittance:null,GlazingAreaFraction:+(sum.glass/(S.W*S.H/1e4)).toFixed(3),Infiltration:null,FireRating:null,IsExternal:true}},
+    taiwanReview:{daylightArea_m2:+sum.daylight.toFixed(3),ventilationOpening_m2:+sum.openArea.toFixed(3),Uaf_W_m2K:null,SF:null,
+      airtightnessClass_CNS11527:8,watertightnessClass_CNS11528:35,windLoadClass_CNS11526_kgf_m2:280,glassType:'8mm 單層（膠合 5+5 為常見替代）',fireRating_h:null,
+      _defaultsSource:'CNS 等級與框深取自大同鋁業型錄與 YKK AP 台灣；玻璃厚與窗台高取自裝修媒體；框寬類估值未查證'},
+    symbols:{apexAtHinge:S.apexHinge,planSwingAngle:S.swing}
+  };
+  return JSON.stringify(spec,null,2);
+}
+function hl(js){return js.replace(/"([^"]+)":/g,'<span class="k">"$1"</span>:').replace(/: "([^"]*)"/g,': <span class="s">"$1"</span>');}
+
+/* ---------- render ---------- */
+function render(){
+  ({FW,MW,SW,D}=S.frame);
+  S.active.r=Math.min(S.active.r,S.rows.length-1); S.active.c=Math.min(S.active.c,S.cols.length-1);
+  const lay=layout();
+  $('elev').innerHTML=drawElev(lay);
+  $('plan').innerHTML=drawPlan(lay);
+  $('sec').innerHTML=drawSec(lay);
+  const SCALE={coarse:'1:100',medium:'1:50',fine:'1:20'}[S.detail];
+  $('elevCap').textContent=`自室外看 · ${SCALE}`;
+  $('planCap').textContent=`剖切最下排 · ${SCALE}`;
+  $('secCap').textContent=`第 ${S.active.c+1} 樘 · 室外在左 · ${SCALE}`;
+  const s=summary(lay);
+  $('tiles').innerHTML=[
+    ['排 × 樘',`${s.rows}×${s.cols}`,''],['扇數',s.sashes,''],['可開扇',s.openable,''],
+    ['玻璃面積',s.glass.toFixed(2),'m²'],['有效採光',s.daylight.toFixed(2),'m²','acc'],['可開口',s.openArea.toFixed(2),'m²','acc'],
+    ['MO',`${f1(S.W+2*S.wall.moGap)}×${f1(S.H+2*S.wall.moGap)}`,'','acc']
+  ].map(t=>`<div class="tile ${t[3]||''}"><div class="k">${t[0]}</div><div class="v">${t[1]}<small>${t[2]}</small></div></div>`).join('');
+  $('json').innerHTML=hl(specJSON(lay));
+  renderControls();
+  save();
+}
+function numField(id,label,unit,val,step,extra=''){return `<label class="f"><span>${label} <b>${unit}</b></span><input type="number" id="${id}" value="${val}" step="${step}" ${extra}></label>`;}
+function renderControls(){
+  $('W').value=S.W;$('H').value=S.H;$('sill').value=S.sill;$('R').value=S.rows.length;$('C').value=S.cols.length;
+  $('presets').innerHTML=Object.keys(PRESETS).map(k=>`<button class="chip" data-p="${k}">${PRESETS[k].name}</button>`).join('');
+  // grid map
+  const R=S.rows.length,C=S.cols.length;
+  const gm=$('gridmap'); gm.style.gridTemplateColumns=`repeat(${C},1fr)`;
+  gm.innerHTML=S.cells.map((row,r)=>row.map((cell,c)=>{
+    const on=(r===S.active.r&&c===S.active.c);
+    const desc=cell.sashes.map(s=>ABBR[s.t]+(s.t==='casement'?s.h:'')).join('·');
+    return `<button class="${on?'on':''}" data-cell="${r}:${c}"><b>R${r+1}C${c+1}</b>${cell.sashes.length} 扇 ${desc}</button>`;
+  }).join('')).join('');
+  // cell editor
+  const cell=S.cells[S.active.r][S.active.c], list=cell.sashes;
+  $('cell').innerHTML=`<div class="seg"><h4><b>R${S.active.r+1}C${S.active.c+1}</b><span>扇數 <select id="cnt">${[1,2,3,4].map(n=>`<option ${n===list.length?'selected':''}>${n}</option>`).join('')}</select></span></h4>
+    <div class="chips">${Object.keys(TYPES).map(t=>`<button class="chip ${list.every(s=>s.t===t)?'on':''}" data-all="${t}">${TYPES[t]}</button>`).join('')}</div>
+    ${list.map((s,k)=>`<div class="sash"><span class="n">${k+1}</span><select data-s="${k}">${Object.keys(TYPES).map(t=>`<option value="${t}" ${s.t===t?'selected':''}>${TYPES[t]}</option>`).join('')}</select>
+      ${s.t==='casement'?`<button class="small" data-h="${k}">鉸鏈 ${s.h==='L'?'左':'右'}</button>`:s.t==='sliding'?`<span class="hint">${k%2===0?'外軌':'內軌'}</span>`:'<span></span>'}</div>`).join('')}
+    <div class="chips"><button class="small" id="applyRow">套用到整排</button><button class="small" id="applyCol">套用到整樘</button><button class="small" id="applyAll">套用到整組</button></div></div>`;
+  // ratios
+  const rowF=S.rows.map((p,r)=>`<label class="f"><span>R${r+1} 高 <b>%</b></span><input type="number" data-row="${r}" value="${f1(p)}" min="5" max="90" step="5" ${r===S.rows.length-1?'readonly':''}></label>`).join('');
+  const colF=S.cols.map((p,c)=>`<label class="f"><span>C${c+1} 寬 <b>%</b></span><input type="number" data-col="${c}" value="${f1(p)}" min="5" max="90" step="5" ${c===S.cols.length-1?'readonly':''}></label>`).join('');
+  $('ratios').innerHTML=(R>1?`<div class="rowN">${rowF}<button class="small" data-eq="rows">等分</button></div>`:'')+(C>1?`<div class="rowN">${colF}<button class="small" data-eq="cols">等分</button></div>`:'')+(R===1&&C===1?'<p class="hint">單排單樘，沒有分割比例可調。</p>':'');
+  // frame & wall
+  const F=S.frame, Wl=S.wall;
+  $('frameInputs').innerHTML=numField('f_FW','外框寬','cm',F.FW,.5,'min="1"')+numField('f_MW','中框寬','cm',F.MW,.5,'min="1"')+numField('f_SW','扇框寬','cm',F.SW,.5,'min="1"')+numField('f_D','框深','cm',F.D,.5,'min="3"')+numField('f_glass','玻璃厚','mm',F.glass,1,'min="3"')+numField('ov','橫拉交疊','mm',f1(OV()),5,S.ovAuto?'readonly':'min="0"')+`<label class="f"><span>交疊規則</span><button class="chip acc ${S.ovAuto?'on':''}" data-ovauto="1" title="預設：兩支勾企完全重疊，交疊量＝扇框寬">${S.ovAuto?'同扇框寬':'手動'}</button></label>`;
+  $('wallInputs').innerHTML=numField('w_rc','RC 牆厚','cm',Wl.rc,1,'min="8"')+numField('w_ext','外飾板','cm',Wl.ext,.5,'min="0"')+numField('w_int','內飾板','cm',Wl.int,.5,'min="0"')+numField('w_off','框位置偏移','cm',Wl.off,.5,'title="正值向室外、負值向室內；0＝框心對牆心"')+numField('w_moGap','MO 每側預留','cm',Wl.moGap,.5,'min="0"')+numField('w_cutOut','外切透','cm',Wl.cutOut,1,'min="0"')+numField('w_cutIn','內切透','cm',Wl.cutIn,1,'min="0"');
+  $('detail').innerHTML=[['coarse','粗略'],['medium','中等'],['fine','細緻']].map(d=>`<button class="chip ${S.detail===d[0]?'on':''}" data-d="${d[0]}">${d[1]}</button>`).join('');
+  $('apex').innerHTML=[[true,'頂點在鉸鏈側'],[false,'頂點在把手側']].map(a=>`<button class="chip acc ${S.apexHinge===a[0]?'on':''}" data-a="${a[0]}">${a[1]}</button>`).join('');
+  $('swing').innerHTML=[[0,'外推平面不畫開啟'],[30,'30° 實線（公司標準）'],[45,'45°'],[90,'90°']].map(a=>`<button class="chip acc ${S.swing===a[0]?'on':''}" data-sw="${a[0]}">${a[1]}</button>`).join('');
+}
+
+/* ---------- helpers ---------- */
+function resizeGrid(R,C){
+  const cells=[];
+  for(let r=0;r<R;r++){const row=[];for(let c=0;c<C;c++){row.push(S.cells[r]&&S.cells[r][c]?S.cells[r][c]:clone(S.cells[Math.min(r,S.cells.length-1)][Math.min(c,S.cells[0].length-1)]));}cells.push(row);}
+  S.cells=cells;
+  S.rows=S.rows.length===R?S.rows:Array(R).fill(100/R);
+  S.cols=S.cols.length===C?S.cols:Array(C).fill(100/C);
+}
+function setRatio(arr,i,v){
+  v=Math.max(5,Math.min(90,v)); const last=arr.length-1; if(i===last)return;
+  arr[i]=v; const others=arr.slice(0,last).reduce((a,b)=>a+b,0);
+  if(others>95){arr[i]=Math.max(5,v-(others-95));}
+  arr[last]=100-arr.slice(0,last).reduce((a,b)=>a+b,0);
+}
+
+/* ---------- events ---------- */
+document.addEventListener('input',e=>{
+  const t=e.target, v=+t.value;
+  if(t.id==='W')S.W=Math.max(40,v||40);
+  else if(t.id==='H')S.H=Math.max(40,v||40);
+  else if(t.id==='sill')S.sill=Math.max(0,v||0);
+  else if(t.id==='ov')S.ov=Math.max(0,v||0);
+  else if(t.id&&t.id.startsWith('f_')){const k=t.id.slice(2);S.frame[k]=Math.max(k==='glass'?3:1,v||1);}
+  else if(t.id&&t.id.startsWith('w_')){const k=t.id.slice(2);S.wall[k]= k==='off' ? (v||0) : Math.max(0,v||0);}
+  else if(t.dataset.row!==undefined){setRatio(S.rows,+t.dataset.row,v);}
+  else if(t.dataset.col!==undefined){setRatio(S.cols,+t.dataset.col,v);}
+  else return;
+  if(t.dataset.row!==undefined||t.dataset.col!==undefined){ // keep focus: only re-render drawings + last field
+    render(); const el=document.querySelector(`[data-${t.dataset.row!==undefined?'row':'col'}="${t.dataset.row??t.dataset.col}"]`); if(el){el.focus();}
+    return;
+  }
+  render(); const el=$(t.id); if(el){el.focus();}
+});
+document.addEventListener('change',e=>{
+  const t=e.target, cell=S.cells[S.active.r][S.active.c];
+  if(t.id==='R'){resizeGrid(+t.value,S.cols.length);}
+  else if(t.id==='C'){resizeGrid(S.rows.length,+t.value);}
+  else if(t.id==='cnt'){const n=+t.value,list=cell.sashes;while(list.length<n)list.push(clone(list[list.length-1]));list.length=n;list.forEach((s,k)=>{if(s.t==='casement')s.h=k<n/2?'L':'R';});}
+  else if(t.dataset.s!==undefined){cell.sashes[+t.dataset.s].t=t.value;}
+  else return;
+  render();
+});
+document.addEventListener('click',e=>{
+  const t=e.target.closest('button'); if(!t)return;
+  const cell=S.cells[S.active.r][S.active.c];
+  if(t.dataset.p){const keep={detail:S.detail,apexHinge:S.apexHinge,swing:S.swing,frame:S.frame,wall:S.wall};S=Object.assign(fromPreset(PRESETS[t.dataset.p]),keep);}
+  else if(t.dataset.cell){const [r,c]=t.dataset.cell.split(':').map(Number);S.active={r,c};}
+  else if(t.dataset.all){const ty=t.dataset.all;cell.sashes.forEach((s,k)=>{s.t=ty;if(ty==='casement')s.h=k<cell.sashes.length/2?'L':'R';});}
+  else if(t.dataset.h!==undefined){const s=cell.sashes[+t.dataset.h];s.h=s.h==='L'?'R':'L';}
+  else if(t.dataset.eq){const arr=S[t.dataset.eq];arr.fill(100/arr.length);}
+  else if(t.dataset.d)S.detail=t.dataset.d;
+  else if(t.dataset.a!==undefined)S.apexHinge=t.dataset.a==='true';
+  else if(t.dataset.sw!==undefined)S.swing=+t.dataset.sw;
+  else if(t.dataset.ovauto){S.ovAuto=!S.ovAuto; if(!S.ovAuto)S.ov=S.frame.SW*10;}
+  else if(t.id==='applyRow'){S.cells[S.active.r]=S.cells[S.active.r].map(()=>clone(cell));}
+  else if(t.id==='applyCol'){S.cells.forEach(row=>{row[S.active.c]=clone(cell);});}
+  else if(t.id==='applyAll'){S.cells=S.cells.map(row=>row.map(()=>clone(cell)));}
+  else if(t.id==='copy'){
+    const txt=specJSON(layout());
+    const done=()=>{const el=$('toast');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),1400);};
+    try{navigator.clipboard.writeText(txt).then(done,done);}catch(err){done();}
+    return;
+  }
+  else return;
+  render();
+});
+render();
+})();
+</script>

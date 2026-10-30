@@ -42,7 +42,9 @@ export async function executeRevitTool(
 
     // 跨文件命令需要較長 timeout（開啟 .rvt/.rfa 檔案較費時）
     const CROSS_DOC_COMMANDS = new Set(["read_source_file_sheets", "copy_sheets_from_file", "sync_sheet_parameters_from_source", "inject_green_material_into_family"]);
-    const timeoutMs = CROSS_DOC_COMMANDS.has(commandName) ? 120000 : 30000;
+    // 族生成命令需要較長 timeout（建幾何、空心切割、載入專案較費時）
+    const EXTENDED_TIMEOUT_COMMANDS = new Set(["generate_window_family"]);
+    const timeoutMs = (CROSS_DOC_COMMANDS.has(commandName) || EXTENDED_TIMEOUT_COMMANDS.has(commandName)) ? 120000 : 30000;
 
     // 發送命令到 Revit
     const response = await client.sendCommand(commandName, args, timeoutMs);
