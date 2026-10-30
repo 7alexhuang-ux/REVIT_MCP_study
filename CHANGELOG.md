@@ -111,7 +111,7 @@
 - **文件**：`docs/universal-window/SPEC.md`（規格 v0.1）、`docs/universal-window/ROADMAP.md`、`docs/universal-window/configurator-demo.html`（互動示意，Phase 0）、`docs/ADR.md`（D-001～D-007：拓樸生成時決定／幾何程式直接畫／Phase 1 固定尺寸／圖面慣例／交疊＝扇框寬／MO 空心切透／worktree 分支）。
 - **工具**：`generate_window_family`（規格 JSON → Revit 2024 生成 .rfa 並載入專案）。TS：`MCP-Server/src/tools/window-family-tools.ts`（full／architect profile，120 s timeout）；C#：`MCP/Core/WindowFamily/{WindowFamilySpec,WindowLayoutMath,UniversalWindowParameters,WindowFamilyBuilder}.cs`、`MCP/Core/Commands/CommandExecutor.WindowFamily.cs`、共用參數檔 `MCP/Resources/shared-parameters/universal-window.txt`。狀態：**已編譯、單元測試 85 pass、未在 Revit 內實測**；工具回傳 `templateProbe`（參考平面名、視圖名、室外方向）供首次實測回填 SPEC §10。
 - **安裝腳本**：`scripts/install-addon.ps1` 一併部署共用參數檔到 `%APPDATA%\RevitMCP\shared-parameters\`。
-- **計數同步**：Runtime MCP tools 181 → 182（main 的 CLAUDE.md／README／inventory／docs/BIM_MCP 公開頁原本漂移在 173，一併修正）。
+- **計數同步**：Runtime MCP tools 192 → 201（含 main 既有 8 個整地工具未計入的漂移與新增 generate_window_family）。
 - **已知未處理**：`revit-tools.ts` 在 full／architect／structural profile 會把 grading 工具重複註冊（既有 bug，另案處理）；ADR D-006 專案端「放窗後自動切割相交飾板」留待 Phase 3。
 
 ### 📚 調查（2026-09-13～14，見 SPEC §10 未查證清單）

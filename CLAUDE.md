@@ -131,6 +131,7 @@ If pulling the 2026-07-17 cleanup commit fails with "local changes would be over
 | `MCP-Server/src/tools/revit-tools.ts` | Execution bridge from tool name to Revit command |
 | `MCP/Core/Commands/CommandExecutor.Walkthrough.cs` | Walkthrough presentation package commands: camera station discovery, frame/plan/section export, glTF model export, depth map export (external Node/Chrome subprocess) |
 | `viewer/walkthrough/` | Offline four-pane walkthrough viewer template (frames/plan/section/3D synced by path position); data contract in `viewer/walkthrough/CONTRACT.md`; deployed to `%APPDATA%\RevitMCP\viewer\walkthrough` by `install-addon.ps1` |
+| `MCP-Server/src/tools/window-family-tools.ts` | `generate_window_family` (Universal Window Family Generator, Phase 1) — schema per `docs/universal-window/SPEC.md` §8 |
 | `MCP-Server/src/tools/annotations.ts` | Central `title` + `readOnlyHint`/`destructiveHint` injection for every registered tool (MCP 2026-07-28 metadata layer) |
 | `MCP-Server/src/apps/register-apps.ts` | MCP Apps (`io.modelcontextprotocol/ui`) resource wiring: `listAppResources` / `readAppResource` / `withAppUi` |
 | `MCP-Server/src/apps/clash-viewer/` | The first MCP App: `app.ts` (ext-apps client) + `template.html`, bundled by `scripts/build-apps.mjs` into a self-contained `ui://clash-viewer/index.html` served for `detect_clashes` |
