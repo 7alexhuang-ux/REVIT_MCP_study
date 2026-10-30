@@ -564,5 +564,103 @@ namespace RevitMCP.Core
 
             return added;
         }
+
+        /// <summary>
+        /// 地界線（PropertyLine）不經 CustomExporter（曲線不匯出），這裡自行收集主模型與各連結模型的地界線，
+        /// 離散成線段寫成 LINES 節點：extras.category="Property Lines"、source＝連結名（issue-manager viewer3d.md §21.5）。
+        /// 回傳線段數。
+        /// </summary>
+        private static int AddPropertyLinesToBuilder(GltfBuilder builder, List<WebCompareDoc> docs, Vec3 offset, List<string> warnings,
+            Func<string, GltfBuilder?>? builderForDocument = null)
+        {
+            const double toM = CameraPathMath.FeetToMeters;
+            var options = new Options { IncludeNonVisibleObjects = true, DetailLevel = ViewDetailLevel.Fine };
+            var segments = 0;
+            // splitLinks：地界線寫進所屬文件那一檔；材質索引各 builder 不同，所以每個 builder 各記一個。
+            var materials = new Dictionary<GltfBuilder, int>();
+            foreach (var d in docs)
+            {
+                // splitLinks：只處理本次匯出有走訪到的連結（回傳 null＝沒走訪到，略過），避免長出只有線的分檔。
+                var target = builderForDocument == null ? builder : builderForDocument(d.Name);
+                if (target == null) continue;
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var e in WebCompareElements(d.Doc, BuiltInCategory.OST_SiteProperty, BuiltInCategory.OST_SitePropertyLineSegment))
+                {
+                    var curves = new List<Curve>();
+                    try
+                    {
+                        CollectCurves(e.get_Geometry(options), curves);
+                        if (curves.Count == 0)
+                        {
+                            var c = (e as CurveElement)?.GeometryCurve ?? (e.Location as LocationCurve)?.Curve;
+                            if (c != null) curves.Add(c);
+                        }
+                    }
+                    catch (Autodesk.Revit.Exceptions.ApplicationException ex)
+                    {
+                        warnings.Add($"地界線 {d.Name}:{e.Id.GetIdValue()} 讀不到幾何：{ex.Message}");
+                        continue;
+                    }
+
+                    var points = new List<Vec3>();
+                    foreach (var curve in curves)
+                    {
+                        IList<XYZ> pts;
+                        try { pts = curve.Tessellate(); }
+                        catch (Autodesk.Revit.Exceptions.ApplicationException) { continue; }
+                        for (var i = 0; i + 1 < pts.Count; i++)
+                        {
+                            var a = d.Transform.OfPoint(pts[i]);
+                            var b = d.Transform.OfPoint(pts[i + 1]);
+                            // 父元件（PropertyLine）與子線段（PropertyLineSegment）常回傳同一條曲線，去重。
+                            var key = SegmentKey(a, b);
+                            if (!seen.Add(key)) continue;
+                            points.Add(new Vec3(a.X * toM - offset.X, a.Z * toM - offset.Z, -(a.Y * toM - offset.Y)));
+                            points.Add(new Vec3(b.X * toM - offset.X, b.Z * toM - offset.Z, -(b.Y * toM - offset.Y)));
+                        }
+                    }
+
+                    if (points.Count < 2) continue;
+                    target.BeginElement(new GltfElementInfo
+                    {
+                        ElementId = e.Id.GetIdValue(),
+                        UniqueId = e.UniqueId,
+                        Category = "Property Lines",
+                        Family = e.Name,
+                        Name = "Property Line " + e.Id.GetIdValue().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        Source = d.Name
+                    });
+                    if (!materials.TryGetValue(target, out var material))
+                    {
+                        material = target.AddMaterial("Property Line", 0.898, 0.282, 0.302, 1.0);
+                        materials[target] = material;
+                    }
+
+                    target.AddLineSegments(material, points);
+                    target.EndElement();
+                    segments += points.Count / 2;
+                }
+            }
+
+            return segments;
+        }
+
+        private static void CollectCurves(GeometryElement geometry, List<Curve> curves)
+        {
+            if (geometry == null) return;
+            foreach (var obj in geometry)
+            {
+                if (obj is Curve c) curves.Add(c);
+                else if (obj is GeometryInstance gi) CollectCurves(gi.GetInstanceGeometry(), curves);
+            }
+        }
+
+        private static string SegmentKey(XYZ a, XYZ b)
+        {
+            string P(XYZ p) => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0.000},{1:0.000},{2:0.000}", p.X, p.Y, p.Z);
+            var pa = P(a);
+            var pb = P(b);
+            return string.CompareOrdinal(pa, pb) <= 0 ? pa + "|" + pb : pb + "|" + pa;
+        }
     }
 }

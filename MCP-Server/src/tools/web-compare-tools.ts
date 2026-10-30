@@ -125,6 +125,21 @@ export const webCompareTools: Tool[] = [
                     default: "auto",
                     description: "連結模型的 Toposolid／Topography 寫入 GLB 的方式。auto：CustomExporter 沒匯出連結地形時，自己三角化補上並依 section box 裁切；always：一律補；off：不補。",
                 },
+                splitLinks: {
+                    type: "boolean",
+                    default: false,
+                    description: "true：主檔只放主模型，每個連結文件（以文件標題為鍵）另寫 part_<ascii-slug>.glb，並輸出 parts.json（版本、各檔面數／節點數／位元組、defaultVisible、前 5 大類別）。每個檔的場景 extras 都有相同 originOffsetMeters，分檔另有 part:{key,label}。預設 false＝行為與先前完全相同。",
+                },
+                maxPartTriangles: {
+                    type: "integer",
+                    minimum: 1,
+                    description: "splitLinks 時每個分檔各自的三角面上限（省略＝等於 maxTriangles）；maxTriangles 只套主檔。某分檔超過上限只停止該檔並在 warnings 說明，其他檔照常輸出。",
+                },
+                maxTotalTriangles: {
+                    type: "integer",
+                    minimum: 1,
+                    description: "splitLinks 時主檔與全部分檔合計的三角面上限（省略＝maxTriangles + 6×分檔上限）；超過整個匯出提前停止並在 warnings 說明。",
+                },
             },
         },
     },
@@ -151,6 +166,7 @@ webCompareTools.push(
             properties: {
                 ...Object.fromEntries(Object.entries(exportProperties).filter(([key]) => !["designOptions", "includeImages", "includeIfc", "includeGlb", "pixelSize", "camera"].includes(key))),
                 optionKeys: { type: "array", items: { type: "string" }, uniqueItems: true, description: "選項 UniqueId；省略或空陣列匯出全部" },
+                sourceViewName: { type: "string", description: "splitLinks=true 時暫存視圖要複製的 3D 視圖名稱；省略＝作用中的 3D 視圖，再不行自動挑選未裁切的非透視 3D 視圖。" },
                 originOffsetMeters: { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3, description: "共用 Revit XYZ 公尺原點偏移；所有分件與命名視圖必須一致" },
             },
         },

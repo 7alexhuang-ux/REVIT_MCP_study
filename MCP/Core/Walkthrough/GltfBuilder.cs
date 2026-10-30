@@ -23,6 +23,8 @@ namespace RevitMCP.Core.Walkthrough
         public long ElementId;
         public string UniqueId;
         public string Category;
+        /// <summary>Category 的 BuiltInCategory 整數值（與介面語言無關）；0＝未知。不寫進 GLB，只供分檔判斷。</summary>
+        public int CategoryBuiltIn;
         public string Family;
         public string Name;
         /// <summary>Document the element lives in: "(host)" or the linked document title.</summary>
@@ -81,6 +83,20 @@ namespace RevitMCP.Core.Walkthrough
         }
 
         private readonly List<GltfImage> _images = new List<GltfImage>();
+
+        /// <summary>
+        /// Revit 內部座標（公尺）中被扣掉的 GLB 原點；有值時寫進 scenes[0].extras.originOffsetMeters（同 camera.json），
+        /// 網頁上傳基地範圍時可自動對齊。null＝不輸出。
+        /// </summary>
+        public Vec3? OriginOffsetMeters { get; set; }
+
+        /// <summary>
+        /// 連結模型分檔（splitLinks）的檔案識別：兩者皆非空時寫進 scenes[0].extras.part = { key, label }。
+        /// 主檔不設定。
+        /// </summary>
+        public string PartKey { get; set; } = string.Empty;
+
+        public string PartLabel { get; set; } = string.Empty;
 
         private readonly List<ElementNode> _elementNodes = new List<ElementNode>();
         private ElementNode _currentElementNode;
@@ -648,9 +664,24 @@ namespace RevitMCP.Core.Walkthrough
             }
 
             json.Append("{\"asset\":{\"version\":\"2.0\",\"generator\":\"RevitMCP walkthrough exporter\"},\"scene\":0");
+            var sceneExtraFields = new List<string>();
+            if (OriginOffsetMeters.HasValue)
+            {
+                sceneExtraFields.Add(string.Format(CultureInfo.InvariantCulture, "\"originOffsetMeters\":[{0},{1},{2}]",
+                    Num(OriginOffsetMeters.Value.X), Num(OriginOffsetMeters.Value.Y), Num(OriginOffsetMeters.Value.Z)));
+            }
+
+            if (!string.IsNullOrEmpty(PartKey))
+            {
+                sceneExtraFields.Add("\"part\":{\"key\":" + JsonString(PartKey) + ",\"label\":" + JsonString(string.IsNullOrEmpty(PartLabel) ? PartKey : PartLabel) + "}");
+            }
+
+            var sceneExtras = sceneExtraFields.Count > 0
+                ? ",\"extras\":{" + string.Join(",", sceneExtraFields) + "}"
+                : string.Empty;
             if (nodes.Count == 0)
             {
-                json.Append(",\"scenes\":[{\"nodes\":[]}]}");
+                json.Append(",\"scenes\":[{\"nodes\":[]").Append(sceneExtras).Append("}]}");
             }
             else
             {
@@ -660,7 +691,7 @@ namespace RevitMCP.Core.Walkthrough
                     nodeIndices.Add(i.ToString(CultureInfo.InvariantCulture));
                 }
 
-                json.Append(",\"scenes\":[{\"nodes\":[").Append(string.Join(",", nodeIndices)).Append("]}],\"nodes\":[").Append(string.Join(",", nodes)).Append(']');
+                json.Append(",\"scenes\":[{\"nodes\":[").Append(string.Join(",", nodeIndices)).Append(']').Append(sceneExtras).Append("}],\"nodes\":[").Append(string.Join(",", nodes)).Append(']');
                 json.Append(",\"meshes\":[").Append(string.Join(",", meshes)).Append(']');
                 if (_images.Count > 0)
                 {

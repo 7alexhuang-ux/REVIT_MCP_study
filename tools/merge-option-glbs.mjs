@@ -52,7 +52,7 @@ export function mergeParts(parts, manifest, originOffsetMeters) {
         optionMap.set(option.optionKey, { setKey: set.setKey, setName: set.setName, optionKey: option.optionKey, optionName: option.optionName, isPrimary: option.isPrimary });
     }
     if (!Array.isArray(originOffsetMeters) || originOffsetMeters.length !== 3 || !originOffsetMeters.every(Number.isFinite)) throw new Error('缺少共用 originOffsetMeters');
-    const out = { asset: { version: '2.0', generator: 'RevitMCP merge-option-glbs' }, scene: 0, scenes: [{ nodes: [] }], nodes: [], meshes: [], accessors: [], bufferViews: [], materials: [], textures: [], images: [], samplers: [], extras: { originOffsetMeters } };
+    const out = { asset: { version: '2.0', generator: 'RevitMCP merge-option-glbs' }, scene: 0, scenes: [{ nodes: [], extras: { originOffsetMeters } }], nodes: [], meshes: [], accessors: [], bufferViews: [], materials: [], textures: [], images: [], samplers: [], extras: { originOffsetMeters } };
     const binaries = [], identities = new Map(); let length = 0, duplicates = 0;
     for (const { json, bin, part } of parts) {
         if ((json.extensionsUsed?.length ?? 0) || (json.extensionsRequired?.length ?? 0) || json.animations?.length || json.skins?.length || json.cameras?.length)

@@ -85,6 +85,7 @@ namespace RevitMCP.Core
             if (parameters["originOffsetMeters"] != null || parameters["cameraPath"] != null || File.Exists(Path.Combine(outputDir, "camera.json")))
                 offset = ResolveNamedViewsOrigin(parameters, outputDir, out offsetSource);
             var maxTriangles = parameters["maxTriangles"]?.Value<int?>() ?? 3_000_000;
+            var splitOptions = ParseWebCompareSplitOptions(parameters, maxTriangles);
             var maxElementTriangles = parameters["maxElementTriangles"]?.Value<int?>() ?? 100_000;
             var heavy = new WebCompareHeavyOptions
             {
@@ -123,6 +124,8 @@ namespace RevitMCP.Core
             var timer = Stopwatch.StartNew();
             // 先落一份進度，逾時或意外中止不會把前一輪成功報告當成本輪結果。
             var reportPath = Path.Combine(outputDir, "design_options_export.json");
+            if (splitOptions != null)
+                warnings.Add("splitLinks=true：主檔只含主模型；每個連結文件另寫 part_<slug>.glb，清單在 parts.json（不在 parts 陣列內，merge-option-glbs 只合併主檔與選項）。暫存視圖改為複製來源 3D 視圖，使連結全部走訪。");
             var report = new JObject
             {
                 ["complete"] = false, ["state"] = "running", ["revitDoc"] = doc.Title,
@@ -137,17 +140,29 @@ namespace RevitMCP.Core
                 group.Start();
                 try
                 {
-                    View3D temp;
+                    View3D? temp = null;
                     using (var tx = new Transaction(doc, "設計選項：建立全模型暫存等角視圖"))
                     {
                         tx.Start();
-                        var type = new FilteredElementCollector(doc).OfClass(typeof(ViewFamilyType)).Cast<ViewFamilyType>()
-                            .FirstOrDefault(t => t.ViewFamily == ViewFamily.ThreeDimensional);
-                        if (type == null) throw new InvalidOperationException("找不到三維 ViewFamilyType。");
-                        temp = View3D.CreateIsometric(doc, type.Id);
-                        temp.ViewTemplateId = ElementId.InvalidElementId;
-                        temp.IsSectionBoxActive = false;
-                        temp.CropBoxActive = false;
+                        if (splitOptions != null)
+                        {
+                            // 新建的等角視圖實測只走到部分連結；splitLinks 改複製來源 3D 視圖（連結顯示設定與使用者一致）。
+                            temp = DuplicateDesignOptionSourceView(doc, parameters["sourceViewName"]?.Value<string>(), warnings, report);
+                        }
+
+                        if (temp == null)
+                        {
+                            if (splitOptions != null)
+                                warnings.Add("splitLinks：沒有可複製的 3D 視圖（找不到或複製失敗），暫存視圖退回新建等角視圖，部分連結模型可能不會被走訪。");
+                            var type = new FilteredElementCollector(doc).OfClass(typeof(ViewFamilyType)).Cast<ViewFamilyType>()
+                                .FirstOrDefault(t => t.ViewFamily == ViewFamily.ThreeDimensional);
+                            if (type == null) throw new InvalidOperationException("找不到三維 ViewFamilyType。");
+                            temp = View3D.CreateIsometric(doc, type.Id);
+                            temp.ViewTemplateId = ElementId.InvalidElementId;
+                            temp.IsSectionBoxActive = false;
+                            temp.CropBoxActive = false;
+                        }
+
                         tx.Commit();
                     }
                     var path = Path.Combine(outputDir, "main_model.glb");
@@ -158,7 +173,13 @@ namespace RevitMCP.Core
                             WebCompareDocuments(doc), new WebCompareSectionOptions { Mode = "off", TerrainMode = "off" }, null,
                             new List<WebCompareTerrainPiece>(), links, parameters["contourIntervalMeters"]?.Value<double?>() ?? 1,
                             excludedCategories, excludedElements, maxElementTriangles, parameters["dumpAppearance"]?.Value<bool?>() ?? false,
-                            heavy, (document, element) => element.DesignOption == null);
+                            heavy, (document, element) => element.DesignOption == null, splitOptions);
+                        if (splitOptions != null)
+                        {
+                            report["splitLinks"] = true;
+                            report["partsManifest"] = "parts.json";
+                            report["linkParts"] = links["splitLinks"]?["parts"]?.DeepClone() ?? new JArray();
+                        }
                         var diag = links["glbTerrain"];
                         // 貼圖找不到清單上提到報告頂層（材質名、原路徑、原因）；不偽造貼圖，該材質退回外觀顏色。
                         if (diag?["textureProblems"] is JObject texProblems)
@@ -228,6 +249,71 @@ namespace RevitMCP.Core
             report["parameters"] = parameters.DeepClone();
             WriteDesignOptionJson(reportPath, report);
             return report;
+        }
+
+        /// <summary>
+        /// splitLinks 用的暫存 3D 視圖：複製來源 3D 視圖（sourceViewName > 作用中 3D 視圖 > 自動挑選未裁切的非透視視圖），
+        /// 移除視圖樣板、關閉 section box／裁切、透視改等角、確保「Revit 連結」類別可見。必須在已開啟的 Transaction 內呼叫；
+        /// 視圖建立在 TransactionGroup 內，匯出後隨 RollBack 還原。找不到任何 3D 視圖時回 null（呼叫端退回新建等角視圖）。
+        /// </summary>
+        private View3D? DuplicateDesignOptionSourceView(Document doc, string? preferredName, List<string> warnings, JObject report)
+        {
+            var views = new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>().Where(v => !v.IsTemplate).ToList();
+            View3D? source = null;
+            string? selectedBy = null;
+            if (!string.IsNullOrWhiteSpace(preferredName))
+            {
+                source = views.FirstOrDefault(v => string.Equals(v.Name, preferredName.Trim(), StringComparison.OrdinalIgnoreCase));
+                if (source != null) selectedBy = "sourceViewName";
+                else warnings.Add("splitLinks：找不到名為「" + preferredName + "」的 3D 視圖，改用作用中視圖或自動挑選。");
+            }
+
+            if (source == null)
+            {
+                var uiDoc = _uiApp.ActiveUIDocument;
+                if (uiDoc != null && uiDoc.Document.Equals(doc) && uiDoc.ActiveView is View3D active && !active.IsTemplate)
+                {
+                    source = active;
+                    selectedBy = "activeView";
+                }
+            }
+
+            if (source == null)
+            {
+                source = views.Where(v => !v.IsPerspective)
+                    .OrderBy(v => v.IsSectionBoxActive ? 1 : 0).ThenBy(v => v.CropBoxActive ? 1 : 0).ThenBy(v => v.Name, StringComparer.Ordinal)
+                    .FirstOrDefault() ?? views.FirstOrDefault();
+                selectedBy = "auto";
+            }
+
+            if (source == null) return null;
+
+            View3D temp;
+            try
+            {
+                temp = (View3D)doc.GetElement(source.Duplicate(ViewDuplicateOption.Duplicate));
+            }
+            catch (Autodesk.Revit.Exceptions.ApplicationException ex)
+            {
+                warnings.Add("splitLinks：複製 3D 視圖「" + source.Name + "」失敗（" + ex.Message + "），退回新建等角視圖。");
+                return null;
+            }
+
+            if (temp.IsLocked) temp.Unlock();
+            temp.ViewTemplateId = ElementId.InvalidElementId;
+            if (temp.IsPerspective && temp.CanToggleBetweenPerspectiveAndIsometric()) temp.ToggleToIsometric();
+            temp.IsSectionBoxActive = false;
+            if (!temp.IsPerspective) temp.CropBoxActive = false;
+            var linksCategory = Category.GetCategory(doc, BuiltInCategory.OST_RvtLinks);
+            if (linksCategory != null && temp.CanCategoryBeHidden(linksCategory.Id) && temp.GetCategoryHidden(linksCategory.Id))
+            {
+                temp.SetCategoryHidden(linksCategory.Id, false);
+                warnings.Add("splitLinks：來源視圖「" + source.Name + "」隱藏了「Revit 連結」類別，暫存視圖已改為顯示，否則連結模型不會被匯出。");
+            }
+
+            warnings.Add("splitLinks：暫存視圖複製自 3D 視圖「" + source.Name + "」（選擇方式 " + selectedBy + "）；複製的視圖沿用來源的隱藏元件、篩選器（Filters）與 Phase 設定，來源視圖隱藏的東西不會被匯出。");
+            report["splitLinkSourceView"] = new JObject { ["name"] = source.Name, ["id"] = source.Id.GetIdValue(), ["selectedBy"] = selectedBy };
+            return temp;
         }
 
         private static JObject ExportDesignOptionGeometry(Document doc, DesignOption option, string outputDir, Vec3 offset,
@@ -466,7 +552,7 @@ namespace RevitMCP.Core
                 var category = element.Category;
                 if (category == null) return null;
                 var value = (long)category.Id.GetIdValue();
-                if (value < int.MinValue || value > int.MaxValue || !Enum.IsDefined(typeof(BuiltInCategory), (int)value)) return null;
+                if (value < int.MinValue || value > int.MaxValue || !Enum.IsDefined(typeof(BuiltInCategory), Enum.ToObject(typeof(BuiltInCategory), value))) return null;
                 return ((BuiltInCategory)(int)value).ToString();
             }
             catch (Exception) { return null; }

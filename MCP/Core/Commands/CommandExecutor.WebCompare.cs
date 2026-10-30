@@ -67,6 +67,7 @@ namespace RevitMCP.Core
             var includeIfc = parameters["includeIfc"]?.Value<bool?>() ?? true;
             var includeGlb = parameters["includeGlb"]?.Value<bool?>() ?? true;
             var maxTriangles = parameters["maxTriangles"]?.Value<int?>() ?? 3_000_000;
+            var splitOptions = ParseWebCompareSplitOptions(parameters, maxTriangles);
             var contourInterval = parameters["contourIntervalMeters"]?.Value<double?>() ?? 1.0;
             var excludedCategories = WebCompareStringList(parameters["excludeCategories"]);
             var excludedElements = WebCompareStringList(parameters["excludeElements"]);
@@ -242,12 +243,13 @@ namespace RevitMCP.Core
                 {
                     ExportWebCompareGlb(doc, view, glbPath, offset, maxTriangles, warnings, out glbTriangles, out glbNodes,
                         linkedDocs, sectionOptions, sectionBox, terrainPieces, linkReport, contourInterval, excludedCategories,
-                        excludedElements, maxElementTriangles, dumpAppearance, heavyOptions);
+                        excludedElements, maxElementTriangles, dumpAppearance, heavyOptions, null, splitOptions);
                     files.Add(WebCompareFileEntry("cpc.glb", glbPath, sw, warnings, new JObject
                     {
                         ["triangleCount"] = glbTriangles,
                         ["elementNodeCount"] = glbNodes
                     }));
+                    AddWebCompareSplitFileEntries(files, splitOptions, sw, warnings);
                 }
                 catch (Exception ex)
                 {
@@ -813,12 +815,76 @@ namespace RevitMCP.Core
             public int LevelOfDetail = -1;
         }
 
+        /// <summary>
+        /// splitLinks：主檔只放主模型，每個連結文件另寫 part_&lt;slug&gt;.glb，並輸出 parts.json（viewer3d.md §22.2）。
+        /// 傳 null＝行為與先前完全相同。Files 是匯出後實際寫出的分檔與清單，供呼叫端列入回報。
+        /// </summary>
+        private sealed class WebCompareSplitOptions
+        {
+            /// <summary>每個分檔的三角面上限；0＝沿用 maxTriangles。</summary>
+            public int MaxPartTriangles;
+            /// <summary>主檔＋全部分檔合計的三角面上限；超過整個匯出提前停止並警告。</summary>
+            public int MaxTotalTriangles;
+            public readonly List<WebCompareWrittenFile> Files = new List<WebCompareWrittenFile>();
+            public JObject Manifest = new JObject();
+        }
+
+        private sealed class WebCompareWrittenFile
+        {
+            public string Name = string.Empty;
+            public string Path = string.Empty;
+            public JObject Extra = new JObject();
+        }
+
+        /// <summary>解析 splitLinks／maxPartTriangles；splitLinks 不為 true 時回 null（maxPartTriangles 也不檢查）。</summary>
+        private static WebCompareSplitOptions? ParseWebCompareSplitOptions(JObject parameters, int maxTriangles)
+        {
+            if (!(parameters["splitLinks"]?.Value<bool?>() ?? false))
+            {
+                return null;
+            }
+
+            var maxPart = parameters["maxPartTriangles"]?.Value<int?>();
+            if (maxPart.HasValue && maxPart.Value < 1)
+            {
+                throw new ArgumentException("maxPartTriangles 必須是 1 以上的整數。");
+            }
+
+            var maxTotal = parameters["maxTotalTriangles"]?.Value<long?>();
+            if (maxTotal.HasValue && maxTotal.Value < 1)
+            {
+                throw new ArgumentException("maxTotalTriangles 必須是 1 以上的整數。");
+            }
+
+            var partBudget = maxPart ?? maxTriangles;
+            // 預設合計上限＝主檔上限＋最多 6 個分檔各自的上限（超過 6 個連結時仍受合計保護）。
+            var total = maxTotal ?? ((long)maxTriangles + 6L * partBudget);
+            return new WebCompareSplitOptions
+            {
+                MaxPartTriangles = partBudget,
+                MaxTotalTriangles = (int)Math.Min(int.MaxValue, total)
+            };
+        }
+
+        private static void AddWebCompareSplitFileEntries(List<object> files, WebCompareSplitOptions? split, Stopwatch sw, List<string> warnings)
+        {
+            if (split == null)
+            {
+                return;
+            }
+
+            foreach (var written in split.Files)
+            {
+                files.Add(WebCompareFileEntry(written.Name, written.Path, sw, warnings, written.Extra));
+            }
+        }
+
         private static void ExportWebCompareGlb(Document doc, View3D source, string glbPath, Vec3 offset, int maxTriangles,
             List<string> warnings, out int triangleCount, out int elementNodeCount,
             List<WebCompareDoc> linkedDocs, WebCompareSectionOptions sectionOptions, MeterBox? sectionBox,
             List<WebCompareTerrainPiece> terrainPieces, JObject linkReport, double webCompareContourInterval, List<string> webCompareExcludedCategories,
             List<string> webCompareExcludedElements, int webCompareMaxElementTriangles, bool webCompareDumpAppearance,
-            WebCompareHeavyOptions heavyOptions, Func<Document, Element, bool> elementPredicate = null)
+            WebCompareHeavyOptions heavyOptions, Func<Document, Element, bool> elementPredicate = null, WebCompareSplitOptions? split = null)
         {
             ElementId tempViewId;
             using (var tx = new Transaction(doc, "WEB_COMPARE：建立 GLB 匯出暫存視圖"))
@@ -877,6 +943,12 @@ namespace RevitMCP.Core
                 context.SimplifyRatio = heavyOptions.SimplifyRatio;
                 context.LevelOfDetail = heavyOptions.LevelOfDetail;
                 context.DumpAppearance = webCompareDumpAppearance;
+                if (split != null)
+                {
+                    context.SplitLinks = true;
+                    context.PartTriangleBudget = split.MaxPartTriangles > 0 ? split.MaxPartTriangles : maxTriangles;
+                    context.TotalTriangleBudget = split.MaxTotalTriangles;
+                }
 
                 File.WriteAllText(context.DiagPath, "");
                 context.Diag($"export start view={tempView.Name} perspective={tempView.IsPerspective} cropActive={tempView.CropBoxActive} sectionBoxActive={tempView.IsSectionBoxActive}");
@@ -904,6 +976,14 @@ namespace RevitMCP.Core
                     context.Diag("trianglesByKey=" + JsonConvert.SerializeObject(context.TrianglesByKey.OrderByDescending(kv => kv.Value).Take(40).ToDictionary(kv => kv.Key, kv => kv.Value)));
                     context.Diag("droppedElements=" + JsonConvert.SerializeObject(context.DroppedElements));
                     context.Diag($"textured={context.TexturedMaterials} images={builder.ImageCount} contourSegments={context.ContourSegments}");
+                    if (split != null)
+                    {
+                        context.Diag("splitParts=" + JsonConvert.SerializeObject(context.LinkParts.Select(p => new
+                        {
+                            p.Title, p.Key, triangles = p.Builder.TriangleCount, nodes = p.Builder.ElementNodeCount, p.OverBudget
+                        })));
+                    }
+
                     context.Diag("textureProblems=" + JsonConvert.SerializeObject(context.TextureProblems));
                     context.Diag("transparentMaterials=" + JsonConvert.SerializeObject(context.TransparentMaterials));
                 }
@@ -977,7 +1057,45 @@ namespace RevitMCP.Core
                     pieces = CollectLinkedTerrain(linkedDocs, sectionBox ?? far, Math.Max(0, maxTriangles - builder.TriangleCount), warnings, out _);
                 }
 
-                var added = AddTerrainPiecesToBuilder(builder, pieces, sectionBox ?? far, offset);
+                var terrainBox = sectionBox ?? far;
+                var added = 0;
+                if (split == null)
+                {
+                    added = AddTerrainPiecesToBuilder(builder, pieces, terrainBox, offset);
+                }
+                else
+                {
+                    // 補算的連結地形放進它所屬連結文件的那一檔（Family 欄位存的是文件標題）。
+                    foreach (var group in pieces.GroupBy(p => p.Info?.Family ?? RevitGltfExportContext.HostName))
+                    {
+                        foreach (var piece in group)
+                        {
+                            if (piece.Info != null && string.IsNullOrEmpty(piece.Info.Source))
+                            {
+                                piece.Info.Source = group.Key;
+                            }
+                        }
+
+                        // 補算地形也受各檔上限：超出剩餘額度的元素略過並警告。
+                        var target = context.PartBuilderFor(group.Key);
+                        var remaining = (group.Key == RevitGltfExportContext.HostName ? maxTriangles : context.PartTriangleBudget) - target.TriangleCount;
+                        var allowed = new List<WebCompareTerrainPiece>();
+                        foreach (var piece in group)
+                        {
+                            if (piece.Triangles.Count > remaining)
+                            {
+                                warnings.Add($"連結地形 {piece.Info?.Name}（{group.Key}）會超過該檔三角面上限，已略過。");
+                                continue;
+                            }
+
+                            remaining -= piece.Triangles.Count;
+                            allowed.Add(piece);
+                        }
+
+                        added += AddTerrainPiecesToBuilder(target, allowed, terrainBox, offset);
+                    }
+                }
+
                 terrainReport["fallbackElements"] = pieces.Count;
                 terrainReport["fallbackTriangles"] = added;
                 if (pieces.Count == 0)
@@ -988,14 +1106,173 @@ namespace RevitMCP.Core
 
             linkReport["glbTerrain"] = terrainReport;
 
-            if (context.BudgetExceeded)
+            var propertyLineSegments = AddPropertyLinesToBuilder(builder, linkedDocs, offset, warnings,
+                split == null ? (Func<string, GltfBuilder?>?)null : context.TryGetVisitedPartBuilder);
+            linkReport["glbPropertyLineSegments"] = propertyLineSegments;
+            builder.OriginOffsetMeters = offset;
+
+            if (context.BudgetExceeded && split == null)
             {
                 warnings.Add($"GLB 三角面超過上限 {context.TriangleBudget:N0}，匯出提前停止（模型不完整）；請在 {source.Name} 隱藏家具、植栽、機電等類別，或用 maxTriangles 提高上限。");
             }
 
-            File.WriteAllBytes(glbPath, builder.BuildGlb());
+            var mainBytes = builder.BuildGlb();
+            File.WriteAllBytes(glbPath, mainBytes);
             triangleCount = builder.TriangleCount;
             elementNodeCount = builder.ElementNodeCount;
+
+            if (split != null)
+            {
+                WriteWebCompareSplitParts(context, builder, mainBytes.Length, glbPath, offset, split, warnings, linkReport, maxTriangles);
+            }
+        }
+
+        /// <summary>
+        /// splitLinks：寫出每個連結分檔 part_&lt;slug&gt;.glb 與 parts.json（viewer3d.md §22.2）。沒有任何構件的分檔不輸出。
+        /// 與主檔放在同一個資料夾；資料夾內不屬於本次輸出的舊 part_*.glb 會刪除（避免網頁匯入到過期分檔）。
+        /// </summary>
+        private static void WriteWebCompareSplitParts(RevitGltfExportContext context, GltfBuilder mainBuilder, int mainBytes, string glbPath,
+            Vec3 offset, WebCompareSplitOptions split, List<string> warnings, JObject linkReport, int maxTriangles)
+        {
+            var dir = Path.GetDirectoryName(Path.GetFullPath(glbPath));
+            // 前一版 parts.json 列出的分檔：只有這些才可能被當成「過期分檔」刪除（共用資料夾裡別人的 part_*.glb 不碰）。
+            var previousFiles = new List<string>();
+            try
+            {
+                var previousPath = Path.Combine(dir, "parts.json");
+                if (File.Exists(previousPath))
+                {
+                    var previous = JObject.Parse(File.ReadAllText(previousPath, Encoding.UTF8));
+                    foreach (var p in (previous["parts"] as JArray) ?? new JArray())
+                    {
+                        var f = p["file"]?.Value<string>();
+                        if (!string.IsNullOrEmpty(f) && string.Equals(Path.GetFileName(f), f, StringComparison.Ordinal) &&
+                            f.StartsWith("part_", StringComparison.OrdinalIgnoreCase) && f.EndsWith(".glb", StringComparison.OrdinalIgnoreCase))
+                        {
+                            previousFiles.Add(f);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is JsonException)
+            {
+                warnings.Add("讀不到前一版 parts.json，不清除舊分檔：" + ex.Message);
+            }
+
+            var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var manifestParts = new JArray();
+            var emptyParts = new JArray();
+            foreach (var part in context.LinkParts.OrderBy(p => p.Title, StringComparer.Ordinal))
+            {
+                var nodes = part.Builder.ElementNodeCount;
+                if (nodes == 0)
+                {
+                    emptyParts.Add(part.Title);
+                    continue;
+                }
+
+                var fileName = LinkPartsManifest.PartFileName(part.Key);
+                var bytes = part.Builder.BuildGlb();
+                var path = Path.Combine(dir, fileName);
+                File.WriteAllBytes(path, bytes);
+                written.Add(fileName);
+                var defaultVisible = LinkPartsManifest.ComputeDefaultVisible(part.TrianglesByCategory, RevitGltfExportContext.StructuralMepBuiltInCategories);
+                var entry = new JObject
+                {
+                    ["key"] = part.Key,
+                    ["label"] = part.Title,
+                    ["file"] = fileName,
+                    ["triangles"] = part.Builder.TriangleCount,
+                    ["nodes"] = nodes,
+                    ["bytes"] = bytes.Length,
+                    ["defaultVisible"] = defaultVisible,
+                    ["topCategories"] = new JArray(LinkPartsManifest.TopCategories(part.TrianglesByCategory, 5)
+                        .Select(c => new JObject { ["category"] = c.Name, ["builtInCategory"] = c.BuiltInCategory != 0 ? (JToken)((BuiltInCategory)c.BuiltInCategory).ToString() : JValue.CreateNull(), ["builtInCategoryId"] = c.BuiltInCategory, ["triangles"] = c.Triangles }))
+                };
+                manifestParts.Add(entry);
+                split.Files.Add(new WebCompareWrittenFile
+                {
+                    Name = fileName,
+                    Path = path,
+                    Extra = new JObject { ["triangleCount"] = part.Builder.TriangleCount, ["elementNodeCount"] = nodes, ["partKey"] = part.Key, ["defaultVisible"] = defaultVisible }
+                });
+                if (part.OverBudget)
+                {
+                    warnings.Add($"連結分檔 {part.Title} 三角面超過上限 {context.PartTriangleBudget:N0}，該檔提前停止（不完整）；請用 maxPartTriangles 提高上限，或在連結模型隱藏不需要的類別。");
+                }
+            }
+
+            var manifest = new JObject
+            {
+                ["version"] = 1,
+                ["originOffsetMeters"] = new JArray(offset.X, offset.Y, offset.Z),
+                ["main"] = new JObject
+                {
+                    ["file"] = Path.GetFileName(glbPath),
+                    ["triangles"] = mainBuilder.TriangleCount,
+                    ["nodes"] = mainBuilder.ElementNodeCount,
+                    ["bytes"] = mainBytes
+                },
+                ["parts"] = manifestParts
+            };
+            var manifestPath = Path.Combine(dir, "parts.json");
+            File.WriteAllText(manifestPath, manifest.ToString(Formatting.Indented), new UTF8Encoding(false));
+            split.Manifest = manifest;
+            split.Files.Add(new WebCompareWrittenFile
+            {
+                Name = "parts.json",
+                Path = manifestPath,
+                Extra = new JObject { ["partCount"] = manifestParts.Count }
+            });
+
+            var removed = new JArray();
+            foreach (var name in previousFiles.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (written.Contains(name))
+                {
+                    continue;
+                }
+
+                var stale = Path.Combine(dir, name);
+                try
+                {
+                    if (File.Exists(stale))
+                    {
+                        File.Delete(stale);
+                        removed.Add(name);
+                    }
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    warnings.Add($"無法刪除過期的分檔 {name}：{ex.Message}");
+                }
+            }
+
+            if (removed.Count > 0)
+            {
+                warnings.Add("已刪除本次輸出沒有的舊分檔：" + string.Join("、", removed.Select(t => t.ToString())) + "。");
+            }
+
+            if (context.MainOverBudget)
+            {
+                warnings.Add($"GLB 主檔三角面超過上限 {context.TriangleBudget:N0}，主檔提前停止（模型不完整）；請隱藏部分類別，或用 maxTriangles 提高上限。");
+            }
+
+            if (context.TotalBudgetExceeded)
+            {
+                warnings.Add($"主檔與分檔合計三角面超過上限 {context.TotalTriangleBudget:N0}，匯出提前停止（模型不完整）；請用 maxTotalTriangles 提高上限，或隱藏部分類別。");
+            }
+
+            linkReport["splitLinks"] = new JObject
+            {
+                ["manifest"] = manifestPath,
+                ["partCount"] = manifestParts.Count,
+                ["parts"] = manifestParts,
+                ["emptyPartsSkipped"] = emptyParts,
+                ["staleRemoved"] = removed,
+                ["partTriangleBudget"] = context.PartTriangleBudget > 0 ? context.PartTriangleBudget : maxTriangles,
+                ["totalTriangleBudget"] = context.TotalTriangleBudget
+            };
         }
 
         // ── shared ──────────────────────────────────────

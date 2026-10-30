@@ -17,12 +17,23 @@ namespace RevitMCP.Core.Walkthrough
     internal sealed class RevitGltfExportContext : IExportContext
     {
         private readonly Document _hostDocument;
-        private readonly GltfBuilder _builder;
         private readonly Vec3 _originOffsetMeters;
         private readonly Stack<Transform> _transforms = new Stack<Transform>();
         private readonly Stack<Document> _documents = new Stack<Document>();
-        private int _currentMaterial = -1;
         private bool _cancelled;
+
+        // 寫入目標：預設永遠是主檔 builder；SplitLinks 時進入連結就切到該連結文件的 builder（每個 builder 各自一份材質／貼圖索引）。
+        private readonly BuilderState _main;
+        private BuilderState _cur;
+        private readonly Stack<BuilderState> _stateStack = new Stack<BuilderState>();
+        private readonly Dictionary<string, BuilderState> _parts = new Dictionary<string, BuilderState>(StringComparer.Ordinal);
+        private readonly List<BuilderState> _partList = new List<BuilderState>();
+        private readonly HashSet<string> _partKeys = new HashSet<string>(StringComparer.Ordinal);
+        private readonly Dictionary<string, MaterialSpec> _specCache = new Dictionary<string, MaterialSpec>();
+        private readonly Dictionary<string, ImageData> _imageData = new Dictionary<string, ImageData>(StringComparer.OrdinalIgnoreCase);
+        private MaterialSpec? _lastSpec;
+
+        private GltfBuilder _builder => _cur.Builder;
         private int _elementDepth;
         private readonly Stack<string> _linkNames = new Stack<string>();
         private readonly Stack<int> _linkStartTriangles = new Stack<int>();
@@ -31,14 +42,43 @@ namespace RevitMCP.Core.Walkthrough
         private int _elementStartTriangles;
         private string _elementKey;
         private string _elementCategory;
-        private double[] _currentUvScale; // feet per texture repeat (x, y); null = untextured
-        private readonly Dictionary<string, MaterialInfo> _materialCache = new Dictionary<string, MaterialInfo>();
-        private readonly Dictionary<string, int> _imageIndexByPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private int _elementBuiltIn;
         private static Dictionary<string, string> _textureIndex;
-        private long _imageBytes;
-        private int _contourMaterial = -1;
 
         public const string HostName = "(host)";
+
+        /// <summary>
+        /// 結構／機電類別的 BuiltInCategory 整數值（與 Revit 介面語言無關）。分檔 defaultVisible 用它判斷，不看顯示名稱。
+        /// 對應 viewer3d.md §22.2 的類別清單。
+        /// </summary>
+        public static readonly HashSet<int> StructuralMepBuiltInCategories = new HashSet<int>(new[]
+        {
+            BuiltInCategory.OST_StructuralFraming, BuiltInCategory.OST_StructuralColumns, BuiltInCategory.OST_StructuralFoundation, BuiltInCategory.OST_Rebar,
+            BuiltInCategory.OST_PipeCurves, BuiltInCategory.OST_PipeFitting, BuiltInCategory.OST_PipeAccessory,
+            BuiltInCategory.OST_DuctCurves, BuiltInCategory.OST_DuctFitting, BuiltInCategory.OST_DuctAccessory, BuiltInCategory.OST_DuctTerminal,
+            BuiltInCategory.OST_Conduit, BuiltInCategory.OST_ConduitFitting,
+            BuiltInCategory.OST_CableTray, BuiltInCategory.OST_CableTrayFitting,
+            BuiltInCategory.OST_MechanicalEquipment, BuiltInCategory.OST_ElectricalEquipment,
+            BuiltInCategory.OST_LightingFixtures, BuiltInCategory.OST_PlumbingFixtures, BuiltInCategory.OST_Sprinklers, BuiltInCategory.OST_ElectricalFixtures,
+            BuiltInCategory.OST_FlexPipeCurves, BuiltInCategory.OST_FlexDuctCurves, BuiltInCategory.OST_PipeInsulations, BuiltInCategory.OST_DuctInsulations, BuiltInCategory.OST_DuctLinings,
+            BuiltInCategory.OST_FireAlarmDevices, BuiltInCategory.OST_CommunicationDevices, BuiltInCategory.OST_DataDevices, BuiltInCategory.OST_SecurityDevices,
+            BuiltInCategory.OST_NurseCallDevices, BuiltInCategory.OST_TelephoneDevices
+        }.Select(c => (int)c));
+
+        /// <summary>Category.Id 轉 BuiltInCategory 整數值；自訂類別或拿不到時回 0。</summary>
+        internal static int BuiltInCategoryValue(Category category)
+        {
+            if (category == null) return 0;
+            try
+            {
+                long id = category.Id.GetIdValue();
+                return id < 0 && id >= int.MinValue && Enum.IsDefined(typeof(BuiltInCategory), Enum.ToObject(typeof(BuiltInCategory), id)) ? (int)id : 0;
+            }
+            catch (Autodesk.Revit.Exceptions.ApplicationException)
+            {
+                return 0;
+            }
+        }
 
         /// <summary>Top-level elements exported per "link|category" (link = document title, host = "(host)"). Diagnostics only.</summary>
         public Dictionary<string, int> ElementCounts { get; } = new Dictionary<string, int>();
@@ -52,8 +92,112 @@ namespace RevitMCP.Core.Walkthrough
         public RevitGltfExportContext(Document document, GltfBuilder builder, Vec3 originOffsetMeters)
         {
             _hostDocument = document ?? throw new ArgumentNullException(nameof(document));
-            _builder = builder ?? throw new ArgumentNullException(nameof(builder));
+            if (builder == null) throw new ArgumentNullException(nameof(builder));
+            _main = new BuilderState { Builder = builder, Title = HostName };
+            _cur = _main;
             _originOffsetMeters = originOffsetMeters;
+        }
+
+        /// <summary>
+        /// 連結模型分檔（export_web_compare／export_design_options 的 splitLinks）：true 時，OnLinkBegin／OnLinkEnd 切換寫入的
+        /// <see cref="GltfBuilder"/>（主模型一個、每個連結文件標題一個），主檔不含連結幾何。預設 false＝行為與先前完全相同。
+        /// </summary>
+        public bool SplitLinks { get; set; }
+
+        /// <summary>SplitLinks 時，每個分檔各自的三角面上限；0＝沿用 <see cref="TriangleBudget"/>。</summary>
+        public int PartTriangleBudget { get; set; }
+
+        /// <summary>SplitLinks 時所有檔（主檔＋全部分檔）合計的三角面上限；0＝不限。超過就整個匯出提前停止（<see cref="TotalBudgetExceeded"/>）。</summary>
+        public int TotalTriangleBudget { get; set; }
+
+        public bool TotalBudgetExceeded { get; private set; }
+
+        /// <summary>SplitLinks 時主檔本身達到 maxTriangles 而停止寫入。</summary>
+        public bool MainOverBudget => _main.OverBudget;
+
+        /// <summary>
+        /// 取得「已走訪過」的連結分檔 builder（不會建立新分檔）；HostName 回主檔；沒走訪過回 null。
+        /// 基地範圍線只寫進有走訪到的連結，避免長出只有線的分檔。
+        /// </summary>
+        public GltfBuilder? TryGetVisitedPartBuilder(string title)
+        {
+            if (string.IsNullOrEmpty(title) || title == HostName) return _main.Builder;
+            return _parts.TryGetValue(title, out var state) ? state.Builder : null;
+        }
+
+        private int TotalTriangles() => _main.Builder.TriangleCount + _partList.Sum(p => p.Builder.TriangleCount);
+
+        /// <summary>SplitLinks 時依首次進入順序排列的連結分檔。</summary>
+        public IReadOnlyList<LinkPart> LinkParts => _partList.Select(p => p.ToPart()).ToList();
+
+        /// <summary>
+        /// 取得（必要時建立）某連結文件標題的分檔 builder；HostName 回主檔 builder。
+        /// 供匯出器以外寫入的幾何（連結地形補算、基地範圍線）放進所屬文件那一檔。
+        /// </summary>
+        public GltfBuilder PartBuilderFor(string title)
+        {
+            if (string.IsNullOrEmpty(title) || title == HostName) return _main.Builder;
+            return GetOrCreatePart(title).Builder;
+        }
+
+        private BuilderState GetOrCreatePart(string title)
+        {
+            if (_parts.TryGetValue(title, out var existing)) return existing;
+            var builder = new GltfBuilder
+            {
+                OriginOffsetMeters = _originOffsetMeters,
+                PartKey = LinkPartsManifest.Slug(title, _partKeys),
+                PartLabel = title
+            };
+            var state = new BuilderState { Builder = builder, Title = title, Key = builder.PartKey };
+            state.CurrentMaterial = builder.AddMaterial("Default", 0.75, 0.75, 0.75, 1.0);
+            _parts[title] = state;
+            _partList.Add(state);
+            return state;
+        }
+
+        private int CurrentBudget => _cur == _main || PartTriangleBudget <= 0 ? TriangleBudget : PartTriangleBudget;
+
+        /// <summary>一個寫入目標（主檔或某連結分檔）與它自己的材質／貼圖／等高線索引。</summary>
+        private sealed class BuilderState
+        {
+            public GltfBuilder Builder = null!;
+            public string Title = string.Empty;
+            public string Key = string.Empty;
+            public readonly Dictionary<string, MaterialInfo> MaterialCache = new Dictionary<string, MaterialInfo>();
+            public readonly Dictionary<string, int> ImageIndexByPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            public readonly Dictionary<string, CategoryTriangles> TrianglesByCategory = new Dictionary<string, CategoryTriangles>(StringComparer.Ordinal);
+            public long ImageBytes;
+            public int ContourMaterial = -1;
+            public int CurrentMaterial = -1;
+            public double[]? CurrentUvScale; // feet per texture repeat (x, y); null = untextured
+            public MaterialSpec? AppliedSpec;
+            public bool OverBudget;
+
+            public LinkPart ToPart() => new LinkPart
+            {
+                Title = Title, Key = Key, Builder = Builder, OverBudget = OverBudget,
+                TrianglesByCategory = TrianglesByCategory.Values.Select(c => new CategoryTriangles { Name = c.Name, BuiltInCategory = c.BuiltInCategory, Triangles = c.Triangles }).ToList()
+            };
+        }
+
+        /// <summary>OnMaterial 讀到的材質（與寫入目標無關），切換 builder 時可重新套用到新的 builder。</summary>
+        private sealed class MaterialSpec
+        {
+            public string CacheKey = string.Empty;
+            public string Name = string.Empty;
+            public double R, G, B, Alpha;
+            public double AppR = -1, AppG = -1, AppB = -1;
+            public string? TexturePath;
+            public double[]? UvScale;
+        }
+
+        private sealed class ImageData
+        {
+            public byte[]? Bytes;
+            public string MimeType = string.Empty;
+            public string Name = string.Empty;
+            public string? Problem;
         }
 
         public int SkippedPolymeshes { get; private set; }
@@ -145,7 +289,8 @@ namespace RevitMCP.Core.Walkthrough
         /// <summary>Stops the export once the triangle budget is exceeded (protects Revit from runaway memory).</summary>
         public int TriangleBudget { get; set; } = 2_000_000;
 
-        public bool BudgetExceeded => _cancelled;
+        /// <summary>預算超過：整體取消（預設），或 SplitLinks 時任一檔（主檔或分檔）達上限而停止寫入。</summary>
+        public bool BudgetExceeded => _cancelled || _main.OverBudget || _partList.Any(p => p.OverBudget);
 
         public bool Start()
         {
@@ -163,9 +308,13 @@ namespace RevitMCP.Core.Walkthrough
             _savedElementState.Clear();
             _holderActive = false;
             _elementDepth = 0;
-            _contourMaterial = -1;
+            _stateStack.Clear();
+            _cur = _main;
+            _lastSpec = null;
+            _main.AppliedSpec = null;
+            _main.ContourMaterial = -1;
             LinkBeginCount = 0;
-            _currentMaterial = _builder.AddMaterial("Default", 0.75, 0.75, 0.75, 1.0);
+            _main.CurrentMaterial = _main.Builder.AddMaterial("Default", 0.75, 0.75, 0.75, 1.0);
             return true;
         }
 
@@ -219,6 +368,7 @@ namespace RevitMCP.Core.Walkthrough
                     var info = ReadElementInfo(elementId);
                     info.Source = _linkNames.Peek();
                     _elementCategory = info.Category ?? "(none)";
+                    _elementBuiltIn = info.CategoryBuiltIn;
                     _elementKey = info.Source + "|" + _elementCategory;
                     ElementCounts[_elementKey] = ElementCounts.TryGetValue(_elementKey, out var n) ? n + 1 : 1;
 
@@ -235,12 +385,18 @@ namespace RevitMCP.Core.Walkthrough
                     }
 
                     // A link instance encloses the link's elements; they get their own nodes, the instance gets none.
-                    if (_elementCategory == "RVT Links" || _elementCategory == "Revit Links")
+                    if (_elementBuiltIn == (int)BuiltInCategory.OST_RvtLinks || (_elementBuiltIn == 0 && (_elementCategory == "RVT Links" || _elementCategory == "Revit Links")))
                     {
                         _holderActive = true;
                     }
                     else
                     {
+                        if (_cur.OverBudget)
+                        {
+                            // SplitLinks：這一檔已達上限，略過後續元件，但其他檔照常繼續。
+                            return RenderNodeAction.Skip;
+                        }
+
                         _builder.BeginElement(info);
                         _currentElementInfo = info;
                         _elementStartTriangles = _builder.TriangleCount;
@@ -348,6 +504,15 @@ namespace RevitMCP.Core.Walkthrough
 
             var added = _builder.TriangleCount - _elementStartTriangles;
             TrianglesByKey[_elementKey] = (TrianglesByKey.TryGetValue(_elementKey, out var t) ? t : 0) + added;
+            var categoryName = _elementCategory ?? "(none)";
+            var categoryKey = _elementBuiltIn.ToString(CultureInfo.InvariantCulture) + "|" + categoryName;
+            if (!_cur.TrianglesByCategory.TryGetValue(categoryKey, out var categoryStat))
+            {
+                categoryStat = new CategoryTriangles { Name = categoryName, BuiltInCategory = _elementBuiltIn };
+                _cur.TrianglesByCategory[categoryKey] = categoryStat;
+            }
+
+            categoryStat.Triangles += added;
             _elementKey = null;
         }
 
@@ -365,6 +530,7 @@ namespace RevitMCP.Core.Walkthrough
 
                 info.UniqueId = element.UniqueId;
                 info.Category = element.Category?.Name;
+                info.CategoryBuiltIn = BuiltInCategoryValue(element.Category);
                 info.Name = element.Name;
                 var type = document.GetElement(element.GetTypeId()) as ElementType;
                 info.Family = type?.FamilyName ?? (element as ElementType)?.FamilyName;
@@ -410,7 +576,14 @@ namespace RevitMCP.Core.Walkthrough
             }
 
             _documents.Push(linkDocument ?? _documents.Peek());
-            _linkNames.Push(linkDocument?.Title ?? "(link)");
+            var linkTitle = linkDocument?.Title ?? "(link)";
+            _linkNames.Push(linkTitle);
+            if (SplitLinks)
+            {
+                _stateStack.Push(_cur);
+                _cur = GetOrCreatePart(linkTitle);
+            }
+
             _linkStartTriangles.Push(_builder.TriangleCount);
             _savedElementState.Push(new KeyValuePair<int, bool>(_elementDepth, _holderActive));
             _elementDepth = 0;
@@ -446,6 +619,11 @@ namespace RevitMCP.Core.Walkthrough
                 LinkTriangles[name] = (LinkTriangles.TryGetValue(name, out var t) ? t : 0) + (_builder.TriangleCount - start);
                 Diag($"OnLinkEnd doc={name} addedTriangles={_builder.TriangleCount - start}");
             }
+
+            if (SplitLinks && _stateStack.Count > 0)
+            {
+                _cur = _stateStack.Pop();
+            }
         }
 
         public RenderNodeAction OnInstanceBegin(InstanceNode node)
@@ -479,17 +657,17 @@ namespace RevitMCP.Core.Walkthrough
         private sealed class MaterialInfo
         {
             public int Index;
-            public double[] UvScale;
+            public double[]? UvScale;
         }
 
         public void OnMaterial(MaterialNode node)
         {
             var document = _documents.Peek();
             var cacheKey = document.Title + "|" + node.MaterialId.GetIdValue() + "|" + node.Color?.Red + "," + node.Color?.Green + "," + node.Color?.Blue + "|" + node.Transparency.ToString("R", CultureInfo.InvariantCulture);
-            if (_materialCache.TryGetValue(cacheKey, out var cached))
+            if (_specCache.TryGetValue(cacheKey, out var cachedSpec))
             {
-                _currentMaterial = cached.Index;
-                _currentUvScale = cached.UvScale;
+                _lastSpec = cachedSpec;
+                ApplyMaterial(cachedSpec);
                 return;
             }
 
@@ -533,12 +711,10 @@ namespace RevitMCP.Core.Walkthrough
                 }
             }
 
-            double appR = -1, appG = -1, appB = -1;
-            var textureIndex = -1;
-            double[] uvScale = null;
+            var spec = new MaterialSpec { CacheKey = cacheKey, Name = name, R = r, G = g, B = b, Alpha = alpha };
             try
             {
-                ReadAppearance(node, name, out appR, out appG, out appB, out textureIndex, out uvScale);
+                ReadAppearance(node, name, spec);
             }
             catch (Exception ex)
             {
@@ -546,17 +722,46 @@ namespace RevitMCP.Core.Walkthrough
                 Diag("ReadAppearance(" + name + ") exception: " + ex.Message);
             }
 
-            _currentMaterial = _builder.AddMaterial(name, r, g, b, alpha, textureIndex, appR, appG, appB);
-            _currentUvScale = textureIndex >= 0 ? uvScale : null;
-            _materialCache[cacheKey] = new MaterialInfo { Index = _currentMaterial, UvScale = _currentUvScale };
+            _specCache[cacheKey] = spec;
+            _lastSpec = spec;
+            ApplyMaterial(spec);
         }
 
-        private void ReadAppearance(MaterialNode node, string materialName, out double appR, out double appG, out double appB,
-            out int textureIndex, out double[] uvScale)
+        /// <summary>把材質寫進目前的 builder（每個 builder 各自快取；貼圖也各自嵌入）並設為目前材質。</summary>
+        private void ApplyMaterial(MaterialSpec spec)
         {
-            appR = appG = appB = -1;
-            textureIndex = -1;
-            uvScale = null;
+            _cur.AppliedSpec = spec;
+            if (_cur.MaterialCache.TryGetValue(spec.CacheKey, out var cached))
+            {
+                _cur.CurrentMaterial = cached.Index;
+                _cur.CurrentUvScale = cached.UvScale;
+                return;
+            }
+
+            var textureIndex = -1;
+            double[]? uvScale = null;
+            if (!string.IsNullOrEmpty(spec.TexturePath))
+            {
+                var index = LoadImage(spec.TexturePath, out var problem);
+                if (index < 0)
+                {
+                    TextureProblems[spec.Name + " :: " + spec.TexturePath] = problem;
+                }
+                else
+                {
+                    textureIndex = index;
+                    uvScale = spec.UvScale;
+                    TexturedMaterials++;
+                }
+            }
+
+            _cur.CurrentMaterial = _builder.AddMaterial(spec.Name, spec.R, spec.G, spec.B, spec.Alpha, textureIndex, spec.AppR, spec.AppG, spec.AppB);
+            _cur.CurrentUvScale = textureIndex >= 0 ? uvScale : null;
+            _cur.MaterialCache[spec.CacheKey] = new MaterialInfo { Index = _cur.CurrentMaterial, UvScale = _cur.CurrentUvScale };
+        }
+
+        private void ReadAppearance(MaterialNode node, string materialName, MaterialSpec spec)
+        {
             var asset = node.GetAppearance();
             if (asset == null)
             {
@@ -614,9 +819,9 @@ namespace RevitMCP.Core.Walkthrough
                 var c = arr.GetValueAsDoubles();
                 if (c != null && c.Count >= 3)
                 {
-                    appR = Math.Max(0, Math.Min(1, c[0]));
-                    appG = Math.Max(0, Math.Min(1, c[1]));
-                    appB = Math.Max(0, Math.Min(1, c[2]));
+                    spec.AppR = Math.Max(0, Math.Min(1, c[0]));
+                    spec.AppG = Math.Max(0, Math.Min(1, c[1]));
+                    spec.AppB = Math.Max(0, Math.Min(1, c[2]));
                 }
             }
 
@@ -655,18 +860,11 @@ namespace RevitMCP.Core.Walkthrough
                 return;
             }
 
-            var index = LoadImage(path, out var problem);
-            if (index < 0)
-            {
-                TextureProblems[materialName + " :: " + path] = problem;
-                return;
-            }
-
-            textureIndex = index;
+            // 貼圖檔在 ApplyMaterial 才讀取／嵌入（每個 builder 各自嵌入一份）。
             if (sx <= 1e-6) { sx = 1.0; }
             if (sy <= 1e-6) { sy = sx; }
-            uvScale = new[] { sx, sy };
-            TexturedMaterials++;
+            spec.TexturePath = path;
+            spec.UvScale = new[] { sx, sy };
         }
 
         private static double ToFeet(AssetPropertyDistance d)
@@ -693,15 +891,44 @@ namespace RevitMCP.Core.Walkthrough
             return cut < 0 ? path : path.Substring(cut + 1);
         }
 
+        /// <summary>貼圖嵌入目前的 builder：檔案只讀／縮圖一次（全域快取），每個 builder 各嵌入一份並各自計 MaxImageBytes。</summary>
         private int LoadImage(string path, out string problem)
         {
             problem = null;
             var key = path.Trim();
-            if (_imageIndexByPath.TryGetValue(key, out var existing))
+            if (_cur.ImageIndexByPath.TryGetValue(key, out var existing))
             {
                 return existing;
             }
 
+            if (!_imageData.TryGetValue(key, out var data))
+            {
+                data = ReadImageData(key);
+                _imageData[key] = data;
+            }
+
+            if (data.Bytes == null)
+            {
+                problem = data.Problem ?? "unknown";
+                _cur.ImageIndexByPath[key] = -1;
+                return -1;
+            }
+
+            if (_cur.ImageBytes + data.Bytes.Length > MaxImageBytes)
+            {
+                problem = "texture byte budget exceeded";
+                _cur.ImageIndexByPath[key] = -1;
+                return -1;
+            }
+
+            _cur.ImageBytes += data.Bytes.Length;
+            var index = _builder.AddImage(new GltfImage { Bytes = data.Bytes, MimeType = data.MimeType, Name = data.Name });
+            _cur.ImageIndexByPath[key] = index;
+            return index;
+        }
+
+        private ImageData ReadImageData(string key)
+        {
             // Revit may store several candidate paths in one string separated by '|'.
             string resolved = null;
             foreach (var candidate in key.Split('|'))
@@ -722,9 +949,7 @@ namespace RevitMCP.Core.Walkthrough
             Diag("bitmap " + key + " -> " + (resolved ?? "(not found)"));
             if (resolved == null)
             {
-                problem = "file not found";
-                _imageIndexByPath[key] = -1;
-                return -1;
+                return new ImageData { Problem = "file not found" };
             }
 
             try
@@ -754,23 +979,11 @@ namespace RevitMCP.Core.Walkthrough
                     }
                 }
 
-                if (_imageBytes + bytes.Length > MaxImageBytes)
-                {
-                    problem = "texture byte budget exceeded";
-                    _imageIndexByPath[key] = -1;
-                    return -1;
-                }
-
-                _imageBytes += bytes.Length;
-                var index = _builder.AddImage(new GltfImage { Bytes = bytes, MimeType = mime, Name = SafeName(resolved) });
-                _imageIndexByPath[key] = index;
-                return index;
+                return new ImageData { Bytes = bytes, MimeType = mime, Name = SafeName(resolved) };
             }
             catch (Exception ex)
             {
-                problem = ex.Message;
-                _imageIndexByPath[key] = -1;
-                return -1;
+                return new ImageData { Problem = ex.Message };
             }
         }
 
@@ -839,9 +1052,15 @@ namespace RevitMCP.Core.Walkthrough
 
         public void OnPolymesh(PolymeshTopology node)
         {
-            if (_cancelled)
+            if (_cancelled || _cur.OverBudget)
             {
                 return;
+            }
+
+            // 切換到另一個 builder（進出連結）後，Revit 不一定重送 OnMaterial：把最後一次的材質補套用到目前的 builder。
+            if (_lastSpec != null && !ReferenceEquals(_cur.AppliedSpec, _lastSpec))
+            {
+                ApplyMaterial(_lastSpec);
             }
 
             var pointCount = node.NumberOfPoints;
@@ -856,7 +1075,7 @@ namespace RevitMCP.Core.Walkthrough
             var points = node.GetPoints();
             var facets = node.GetFacets();
             var distribution = node.DistributionOfNormals;
-            var uvScale = _currentUvScale;
+            var uvScale = _cur.CurrentUvScale;
             IList<UV> sourceUvs = null;
             if (uvScale != null)
             {
@@ -898,7 +1117,7 @@ namespace RevitMCP.Core.Walkthrough
                     }
                 }
 
-                _builder.AddTriangles(_currentMaterial, positions, normals, indices, uvs);
+                _builder.AddTriangles(_cur.CurrentMaterial, positions, normals, indices, uvs);
                 AddContours(positions, normals, indices);
             }
             else
@@ -943,12 +1162,26 @@ namespace RevitMCP.Core.Walkthrough
                     }
                 }
 
-                _builder.AddTriangles(_currentMaterial, positions, normals, indices, smoothUvs);
+                _builder.AddTriangles(_cur.CurrentMaterial, positions, normals, indices, smoothUvs);
                 AddContours(positions, normals, indices);
             }
 
-            if (_builder.TriangleCount > TriangleBudget)
+            if (_builder.TriangleCount > CurrentBudget)
             {
+                if (SplitLinks)
+                {
+                    // 只停止這一檔，其他檔繼續；完整性由 BudgetExceeded／LinkParts[].OverBudget 回報。
+                    _cur.OverBudget = true;
+                }
+                else
+                {
+                    _cancelled = true;
+                }
+            }
+
+            if (TotalTriangleBudget > 0 && !_cancelled && TotalTriangles() > TotalTriangleBudget)
+            {
+                TotalBudgetExceeded = true;
                 _cancelled = true;
             }
         }
@@ -1021,12 +1254,12 @@ namespace RevitMCP.Core.Walkthrough
                 return;
             }
 
-            if (_contourMaterial < 0)
+            if (_cur.ContourMaterial < 0)
             {
-                _contourMaterial = _builder.AddMaterial("Contour", 0.35, 0.28, 0.18, 1.0);
+                _cur.ContourMaterial = _builder.AddMaterial("Contour", 0.35, 0.28, 0.18, 1.0);
             }
 
-            _builder.AddLineSegments(_contourMaterial, segments);
+            _builder.AddLineSegments(_cur.ContourMaterial, segments);
             ContourSegments += segments.Count / 2;
         }
 
@@ -1050,6 +1283,18 @@ namespace RevitMCP.Core.Walkthrough
         }
 
         private static Vec3 ToGltfVector(XYZ v) => new Vec3(v.X, v.Z, -v.Y);
+    }
+
+    /// <summary>splitLinks 的一個連結分檔（以連結文件標題為鍵，同文件多個實例併成同一份）。</summary>
+    internal sealed class LinkPart
+    {
+        public string Title { get; set; } = string.Empty;
+        public string Key { get; set; } = string.Empty;
+        public GltfBuilder Builder { get; set; } = null!;
+        public bool OverBudget { get; set; }
+
+        /// <summary>匯出器走訪到的元件三角面，依類別（不含匯出器以外補寫的連結地形、基地範圍線）。</summary>
+        public List<CategoryTriangles> TrianglesByCategory { get; set; } = new List<CategoryTriangles>();
     }
 
     /// <summary>One exported element's triangle count before/after over-cap handling (diagnostics, triangle study).</summary>
