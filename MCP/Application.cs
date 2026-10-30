@@ -169,6 +169,20 @@ namespace RevitMCP
                 cameraManagerButtonData.ToolTip = "顯示相機管理停靠面板：檢視所有透視相機的離樓板高度、在平面上的位置，並可編輯、複製、匯出";
                 panel.AddItem(cameraManagerButtonData);
 
+                // 6. 萬用窗面板：不依賴 MCP 服務，給不用 AI 的同事直接生成窗族（SPEC §11、ADR D-008）
+                RibbonPanel windowPanel = application.CreateRibbonPanel("萬用窗");
+                PushButtonData windowButtonData = new PushButtonData(
+                    "UniversalWindow",
+                    "產生\n窗族",
+                    assemblyPath,
+                    "RevitMCP.Commands.UniversalWindowCommand");
+                windowButtonData.ToolTip = "開啟萬用窗生成對話框：選窗型、調尺寸，直接產生並載入窗族（不需開啟 MCP 服務）";
+                var windowLargeIcon = Core.WindowFamily.UniversalWindowIcon.Create(32);
+                var windowSmallIcon = Core.WindowFamily.UniversalWindowIcon.Create(16);
+                if (windowLargeIcon != null) windowButtonData.LargeImage = windowLargeIcon;
+                if (windowSmallIcon != null) windowButtonData.Image = windowSmallIcon;
+                windowPanel.AddItem(windowButtonData);
+
                 // 初始化 ExternalEventManager (必須在 UI 執行緒建立)
                 _ = ExternalEventManager.Instance;
                 // 相機管理面板專用的 ExternalEvent FIFO 佇列（不再與 MCP 命令共用

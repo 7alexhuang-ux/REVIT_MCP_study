@@ -20,19 +20,8 @@ namespace RevitMCP.Core
         {
             var spec = WindowFamilySpec.Parse(parameters);
 
-            Document targetDoc = null;
-            if (spec.LoadIntoProject)
-            {
-                var uiDoc = _uiApp.ActiveUIDocument;
-                targetDoc = uiDoc?.Document;
-                if (targetDoc == null)
-                    throw new Exception("loadIntoProject = true 但目前沒有開啟中的專案文件。");
-                if (targetDoc.IsFamilyDocument)
-                    throw new Exception("目前開啟的是族文件，無法載入。請切換到專案再執行。");
-            }
-
-            var builder = new WindowFamilyBuilder(_uiApp.Application);
-            WindowFamilyBuildResult result = builder.Build(spec, targetDoc);
+            // 與 add-in 對話框共用同一個進入點（目標專案檢查＋建族＋載入）
+            WindowFamilyBuildResult result = WindowFamilyService.Generate(_uiApp, spec);
 
             var d = result.Derived;
             return new

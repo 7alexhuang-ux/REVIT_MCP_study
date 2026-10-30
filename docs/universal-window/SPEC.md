@@ -170,4 +170,6 @@ IFC：型別參數 `IfcExportAs = IfcWindow`，`PartitioningType` 依 R×C 對�
 | MCP 工具 `generate_window_family` | AI 客戶端 | MCP 服務開啟 | 自然語言轉規格、競圖快速變體、放窗後切割飾板（Phase 3）、送審檢核（Phase 4） |
 | 共用 | — | — | `MCP/Core/WindowFamily/` 生成引擎與規格 JSON；兩個入口都只做「組規格 → 呼叫引擎」，不各自畫幾何 |
 
+**add-in 入口實作（v0.2）**：ribbon「萬用窗 › 產生窗族」→ `RevitMCP.Commands.UniversalWindowCommand`（IExternalCommand，modal 對話框 `UniversalWindowDialog`）。對話框只負責介面與立面預覽；`WindowSpecBuilder`（純 C#，可單元測試）把 UI 狀態組成與 MCP 工具同形的規格 JSON，再經 `WindowFamilyService.Generate`（MCP 的 `GenerateWindowFamily` 也走同一個方法）呼叫引擎。因為 IExternalCommand 本身就在 Revit API 內容裡，add-in 端不經 WebSocket／ExternalEventManager。使用說明見 `ADDIN-GUIDE.md`。
+
 依據：`research/addin-market.md`（UniversalDW、id:door&window 等同類產品全為純介面；開源 Revit MCP 專案無生成族功能；ArchSmarterRevitMcpServer 的 Core／Server／Addin 分層）。

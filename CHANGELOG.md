@@ -123,6 +123,16 @@
 - **demo**：`configurator-demo.html` 加入三種新窗型、三個範例（三軌含紗窗、垂直上下拉、下懸內倒氣窗）、軌序與方向控制，JSON 輸出為 v0.2 形狀。
 - **測試**：MCP.Tests 新增 16 個（總計 101）、MCP-Server 新增 1 個。
 
+### 🆕 新增 — 萬用窗 add-in 入口（2026-10-31，universal-window 分支）
+
+- **ribbon**：「萬用窗」面板＋「產生窗族」按鈕（`MCP/Application.cs`；圖示由 `UniversalWindowIcon` 以 WPF 向量繪製，專案原本沒有圖示資源）。**不需開啟 MCP 服務、不需 AI**（ADR D-008）。
+- **命令與對話框**：`MCP/Commands/UniversalWindowCommand.cs`（IExternalCommand，modal）、`MCP/Core/WindowFamily/UniversalWindowDialog.cs`（純程式碼 WPF，與既有 LogViewerWindow 同風格）。10 個範例、排／樘／格子小地圖、每扇型式／鉸鏈／開向／軌序、框料與交疊、族名型別名自動命名、輸出資料夾與載入／覆蓋、即時立面線框預覽、引擎驗證錯誤直接顯示、結果面板（族路徑、扇數、玻璃／採光／可開口面積、warnings）。
+- **共用引擎**：新增 `WindowFamilyService.Generate`（目標專案檢查＋建族＋載入），MCP 的 `GenerateWindowFamily` 改走同一個方法，行為不變；add-in 在 IExternalCommand 的 Revit API 內容裡直接呼叫，不經 WebSocket／ExternalEventManager。
+- **規格組裝**：`WindowSpecBuilder`（純 C#）保存 UI 狀態並組出與 MCP 工具同形的規格 JSON；比例自動補滿 100、型別名 `{W}x{H}`、族名 `UW-R{R}C{C}-…`、改排樘數時保留既有格。
+- **測試**：MCP.Tests 新增 13 個（總計 114）。對話框另以暫時的 WPF 煙霧工具（不入庫）建立視窗、逐一套用 10 個範例、改格子／輸入錯誤／產生流程，並截圖檢查預覽。
+- **文件**：新增 `docs/universal-window/ADDIN-GUIDE.md`（human，已登錄 `DOCUMENT_AUDIENCE_INVENTORY.md`）；SPEC §11、ROADMAP Phase 1.5 同步。
+- **未驗證**：未在 Revit 內實機測試（對話框 modal 行為、生成後載入、ribbon 圖示呈現）。工具計數不變（add-in 入口不是 MCP 工具）。
+
 ### 📐 規格 v0.2（2026-10-31）
 
 - `docs/universal-window/SPEC.md` v0.2：窗型擴充（下懸／內倒、垂直上下拉、紗窗扇、整數軌序）、框深預設 7 cm（YKK AP YRB-A70）、§11 入口架構。
