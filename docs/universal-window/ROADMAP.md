@@ -14,9 +14,9 @@
 - [ ] 回填 SPEC §10「樣板室外方向與參考平面命名」
 
 ## Phase 1.5 窗型擴充＋add-in 入口（2026-10-31 開工，ADR D-008／D-009／D-010）
-- [ ] 引擎：hopper（下懸／內倒）、sliding_v（垂直上下拉）、screen（紗窗）、整數軌序、swing；舊 outer/inner 相容
-- [ ] 圖面：三種新型式的立面／平面／剖面符號；紗窗細虛線
-- [ ] MCP schema 同步；測試擴充
+- [x] 引擎：hopper（下懸／內倒）、sliding_v（垂直上下拉）、screen（紗窗）、整數軌序、swing；舊 outer/inner 相容
+- [x] 圖面：三種新型式的立面／平面／剖面符號；紗窗細虛線（剖面開啟線未做，族內無剖面符號線；未在 Revit 實測）
+- [x] MCP schema 同步；測試擴充
 - [ ] add-in：ribbon「萬用窗」面板＋WPF 對話框（格子預覽、範例、產生並載入），不依賴 MCP 服務
 - [ ] 框深預設 7 cm；YKK AP 框寬類回填（待人工判讀型錄斷面）
 

@@ -155,7 +155,7 @@ button.small:hover{color:var(--ink);border-color:var(--ink2)}
   <div class="grp">
     <h3>框料尺寸 <span class="tier">型別參數</span></h3>
     <div class="rowN" id="frameInputs"></div>
-    <p class="hint">框深 8 cm 有型錄來源（YKK AP YRB-A 70/100 mm、大同 896/1096 系列 8/10 cm）。外框寬、中框寬、扇框寬各家型錄不公開，目前是估值，要以你們常用鋁窗廠的斷面圖為準。橫拉交疊預設＝扇框寬（兩支勾企完全重疊），這是事務所慣例。</p>
+    <p class="hint">框深預設 7 cm＝YKK AP YRB-A70 的 70 mm（事務所慣用，A100 為 10 cm，見 ADR D-010）。外框寬、中框寬、扇框寬各家型錄不公開，目前是估值，要以你們常用鋁窗廠的斷面圖為準。滑動交疊（橫拉為水平、垂直上下拉為垂直）預設＝扇框寬（兩支勾企完全重疊），這是事務所慣例。</p>
   </div>
 
   <div class="grp">
@@ -193,7 +193,7 @@ button.small:hover{color:var(--ink);border-color:var(--ink2)}
   </div>
   <div class="legend">
     <span><i></i>實線：向室外開啟</span>
-    <span><i class="d"></i>虛線：開啟軌跡 / 隱藏線</span>
+    <span><i class="d"></i>虛線：開啟軌跡 / 隱藏線 / 向內開（內開、內倒）/ 紗窗網面</span>
     <span><i class="g"></i>玻璃</span>
     <span><i class="rc"></i>RC 牆</span>
     <span><i class="cl"></i>內外飾板</span>
@@ -205,7 +205,7 @@ button.small:hover{color:var(--ink);border-color:var(--ink2)}
     <div class="tbl"><table>
       <thead><tr><th>層</th><th>參數</th><th>誰改、什麼時候改</th><th>在 Revit 裡是什麼</th></tr></thead>
       <tbody>
-        <tr><td class="gen">生成時（拓樸）</td><td>排數 R、樘數 C、每格扇數、每扇開啟方式、鉸鏈側、橫拉內外軌</td><td>建族者或 MCP 工具，產生族時決定。同事要換組合＝從型別目錄挑另一個型別</td><td>Type Catalog 一列＝一種拓樸；零件族用程式擺放，不用陣列</td></tr>
+        <tr><td class="gen">生成時（拓樸）</td><td>排數 R、樘數 C、每格扇數、每扇開啟方式、鉸鏈側、開啟方向（外／內）、軌序（整數，0＝最外軌）</td><td>建族者或 MCP 工具，產生族時決定。同事要換組合＝從型別目錄挑另一個型別</td><td>Type Catalog 一列＝一種拓樸；零件族用程式擺放，不用陣列</td></tr>
         <tr><td>族內活參數（型別）</td><td>框料：外框寬、中框寬、扇框寬、框深、玻璃厚、交疊量</td><td>BIM Manager 依鋁窗廠系列設一次</td><td>Type 參數，公司標準鎖在型別</td></tr>
         <tr><td>族內活參數（實例）</td><td>總寬 W、總高 H、窗台高、各排高度比、各樘寬度比、MO 預留、外切透、內切透</td><td>同事放窗時依現場調</td><td>Instance 參數，公式把格子尺寸自動算出</td></tr>
       </tbody>
@@ -242,15 +242,18 @@ button.small:hover{color:var(--ink);border-color:var(--ink2)}
 
 <script>
 (function(){
-const TYPES={fixed:'固定',casement:'外推',sliding:'橫拉',awning:'上懸'};
-const ABBR={fixed:'F',casement:'C',sliding:'S',awning:'A'};
+const TYPES={fixed:'固定',casement:'外推',sliding:'橫拉',awning:'上懸',hopper:'下懸／內倒',sliding_v:'垂直上下拉',screen:'紗窗'};
+const ABBR={fixed:'F',casement:'C',sliding:'S',awning:'A',hopper:'H',sliding_v:'V',screen:'SC'};
+const SLIDE=t=>t==='sliding'||t==='sliding_v'||t==='screen';          // 滑動類
+const GLASS_SLIDE=t=>t==='sliding'||t==='sliding_v';                  // 玻璃滑動扇（不含紗窗）
+const swingOf=s=>s.sw||(s.t==='hopper'?'in':'out');                   // hopper 預設內倒，其餘預設向外
 const $=id=>document.getElementById(id);
 const clone=o=>JSON.parse(JSON.stringify(o));
 const f1=v=>Math.round(v*10)/10;
 let FW=5,MW=5,SW=4,D=10; // 由 S.frame 帶入
 const OV=()=> S.ovAuto ? S.frame.SW*10 : S.ov; // mm；預設＝扇框寬（兩支勾企完全重疊）
 
-const FRAME_DEF={FW:4.5,MW:4.4,SW:5,D:8,glass:8};
+const FRAME_DEF={FW:4.5,MW:4.4,SW:5,D:7,glass:8};
 const WALL_DEF={rc:15,ext:3,int:2,moGap:2.5,cutOut:5,cutIn:5,off:0};
 
 /* presets: cells[r][c] = list of sashes (row 0 = top) */
@@ -261,21 +264,58 @@ const PRESETS={
   up:{name:'上窗（上懸）',W:180,H:210,sill:60,rows:[30,70],cols:[100],cells:[[[{t:'awning'}]],[[{t:'fixed'}]]]},
   dn:{name:'下窗（橫拉）',W:180,H:210,sill:60,rows:[40,60],cols:[100],cells:[[[{t:'fixed'}]],[[{t:'sliding'},{t:'sliding'}]]]},
   tri:{name:'三樘組合',W:360,H:180,sill:90,rows:[100],cols:[30,40,30],cells:[[[{t:'fixed'}],[{t:'sliding'},{t:'sliding'}],[{t:'fixed'}]]]},
+  tk:{name:'三軌橫拉含紗窗',W:180,H:150,sill:90,rows:[100],cols:[100],cells:[[[{t:'sliding'},{t:'sliding'},{t:'screen'}]]]},
+  dh:{name:'垂直上下拉',W:90,H:150,sill:90,rows:[100],cols:[100],cells:[[[{t:'sliding_v'},{t:'sliding_v'}]]]},
+  hp:{name:'下懸內倒氣窗',W:60,H:60,sill:150,rows:[100],cols:[100],cells:[[[{t:'hopper'}]]]},
   three:{name:'上中下三排',W:240,H:240,sill:45,rows:[25,50,25],cols:[50,50],cells:[[[{t:'awning'}],[{t:'awning'}]],[[{t:'sliding'},{t:'sliding'}],[{t:'sliding'},{t:'sliding'}]],[[{t:'fixed'}],[{t:'fixed'}]]]},
 };
 function fromPreset(p){
   return {W:p.W,H:p.H,sill:p.sill,ov:25,rows:p.rows.slice(),cols:p.cols.slice(),
-    cells:p.cells.map(r=>r.map(c=>({sashes:c.map(s=>({t:s.t,h:s.h||'L'}))}))),
+    cells:p.cells.map(r=>r.map(c=>({sashes:c.map(s=>({t:s.t,h:s.h||'L',sw:s.sw,tr:s.tr}))}))),
     frame:clone(FRAME_DEF),wall:clone(WALL_DEF),ovAuto:true,detail:'fine',apexHinge:true,swing:30,active:{r:0,c:0}};
 }
 let S=null;
-try{const raw=localStorage.getItem('uw-spec-v3');if(raw)S=JSON.parse(raw);}catch(e){}
+try{const raw=localStorage.getItem('uw-spec-v4');if(raw)S=JSON.parse(raw);}catch(e){}
 if(!S||!S.cells)S=fromPreset(PRESETS.ufl);
 if(S.wall.off===undefined)S.wall.off=0;
 if(S.ovAuto===undefined)S.ovAuto=true;
-function save(){try{localStorage.setItem('uw-spec-v3',JSON.stringify(S));}catch(e){}}
+function save(){try{localStorage.setItem('uw-spec-v4',JSON.stringify(S));}catch(e){}}
 
 /* ---------- geometry ---------- */
+/* 滑動格軌序解析（與 C# CellSpec.ResolveSlidePlacements 一致）：
+   玻璃扇未指定軌序 → 依玻璃扇序交錯 0/1；紗窗未指定 → 玻璃最大軌+1；紗窗第 j 片罩第 j mod G 片玻璃 */
+function resolveSlide(list){
+  if(!list.some(s=>SLIDE(s.t)))return null;
+  const res=list.map(()=>({tr:-1,pos:0,screen:false}));
+  let g=0,maxT=-1;
+  list.forEach((s,k)=>{
+    if(!GLASS_SLIDE(s.t))return;
+    const tr=(s.tr===undefined||s.tr===null)?(g%2):s.tr;
+    res[k]={tr,pos:g,screen:false}; if(tr>maxT)maxT=tr; g++;
+  });
+  let j=0;
+  list.forEach((s,k)=>{
+    if(s.t!=='screen')return;
+    const tr=(s.tr===undefined||s.tr===null)?(maxT+1+j):s.tr;
+    res[k]={tr,pos:g>0?j%g:0,screen:true}; j++;
+  });
+  return res;
+}
+/* 與 C# 驗證同規則；回傳 null＝合法，否則為錯誤說明（demo 只顯示警告，不阻擋繪圖） */
+function cellIssue(list){
+  const sl=list.filter(s=>SLIDE(s.t));
+  if(!sl.length)return null;
+  if(sl.length<list.length)return '混用了滑動類（橫拉／垂直上下拉／紗窗）與其他開啟型式，規格無效。';
+  if(list.some(s=>s.t==='sliding')&&list.some(s=>s.t==='sliding_v'))return '橫拉與垂直上下拉不可同格。';
+  if(!list.some(s=>GLASS_SLIDE(s.t)))return '紗窗不能單獨成格，至少要有一個玻璃滑動扇。';
+  const p=resolveSlide(list);
+  for(let a=0;a<p.length;a++)for(let b=a+1;b<p.length;b++)
+    if(p[a].tr===p[b].tr&&Math.abs(p[a].pos-p[b].pos)<=1)return `第 ${a+1}、${b+1} 扇同在第 ${p[a].tr} 軌且位置相鄰，軌道會互卡。`;
+  return null;
+}
+/* 軌道中心相對框心偏移（+ 朝室外）：≤2 軌沿用 ±0.22D；≥3 軌把框深等分（與 C# TrackCentreOffsetCm 一致） */
+const trackOff=(tr,n)=> n<=2 ? (tr<=0?1:-1)*.22*D : D/2-(D/n)*(tr+.5);
+const trackThick=n=> Math.min(SW*.7,.8*D/Math.max(n,1));
 function layout(){
   const R=S.rows.length, C=S.cols.length, ov=OV()/10;
   const availW=S.W-2*FW-(C-1)*MW, availH=S.H-2*FW-(R-1)*MW;
@@ -286,9 +326,18 @@ function layout(){
     const segs=[]; let y=FW;
     for(let r=0;r<R;r++){
       const y0=y, h=rowH[r]; y+=h+MW;
-      const list=S.cells[r][c].sashes, m=list.length, sliding=list.every(s=>s.t==='sliding');
-      const sw=sliding?(w+(m-1)*ov)/m:w/m;
-      const sashes=list.map((s,k)=>({t:s.t,h:s.h||'L',x:x0+k*(sliding?sw-ov:sw),y:y0,w:sw,hgt:h,outer:sliding?(k%2===0):false,idx:k,count:m,sliding,r,c}));
+      const list=S.cells[r][c].sashes, m=list.length, pl=resolveSlide(list), sliding=!!pl;
+      const vert=list.some(s=>s.t==='sliding_v');
+      const gc=Math.max(1,list.filter(s=>GLASS_SLIDE(s.t)).length), tc=pl?Math.max(...pl.map(q=>q.tr))+1:0;
+      const slW=(w+(gc-1)*ov)/gc, slH=(h+(gc-1)*ov)/gc;   // 玻璃扇沿滑動軸交疊分配；紗窗與所罩玻璃扇同尺寸
+      const sashes=list.map((s,k)=>{
+        let sx,sy,wd,hg;
+        if(!sliding){wd=w/m;hg=h;sx=x0+k*wd;sy=y0;}
+        else if(!vert){wd=slW;hg=h;sx=x0+pl[k].pos*(slW-ov);sy=y0;}
+        else{wd=w;hg=slH;sx=x0;sy=y0+pl[k].pos*(slH-ov);}
+        return {t:s.t,h:s.h||'L',swing:swingOf(s),x:sx,y:sy,w:wd,hgt:hg,track:sliding?pl[k].tr:-1,tcount:tc,
+          gi:sliding?pl[k].pos:0,gc:sliding?gc:0,screen:s.t==='screen',vert,outer:sliding&&pl[k].tr===0,idx:k,count:m,sliding,r,c};
+      });
       segs.push({y0,h,x0,w,sashes,sliding,r});
     }
     bays.push({x0,w,segs,i:c});
@@ -311,6 +360,7 @@ const STYLE=`<style>
  .gl{stroke:var(--frame);stroke-width:.6px;fill:none}
  .sym{stroke:var(--ink);stroke-width:.9px;fill:none}
  .symd{stroke:var(--ink);stroke-width:.9px;fill:none;stroke-dasharray:3 2}
+ .scr{stroke:var(--ink2);stroke-width:.5px;fill:none;stroke-dasharray:1.5 1.5}
  .dim{stroke:var(--accent);stroke-width:.7px;fill:none}
  .dimd{stroke:var(--accent);stroke-width:.8px;fill:none;stroke-dasharray:1.5 2}
  .mo{stroke:var(--accent);stroke-width:1px;fill:none;stroke-dasharray:5 3}
@@ -339,6 +389,17 @@ function arrowH(x1,x2,y){
   return L(x1,y,x2,y,'sym')+`<polygon points="${f1(x2)},${f1(y)} ${f1(x2-dir*a)},${f1(y-a*.45)} ${f1(x2-dir*a)},${f1(y+a*.45)}" class="arrow"/>`;
 }
 
+function arrowV(y1,y2,x){
+  const dir=y2>y1?1:-1, a=Math.min(6,Math.abs(y2-y1)*.25);
+  return L(x,y1,x,y2,'sym')+`<polygon points="${f1(x)},${f1(y2)} ${f1(x-a*.45)},${f1(y2-dir*a)} ${f1(x+a*.45)},${f1(y2-dir*a)}" class="arrow"/>`;
+}
+/* 紗窗立面：玻璃範圍內縮 1 cm 的細虛線框＋一條對角線 */
+function screenElev(s){
+  const x1=s.x+SW+1,y1=s.y+SW+1,x2=s.x+s.w-SW-1,y2=s.y+s.hgt-SW-1;
+  if(x2<=x1||y2<=y1)return '';
+  return R_(x1,y1,x2-x1,y2-y1,'scr')+L(x1,y1,x2,y2,'scr');
+}
+
 /* ---------- elevation ---------- */
 function drawElev(lay){
   const W=S.W,H=S.H, fs=Math.max(4,W/38), pad=fs*4, det=S.detail, g=S.wall.moGap;
@@ -353,11 +414,14 @@ function drawElev(lay){
     b.segs.forEach((sg,j)=>{
       const segTop= j>0? sg.y0-MW/2 : 0, segBot= j<b.segs.length-1? sg.y0+sg.h+MW/2 : H;
       if(j>0){const ty=sg.y0-MW; o+= det==='coarse'?L(bx1,ty+MW/2,bx2,ty+MW/2,'m'):R_(b.x0,ty,b.w,MW,'fr');}
-      const order=[...sg.sashes].sort((a,c)=>(a.outer?1:0)-(c.outer?1:0));
+      const order=[...sg.sashes].sort((a,c)=>c.track-a.track);   // 內軌先畫、外軌（track 0）最後蓋在上面
+      const screens=[];
       order.forEach(s=>{
+        if(s.screen){screens.push(s);return;}                      // 紗窗最後畫（網面疊在玻璃上）
         const sw= s.t==='fixed'?SW*.5:SW;
         if(det==='coarse'){
-          if(s.idx>0)o+=L(s.x+(s.sliding?OV()/20:0),segTop,s.x+(s.sliding?OV()/20:0),segBot,'m');
+          if(s.vert){ if(s.gi>0){const yy=s.y+OV()/20;o+=L(bx1,yy,bx2,yy,'m');} }
+          else{ const xx=s.x+(s.sliding?OV()/20:0); if(s.sliding?s.gi>0:s.idx>0)o+=L(xx,segTop,xx,segBot,'m'); }
         }else{
           if(s.sliding&&s.outer){o+=R_(s.x,s.y,s.w,s.hgt,'fr');}
           o+=R_(s.x,s.y,s.w,s.hgt,det==='fine'?'m':'t');
@@ -365,20 +429,28 @@ function drawElev(lay){
           o+=R_(s.x+sw,s.y+sw,s.w-2*sw,s.hgt-2*sw,'gl');
           if(det==='fine'&&s.t!=='fixed'){o+=R_(s.x+sw*.45,s.y+sw*.45,s.w-sw*.9,s.hgt-sw*.9,'t');}
         }
-        const cx=s.x+s.w/2, cy=s.y+s.hgt/2, ins=sw+1;
+        const cx=s.x+s.w/2, cy=s.y+s.hgt/2, ins=sw+1, cl=s.swing==='in'?'symd':'sym'; // 向內開用虛線
         if(s.t==='casement'){ // 拍板：頂點頂到實際鉸鏈位置（扇框外緣），不是玻璃邊
           const hx = s.h==='L'? s.x : s.x+s.w, ox = s.h==='L'? s.x+s.w : s.x;
           const apexX = S.apexHinge? hx: ox, baseX = S.apexHinge? ox: hx;
-          o+=L(baseX,s.y,apexX,cy,'sym')+L(baseX,s.y+s.hgt,apexX,cy,'sym');
+          o+=L(baseX,s.y,apexX,cy,cl)+L(baseX,s.y+s.hgt,apexX,cy,cl);
         }else if(s.t==='awning'){
           const apexY=S.apexHinge? s.y+ins : s.y+s.hgt-ins, baseY=S.apexHinge? s.y+s.hgt-ins : s.y+ins;
-          o+=L(s.x+ins,baseY,cx,apexY,'sym')+L(s.x+s.w-ins,baseY,cx,apexY,'sym');
+          o+=L(s.x+ins,baseY,cx,apexY,cl)+L(s.x+s.w-ins,baseY,cx,apexY,cl);
+        }else if(s.t==='hopper'){ // 下懸／內倒：頂點在下緣中點（鉸鏈在下）
+          const apexY=S.apexHinge? s.y+s.hgt-ins : s.y+ins, baseY=S.apexHinge? s.y+ins : s.y+s.hgt-ins;
+          o+=L(s.x+ins,baseY,cx,apexY,cl)+L(s.x+s.w-ins,baseY,cx,apexY,cl);
         }else if(s.t==='sliding'){
-          const len=s.w*.35, dir=(s.idx%2===0)?1:-1;
-          if(s.count===1){o+=arrowH(cx-len/2,cx+len/2,cy);}
+          const len=s.w*.35, dir=(s.gi%2===0)?1:-1;
+          if(s.gc===1){o+=arrowH(cx-len/2,cx+len/2,cy);}
           else o+=arrowH(cx-dir*len/2,cx+dir*len/2,cy);
+        }else if(s.t==='sliding_v'){ // 垂直箭頭：上扇向下、下扇向上
+          const len=s.hgt*.35, dir=(s.gi%2===0)?1:-1;
+          if(s.gc===1){o+=arrowV(cy-len/2,cy+len/2,cx);}
+          else o+=arrowV(cy-dir*len/2,cy+dir*len/2,cx);
         }
       });
+      if(det!=='coarse')screens.forEach(s=>{o+=R_(s.x,s.y,s.w,s.hgt,det==='fine'?'m':'t')+screenElev(s);});
     });
   });
   const yb=H+g+fs*1.6;
@@ -398,7 +470,7 @@ function drawElev(lay){
 function drawPlan(lay){
   const W=S.W, fs=Math.max(4,W/38), det=S.detail, ov=OV()/10, wl=S.wall;
   const swing = det==='coarse'? 0 : (S.swing??30), ang=swing*Math.PI/180;
-  let o='', maxOut=D/2;
+  let o='', maxOut=D/2, maxIn=0;
   const yc=0; // frame centre line; outside = negative y
   // wall: RC centred on frame, cladding outside/inside; wall runs beyond window each side
   const ext=30, yo=-wl.rc/2+wl.off, yi=wl.rc/2+wl.off;
@@ -427,11 +499,13 @@ function drawPlan(lay){
     }
     seg.sashes.forEach(s=>{
       const gw=det==='fine'?1.2:0;
-      if(s.t==='sliding'){
-        const y = s.outer? yc-D*.22 : yc+D*.22;
+      if(s.sliding){
+        const y = yc-trackOff(s.track,s.tcount);   // 依軌序放在框深內的軌道位置（外側為負 y）
+        if(s.screen){ if(det!=='coarse')o+=L(s.x,y,s.x+s.w,y,'scr'); return; }   // 紗窗：平面佔一條虛線軌線
+        const th=trackThick(s.tcount);
         if(det==='coarse'){o+=L(s.x,y,s.x+s.w,y,'m');}
-        else{o+=R_(s.x,y-gw-SW*.35,s.w,SW*.7+2*gw,'frt');o+=L(s.x,y,s.x+s.w,y,'h');}
-        if(det==='fine'&&s.idx>0){
+        else{o+=R_(s.x,y-gw-th/2,s.w,th+2*gw,'frt');o+=L(s.x,y,s.x+s.w,y,'h');}
+        if(det==='fine'&&!s.vert&&s.gi>0){
           const mx=s.x, my=yc-D*.62;
           o+=L(mx,my,mx+ov,my,'dim')+L(mx,my-1.2,mx,my+1.2,'dim')+L(mx+ov,my-1.2,mx+ov,my+1.2,'dim')+T(mx+ov/2,my-1.4,`交疊 ${f1(OV())}`,'d','text-anchor="middle"');
         }
@@ -441,22 +515,29 @@ function drawPlan(lay){
       if(det==='fine'){o+=R_(s.x,yc-D*.2,SW*.5,D*.4,'frt')+R_(s.x+s.w-SW*.5,yc-D*.2,SW*.5,D*.4,'frt');}
       else if(s.idx>0){o+=L(s.x,yc-D/2,s.x,yc+D/2,'m');}
       o+=L(s.x,yc,s.x+s.w,yc,'h');
+      const inn=s.swing==='in';
       if(s.t==='casement'&&swing>0){
-        const hx=s.h==='L'?s.x:s.x+s.w, dir=s.h==='L'?1:-1, stop=yc-D/2;
-        const tx=hx+dir*Math.cos(ang)*s.w, ty=stop-Math.sin(ang)*s.w;
-        maxOut=Math.max(maxOut,D/2+Math.sin(ang)*s.w);
-        o+=L(hx,stop,tx,ty,'sym'); // 拍板 2026-09-14：30° 實線示意，不畫成門
-        o+=`<path d="M ${f1(tx)} ${f1(ty)} A ${f1(s.w)} ${f1(s.w)} 0 0 ${dir>0?1:0} ${f1(hx+dir*s.w)} ${f1(stop)}" class="symd" ${NS}/>`;
+        const hx=s.h==='L'?s.x:s.x+s.w, dir=s.h==='L'?1:-1, stop=inn?yc+D/2:yc-D/2, sg=inn?1:-1;
+        const tx=hx+dir*Math.cos(ang)*s.w, ty=stop+sg*Math.sin(ang)*s.w;
+        if(inn)maxIn=Math.max(maxIn,D/2+Math.sin(ang)*s.w); else maxOut=Math.max(maxOut,D/2+Math.sin(ang)*s.w);
+        o+=L(hx,stop,tx,ty,'sym'); // 拍板 2026-09-14：30° 實線示意，不畫成門；swing=in 時畫向室內側
+        const sweep=inn?(dir>0?0:1):(dir>0?1:0);
+        o+=`<path d="M ${f1(tx)} ${f1(ty)} A ${f1(s.w)} ${f1(s.w)} 0 0 ${sweep} ${f1(hx+dir*s.w)} ${f1(stop)}" class="symd" ${NS}/>`;
       }
-      if(s.t==='awning'&&det!=='coarse'){o+=L(s.x+SW,yc-D*.9,s.x+s.w-SW,yc-D*.9,'symd');maxOut=Math.max(maxOut,D*.9);}
+      if((s.t==='awning'||s.t==='hopper')&&det!=='coarse'){ // 上／下懸：虛線示意放在開啟方向那側
+        const yy=inn?yc+D*.9:yc-D*.9;
+        o+=L(s.x+SW,yy,s.x+s.w-SW,yy,'symd');
+        if(inn)maxIn=Math.max(maxIn,D*.9); else maxOut=Math.max(maxOut,D*.9);
+      }
     });
   });
+  const bot=Math.max(moBot,maxIn);
   o+=T(-ext,-maxOut-fs*1.3,'OUTSIDE 室外','big');
-  o+=T(-ext,moBot+fs*1.6,'INSIDE 室內','big');
-  o+=dimH(-wl.moGap,W+wl.moGap,moBot+fs*3.4,`MO ${f1(W+2*wl.moGap)}`,fs);
-  o+=dimH(0,W,moBot+fs*5,W,fs);
+  o+=T(-ext,bot+fs*1.6,'INSIDE 室內','big');
+  o+=dimH(-wl.moGap,W+wl.moGap,bot+fs*3.4,`MO ${f1(W+2*wl.moGap)}`,fs);
+  o+=dimH(0,W,bot+fs*5,W,fs);
   const top=-maxOut-fs*2.6;
-  return svg([-ext-fs*1.5,top,W+2*ext+fs*3,(moBot+fs*6.2)-top],fs,o);
+  return svg([-ext-fs*1.5,top,W+2*ext+fs*3,(bot+fs*6.2)-top],fs,o);
 }
 
 /* ---------- section ---------- */
@@ -487,18 +568,27 @@ function drawSec(lay){
     if(j>0)o+=frame(y0-MW,MW);
     const s=sg.sashes[0];
     if(sg.sliding){
-      sg.sashes.slice(0,2).forEach(ss=>{
-        const x= ss.outer? xc-D*.22 : xc+D*.22;
-        if(det==='coarse')o+=L(x,y0,x,y0+h,'m');
-        else{o+=R_(x-SW*.35,y0,SW*.7,SW,'frt')+R_(x-SW*.35,y0+h-SW,SW*.7,SW,'frt')+L(x,y0+SW,x,y0+h-SW,'h');}
+      sg.sashes.forEach(ss=>{
+        const x=xc-trackOff(ss.track,ss.tcount), ya=yTop+ss.y, hh=ss.hgt;   // 外軌在室外（左）側；垂直滑動各扇有自己的高度範圍
+        if(ss.screen){ if(det!=='coarse')o+=L(x,ya,x,ya+hh,'scr'); return; }
+        if(det==='coarse')o+=L(x,ya,x,ya+hh,'m');
+        else{const th=trackThick(ss.tcount);o+=R_(x-th/2,ya,th,SW,'frt')+R_(x-th/2,ya+hh-SW,th,SW,'frt')+L(x,ya+SW,x,ya+hh-SW,'h');}
       });
-    }else if(s.t==='awning'){
-      const ang=35*Math.PI/180, hy=y0+SW, len=h-SW*2;
-      const tx=xc-Math.sin(ang)*len, ty=hy+Math.cos(ang)*len;
-      if(det==='coarse'){o+=L(xc,y0,xc,y0+h,'m');}
-      else{o+=R_(xc-SW*.35,y0,SW*.7,SW,'frt')+L(xc,hy,tx,ty,'h')+L(xc-SW*.9,hy,tx-SW*.9,ty,'m');
-        o+=`<path d="M ${f1(tx)} ${f1(ty)} A ${f1(len)} ${f1(len)} 0 0 0 ${f1(xc)} ${f1(hy+len)}" class="symd" ${NS}/>`;
-        o+=L(xc,hy,xc,y0+h,'t');}
+    }else if(s.t==='awning'||s.t==='hopper'){
+      const inn=s.swing==='in', k=inn?1:-1, ang=35*Math.PI/180, len=h-SW*2;
+      if(s.t==='awning'){ // 鉸鏈在上：自室外側（左）或室內側（右）開
+        const hy=y0+SW, tx=xc+k*Math.sin(ang)*len, ty=hy+Math.cos(ang)*len;
+        if(det==='coarse'){o+=L(xc,y0,xc,y0+h,'m');}
+        else{o+=R_(xc-SW*.35,y0,SW*.7,SW,'frt')+L(xc,hy,tx,ty,'h')+L(xc+k*SW*.9,hy,tx+k*SW*.9,ty,'m');
+          o+=`<path d="M ${f1(tx)} ${f1(ty)} A ${f1(len)} ${f1(len)} 0 0 ${inn?1:0} ${f1(xc)} ${f1(hy+len)}" class="symd" ${NS}/>`;
+          o+=L(xc,hy,xc,y0+h,'t');}
+      }else{ // 下懸／內倒：鉸鏈在下，上緣向室內（預設）或室外擺動
+        const hy=y0+h-SW, tx=xc+k*Math.sin(ang)*len, ty=hy-Math.cos(ang)*len;
+        if(det==='coarse'){o+=L(xc,y0,xc,y0+h,'m');}
+        else{o+=R_(xc-SW*.35,y0+h-SW,SW*.7,SW,'frt')+L(xc,hy,tx,ty,'h')+L(xc+k*SW*.9,hy,tx+k*SW*.9,ty,'m');
+          o+=`<path d="M ${f1(tx)} ${f1(ty)} A ${f1(len)} ${f1(len)} 0 0 ${inn?0:1} ${f1(xc)} ${f1(hy-len)}" class="symd" ${NS}/>`;
+          o+=L(xc,y0,xc,hy,'t');}
+      }
     }else{
       if(det==='coarse')o+=L(xc,y0,xc,y0+h,'m');
       else{o+=R_(xc-SW*.35,y0,SW*.7,SW,'frt')+R_(xc-SW*.35,y0+h-SW,SW*.7,SW,'frt')+L(xc,y0+SW,xc,y0+h-SW,'h');}
@@ -515,8 +605,9 @@ function drawSec(lay){
 
 /* ---------- summary & JSON ---------- */
 function summary(lay){
-  let sashes=0, openable=0, glass=0, daylight=0, openArea=0;
+  let sashes=0, screens=0, openable=0, glass=0, daylight=0, openArea=0;
   lay.forEach(b=>b.segs.forEach(sg=>sg.sashes.forEach(s=>{
+    if(s.screen){screens++;return;}   // 紗窗不計入扇數、玻璃、採光、可開口（ADR D-009）
     sashes++;
     const sw=s.t==='fixed'?SW*.5:SW;
     const gw=s.w-2*sw, gh=s.hgt-2*sw, a=gw*gh/1e4;
@@ -524,32 +615,45 @@ function summary(lay){
     const top=S.sill+S.H-(s.y+sw), bot=top-gh;
     const eff=Math.max(0,top-Math.max(bot,75));
     daylight+=gw*eff/1e4;
-    if(s.t!=='fixed'){openable++; openArea+= s.t==='sliding'? a*.5 : a;}
+    if(s.t!=='fixed'){openable++; openArea+= (s.t==='sliding'||s.t==='sliding_v')? a*.5 : a;}
   })));
-  return {rows:S.rows.length,cols:S.cols.length,sashes,openable,glass,daylight,openArea};
+  return {rows:S.rows.length,cols:S.cols.length,sashes,screens,openable,glass,daylight,openArea};
 }
 function ifcPartition(){
   const R=S.rows.length, C=S.cols.length;
-  if(R===1&&C===1){const n=S.cells[0][0].sashes.length;return n===1?'SINGLE_PANEL':n===2?'DOUBLE_PANEL_VERTICAL':n===3?'TRIPLE_PANEL_VERTICAL':'USERDEFINED';}
-  if(R===2&&C===1){const a=S.cells[0][0].sashes.length,b=S.cells[1][0].sashes.length;if(a===1&&b===1)return 'DOUBLE_PANEL_HORIZONTAL';if(a===1&&b===2)return 'TRIPLE_PANEL_TOP';if(a===2&&b===1)return 'TRIPLE_PANEL_BOTTOM';}
-  if(R===1&&C===2&&S.cells[0].every(c=>c.sashes.length===1))return 'DOUBLE_PANEL_VERTICAL';
+  const pc=cell=>cell.sashes.filter(s=>s.t!=='screen').length;   // 紗窗不計面板數
+  if(R===1&&C===1){
+    const cell=S.cells[0][0], n=pc(cell);
+    if(n===1)return 'SINGLE_PANEL';
+    if(cell.sashes.some(s=>s.t==='sliding_v'))return n===2?'DOUBLE_PANEL_HORIZONTAL':n===3?'TRIPLE_PANEL_HORIZONTAL':'USERDEFINED';
+    return n===2?'DOUBLE_PANEL_VERTICAL':n===3?'TRIPLE_PANEL_VERTICAL':'USERDEFINED';
+  }
+  if(R===2&&C===1){const a=pc(S.cells[0][0]),b=pc(S.cells[1][0]);if(a===1&&b===1)return 'DOUBLE_PANEL_HORIZONTAL';if(a===1&&b===2)return 'TRIPLE_PANEL_TOP';if(a===2&&b===1)return 'TRIPLE_PANEL_BOTTOM';}
+  if(R===1&&C===2&&S.cells[0].every(c=>pc(c)===1))return 'DOUBLE_PANEL_VERTICAL';
   return 'USERDEFINED';
 }
+const IFC_OP={fixed:'FIXEDCASEMENT',sliding:'SLIDINGHORIZONTAL',awning:'TOPHUNG',hopper:'BOTTOMHUNG',sliding_v:'SLIDINGVERTICAL'};  // screen 不輸出
 function specJSON(lay){
   const sum=summary(lay), wl=S.wall, g=wl.moGap;
   const spec={
     family:`UW-R${S.rows.length}C${S.cols.length}-${S.W}x${S.H}`, revitVersion:2024, units:'cm',
     generation:{ // 拓樸：生成時決定，Type Catalog 一列
       rows:S.rows.length, cols:S.cols.length,
-      cells:S.cells.map((row,r)=>row.map((cell,c)=>({id:`R${r+1}C${c+1}`,sashes:cell.sashes.map((s,k)=>{
-        const x={type:s.t}; if(s.t==='casement')x.hinge=s.h; if(s.t==='sliding')x.track=k%2===0?'outer':'inner';
-        x.ifcOperationType={fixed:'FIXEDCASEMENT',casement:s.h==='L'?'SIDEHUNGLEFTHAND':'SIDEHUNGRIGHTHAND',sliding:'SLIDINGHORIZONTAL',awning:'TOPHUNG'}[s.t]; return x;})})))
+      cells:S.cells.map((row,r)=>row.map((cell,c)=>{
+        const pl=resolveSlide(cell.sashes);
+        return {id:`R${r+1}C${c+1}`,sashes:cell.sashes.map((s,k)=>{
+          const x={type:s.t}; if(s.t==='casement')x.hinge=s.h;
+          if(s.t==='casement'||s.t==='awning'||s.t==='hopper')x.swing=swingOf(s);   // v0.2：out／in
+          if(pl&&pl[k].tr>=0)x.track=pl[k].tr;                                      // v0.2：整數軌序，0＝最外軌
+          const op=s.t==='casement'?(s.h==='L'?'SIDEHUNGLEFTHAND':'SIDEHUNGRIGHTHAND'):IFC_OP[s.t];
+          if(op)x.ifcOperationType=op; return x;})};
+      }))
     },
     typeParams:{frameOuter:FW,mullion:MW,sash:SW,frameDepth:D,glass_mm:S.frame.glass,meetingRailOverlap_mm:f1(OV()),meetingRailOverlapMode:S.ovAuto?'equalsSashFrameWidth':'manual'},
     instanceParams:{width:S.W,height:S.H,sillHeight:S.sill,rowRatios:S.rows.slice(),colRatios:S.cols.slice(),
       frameOffsetFromWallCentre:wl.off,mo:{gapPerSide:g,width:f1(S.W+2*g),height:f1(S.H+2*g),cutBeyondExterior:wl.cutOut,cutBeyondInterior:wl.cutIn,
           voidDepth:f1(wl.rc+wl.ext+wl.int+wl.cutOut+wl.cutIn),cutTargets:['host wall','exterior cladding','interior lining']}},
-    derived:{rowHeights:lay[0].segs.map(s=>f1(s.h)),colWidths:lay.map(b=>f1(b.w)),sashCount:sum.sashes,openableCount:sum.openable,glassArea_m2:+sum.glass.toFixed(3),daylightArea_m2:+sum.daylight.toFixed(3),openableArea_m2:+sum.openArea.toFixed(3)},
+    derived:{rowHeights:lay[0].segs.map(s=>f1(s.h)),colWidths:lay.map(b=>f1(b.w)),sashCount:sum.sashes,screenCount:sum.screens,openableCount:sum.openable,glassArea_m2:+sum.glass.toFixed(3),daylightArea_m2:+sum.daylight.toFixed(3),openableArea_m2:+sum.openArea.toFixed(3)},
     ifc:{entity:'IfcWindow',partitioningType:ifcPartition(),psetWindowCommon:{ThermalTransmittance:null,GlazingAreaFraction:+(sum.glass/(S.W*S.H/1e4)).toFixed(3),Infiltration:null,FireRating:null,IsExternal:true}},
     taiwanReview:{daylightArea_m2:+sum.daylight.toFixed(3),ventilationOpening_m2:+sum.openArea.toFixed(3),Uaf_W_m2K:null,SF:null,
       airtightnessClass_CNS11527:8,watertightnessClass_CNS11528:35,windLoadClass_CNS11526_kgf_m2:280,glassType:'8mm 單層（膠合 5+5 為常見替代）',fireRating_h:null,
@@ -596,10 +700,23 @@ function renderControls(){
   }).join('')).join('');
   // cell editor
   const cell=S.cells[S.active.r][S.active.c], list=cell.sashes;
+  const pl=resolveSlide(list), issue=cellIssue(list);
+  const sashExtra=(s,k,pl)=>{
+    const swBtn=`<button class="small" data-sws="${k}">${swingOf(s)==='in'?'向內':'向外'}</button>`;
+    if(s.t==='casement')return `<span><button class="small" data-h="${k}">鉸鏈 ${s.h==='L'?'左':'右'}</button> ${swBtn}</span>`;
+    if(s.t==='awning'||s.t==='hopper')return `<span>${swBtn}</span>`;
+    if(SLIDE(s.t)){
+      const auto=pl&&pl[k].tr>=0?pl[k].tr:'';
+      const cur=(s.tr===undefined||s.tr===null)?'':String(s.tr);
+      return `<select data-tr="${k}" title="軌序（0＝最外軌）"><option value="" ${cur===''?'selected':''}>軌 自動(${auto})</option>${[0,1,2,3].map(n=>`<option value="${n}" ${cur===String(n)?'selected':''}>軌 ${n}</option>`).join('')}</select>`;
+    }
+    return '<span></span>';
+  };
   $('cell').innerHTML=`<div class="seg"><h4><b>R${S.active.r+1}C${S.active.c+1}</b><span>扇數 <select id="cnt">${[1,2,3,4].map(n=>`<option ${n===list.length?'selected':''}>${n}</option>`).join('')}</select></span></h4>
     <div class="chips">${Object.keys(TYPES).map(t=>`<button class="chip ${list.every(s=>s.t===t)?'on':''}" data-all="${t}">${TYPES[t]}</button>`).join('')}</div>
     ${list.map((s,k)=>`<div class="sash"><span class="n">${k+1}</span><select data-s="${k}">${Object.keys(TYPES).map(t=>`<option value="${t}" ${s.t===t?'selected':''}>${TYPES[t]}</option>`).join('')}</select>
-      ${s.t==='casement'?`<button class="small" data-h="${k}">鉸鏈 ${s.h==='L'?'左':'右'}</button>`:s.t==='sliding'?`<span class="hint">${k%2===0?'外軌':'內軌'}</span>`:'<span></span>'}</div>`).join('')}
+      ${sashExtra(s,k,pl)}</div>`).join('')}
+    ${issue?`<p class="hint" style="color:var(--accent)">規格無效：${issue}</p>`:''}
     <div class="chips"><button class="small" id="applyRow">套用到整排</button><button class="small" id="applyCol">套用到整樘</button><button class="small" id="applyAll">套用到整組</button></div></div>`;
   // ratios
   const rowF=S.rows.map((p,r)=>`<label class="f"><span>R${r+1} 高 <b>%</b></span><input type="number" data-row="${r}" value="${f1(p)}" min="5" max="90" step="5" ${r===S.rows.length-1?'readonly':''}></label>`).join('');
@@ -652,7 +769,8 @@ document.addEventListener('change',e=>{
   if(t.id==='R'){resizeGrid(+t.value,S.cols.length);}
   else if(t.id==='C'){resizeGrid(S.rows.length,+t.value);}
   else if(t.id==='cnt'){const n=+t.value,list=cell.sashes;while(list.length<n)list.push(clone(list[list.length-1]));list.length=n;list.forEach((s,k)=>{if(s.t==='casement')s.h=k<n/2?'L':'R';});}
-  else if(t.dataset.s!==undefined){cell.sashes[+t.dataset.s].t=t.value;}
+  else if(t.dataset.s!==undefined){const ss=cell.sashes[+t.dataset.s];ss.t=t.value;delete ss.sw;delete ss.tr;}   // 換型式時清掉開啟方向與軌序
+  else if(t.dataset.tr!==undefined){const ss=cell.sashes[+t.dataset.tr]; if(t.value==='')delete ss.tr; else ss.tr=+t.value;}
   else return;
   render();
 });
@@ -661,8 +779,9 @@ document.addEventListener('click',e=>{
   const cell=S.cells[S.active.r][S.active.c];
   if(t.dataset.p){const keep={detail:S.detail,apexHinge:S.apexHinge,swing:S.swing,frame:S.frame,wall:S.wall};S=Object.assign(fromPreset(PRESETS[t.dataset.p]),keep);}
   else if(t.dataset.cell){const [r,c]=t.dataset.cell.split(':').map(Number);S.active={r,c};}
-  else if(t.dataset.all){const ty=t.dataset.all;cell.sashes.forEach((s,k)=>{s.t=ty;if(ty==='casement')s.h=k<cell.sashes.length/2?'L':'R';});}
+  else if(t.dataset.all){const ty=t.dataset.all;cell.sashes.forEach((s,k)=>{s.t=ty;delete s.sw;delete s.tr;if(ty==='casement')s.h=k<cell.sashes.length/2?'L':'R';});}
   else if(t.dataset.h!==undefined){const s=cell.sashes[+t.dataset.h];s.h=s.h==='L'?'R':'L';}
+  else if(t.dataset.sws!==undefined){const s=cell.sashes[+t.dataset.sws];s.sw=swingOf(s)==='in'?'out':'in';}
   else if(t.dataset.eq){const arr=S[t.dataset.eq];arr.fill(100/arr.length);}
   else if(t.dataset.d)S.detail=t.dataset.d;
   else if(t.dataset.a!==undefined)S.apexHinge=t.dataset.a==='true';

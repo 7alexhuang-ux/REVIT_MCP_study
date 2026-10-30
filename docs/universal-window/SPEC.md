@@ -40,6 +40,14 @@ Phase 1 明確不做：巢狀零件族、陣列、可見性參數切換開啟方
 - **三軌橫拉含紗窗**（v0.2，ADR D-009）：軌數＝格內最大 track＋1；screen 扇佔一軌，不計入玻璃面積、有效採光面積與可開口面積；圖面以細虛線表示網面。未指定 track 時，玻璃扇依索引交錯放 0／1 軌、screen 放最內軌。
 - **下懸／內倒**（hopper）：鉸鏈在下緣；swing＝in 為內倒（台灣廁所高窗、氣窗常用）。IFC OperationType＝BOTTOMHUNG。
 - **垂直上下拉**（sliding_v）：交疊邏輯沿垂直軸，扇高 = (格高 + (n−1)·交疊) / n；IFC OperationType＝SLIDINGVERTICAL。
+- **v0.2 實作細則**（2026-10-31，引擎已實作，`MCP.Tests/WindowFamily/WindowTypesV02Tests.cs` 覆蓋）：
+  - 軌序解析：玻璃扇（sliding／sliding_v）未指定 track → 依玻璃扇序交錯 0、1、0、1；screen 未指定 → 玻璃最大軌＋1（多片再依序加）；明確指定一律採用，`track` 範圍 0–3。舊值 `"outer"`→0、`"inner"`→1，數字字串同整數。
+  - 紗窗尺寸與位置：與所罩玻璃扇**同尺寸**，不參與交疊分配（玻璃扇數 G 只算玻璃扇）；第 j 片紗窗罩第 (j mod G) 片玻璃扇。二玻＋一紗：兩扇玻璃交疊分配格寬，紗窗寬＝玻璃扇寬、位置罩第 0 片。
+  - 同軌衝突：同一格內兩扇同軌且位置相鄰（|位置差| ≤ 1）視為無效（軌道互卡）；間隔一片者可同軌（三扇橫拉 0／1／0）。
+  - 計數：UW_扇數 與 `derived.sashCount` **不含紗窗**（另計 `derived.screenCount`）；UW_可開扇數同樣不含紗窗。IFC PartitioningType 不計紗窗；垂直上下拉（sliding_v）二／三扇為 DOUBLE／TRIPLE_PANEL_HORIZONTAL。
+  - 多軌深度：≤2 軌沿用 ±0.22·框深（外軌在室外側）、扇框深 0.35·框深；≥3 軌把框深等分，第 t 軌取第 t 格中心，扇框深取 0.35·框深與單軌寬 80% 的較小者。
+  - 開啟方向縮寫（UW_開啟方式）：F／CL／CR／S／A／H／V／SC；與型式預設相反時加尾碼：casement／awning 內開 `i`（CLi、Ai）、hopper 外開 `o`（Ho）。
+  - 圖面：swing＝in 的外推扇平面開啟線畫向室內側，立面三角形改虛線（ISO 慣例：虛線＝向內開）；hopper 立面三角形頂點在下緣中點；sliding_v 立面為垂直箭頭（上扇向下、下扇向上）；screen 立面為內縮 1 cm 的細虛線框＋對角線（中等以上詳細程度）、平面為該軌道中心的一條虛線。剖面開啟線尚未實作（族內目前沒有剖面符號線，剖面靠實體）。
 - 百葉、凸窗、轉角窗、折疊窗**不進格子模型**，另立生成器（ADR D-009，ROADMAP Phase 5）。
 
 ## 4. 參數分層（ADR D-001）
@@ -123,7 +131,7 @@ IFC：型別參數 `IfcExportAs = IfcWindow`，`PartitioningType` 依 R×C 對�
   "familyName": "UW-上固定下外推-2樘",
   "typeName": "240x180",
   "generation": { "rows": 2, "cols": 2, "cells": [[{"id":"R1C1","sashes":[{"type":"fixed"}]}, ...]] },
-  "typeParams": { "frameOuter": 4.5, "mullion": 4.4, "sash": 5, "frameDepth": 8, "glass_mm": 8, "meetingRailOverlap_mm": 50 },
+  "typeParams": { "frameOuter": 4.5, "mullion": 4.4, "sash": 5, "frameDepth": 7, "glass_mm": 8, "meetingRailOverlap_mm": 50 },
   "instanceParams": { "width": 240, "height": 180, "sillHeight": 90, "rowRatios": [35,65], "colRatios": [50,50],
                       "frameOffsetFromWallCentre": 0,
                       "mo": { "gapPerSide": 2.5, "cutBeyondExterior": 5, "cutBeyondInterior": 5 } },

@@ -15,7 +15,9 @@ export const windowFamilyTools: Tool[] = [
             "萬用窗族生成器（Phase 1，固定尺寸）。依規格 JSON（幾排 × 幾樘、每格幾扇、每扇怎麼開）在 Revit 2024 生成一個可直接出圖、可上門窗表、帶台灣送審參數（UW_ 系列共用參數）的鋁窗族（.rfa），並可選擇載入目前專案。" +
             "拓樸（rows/cols/cells 的扇數與開啟方式）在生成時決定死，不是活參數——換組合需重新呼叫本工具生成新族或新型別。" +
             "typeParams（框料尺寸、玻璃厚、交疊量）寫入為 Type 參數值；instanceParams（尺寸、窗台高、MO 切透）Phase 1 為固定值＋型別參數紀錄，幾何不會隨後續修改參數而跟動（Phase 2 才會）。" +
-            "所有長度單位為公分（cm）。一格內混用 sliding 與其他開啟型式視為無效規格，會回錯誤。",
+            "所有長度單位為公分（cm）。" +
+            "窗型（v0.2）：fixed 固定、casement 外推、sliding 橫拉、awning 上懸、hopper 下懸／內倒、sliding_v 垂直上下拉、screen 紗窗。" +
+            "滑動類（sliding／sliding_v／screen）不可與開啟類同格、sliding 與 sliding_v 不可同格、screen 不能單獨成格（至少一個玻璃滑動扇），違反即回錯誤。",
         inputSchema: {
             type: "object",
             properties: {
@@ -67,26 +69,33 @@ export const windowFamilyTools: Tool[] = [
                                             minItems: 1,
                                             maxItems: 4,
                                             description:
-                                                "該格內的扇，依序排列。一格內若全部是 sliding，扇與扇之間交疊；否則等分。一格內混用 sliding 與其他型式為無效規格。",
+                                                "該格內的扇，依序排列。一格內若全部是滑動類：全是 sliding（可加 screen）則水平交疊、全是 sliding_v（可加 screen）則垂直交疊，紗窗與所罩的玻璃扇同尺寸且佔自己的軌道；否則等分。滑動類與開啟類混用、sliding 與 sliding_v 同格、screen 單獨成格皆為無效規格。",
                                             items: {
                                                 type: "object",
                                                 properties: {
                                                     type: {
                                                         type: "string",
-                                                        enum: ["fixed", "casement", "sliding", "awning"],
+                                                        enum: ["fixed", "casement", "sliding", "awning", "hopper", "sliding_v", "screen"],
                                                         description:
-                                                            "扇的開啟方式：fixed 固定、casement 外推、sliding 橫拉、awning 上懸。",
+                                                            "扇的開啟方式：fixed 固定、casement 外推、sliding 橫拉、awning 上懸、hopper 下懸／內倒（鉸鏈在下，預設內倒）、sliding_v 垂直上下拉、screen 紗窗（滑動類，佔一軌，不計玻璃／採光／可開口面積）。",
                                                     },
                                                     hinge: {
                                                         type: "string",
                                                         enum: ["L", "R"],
                                                         description: "鉸鏈側，僅 type=casement 時使用。",
                                                     },
-                                                    track: {
+                                                    swing: {
                                                         type: "string",
-                                                        enum: ["outer", "inner"],
+                                                        enum: ["out", "in"],
                                                         description:
-                                                            "軌道位置，僅 type=sliding 時使用；偶數索引（自 0 起算）預設外軌。",
+                                                            "開啟方向，適用 casement／awning／hopper。未提供時 hopper 預設 in（內倒），casement／awning 預設 out。in 時平面開啟線畫向室內側、立面符號改虛線。",
+                                                    },
+                                                    track: {
+                                                        type: "integer",
+                                                        minimum: 0,
+                                                        maximum: 3,
+                                                        description:
+                                                            "軌序（整數，0＝最外軌），適用 sliding／sliding_v／screen。軌數＝格內最大 track＋1。未指定時：玻璃扇依序交錯 0／1，screen 放最內軌（玻璃最大軌＋1）。相容 v0.1 舊字串值 \"outer\"（＝0）、\"inner\"（＝1），但新規格請用整數。",
                                                     },
                                                 },
                                                 required: ["type"],
@@ -125,8 +134,8 @@ export const windowFamilyTools: Tool[] = [
                         frameDepth: {
                             type: "number",
                             exclusiveMinimum: 0,
-                            default: 8,
-                            description: "外框／中框深度（cm）。預設 8，來源 YKK AP YRB-A 70/100mm、大同鋁業 896/1096 系列。",
+                            default: 7,
+                            description: "外框／中框深度（cm）。預設 7＝YKK AP YRB-A70（事務所慣用，ADR D-010）；A100 為 10。",
                         },
                         glass_mm: {
                             type: "number",

@@ -47,6 +47,7 @@ namespace RevitMCP.Core
                 derived = new
                 {
                     sashCount = d.SashCount,
+                    screenCount = d.ScreenCount,
                     openableCount = d.OpenableCount,
                     glassArea_m2 = Math.Round(d.GlassAreaM2, 3),
                     daylightArea_m2 = Math.Round(d.DaylightAreaM2, 3),

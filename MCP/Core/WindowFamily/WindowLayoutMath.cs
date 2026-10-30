@@ -20,10 +20,22 @@ namespace RevitMCP.Core.WindowFamily
         public int Count { get; set; }
         public SashType Type { get; set; }
         public HingeSide Hinge { get; set; }
-        /// <summary>橫拉格：偶數索引為外軌（ADR：偶數索引外軌）。</summary>
+        /// <summary>開啟方向（casement／awning／hopper 適用）。</summary>
+        public SwingDirection Swing { get; set; }
+        /// <summary>滑動格：是否在最外軌（Track == 0）。</summary>
         public bool IsOuterTrack { get; set; }
-        /// <summary>所屬格是否整格橫拉。</summary>
+        /// <summary>所屬格是否為滑動格（整格橫拉／垂直上下拉／紗窗）。</summary>
         public bool IsSlidingCell { get; set; }
+        /// <summary>所屬格是否為垂直滑動（sliding_v；交疊沿垂直軸）。</summary>
+        public bool IsVerticalSlide { get; set; }
+        /// <summary>實際軌序（0＝最外軌）；非滑動格為 -1。</summary>
+        public int Track { get; set; } = -1;
+        /// <summary>所屬格的軌數（最大軌序＋1）；非滑動格為 0。</summary>
+        public int TrackCount { get; set; }
+        /// <summary>滑動格內的玻璃扇序（紗窗＝所罩的玻璃扇序）；非滑動格為 0。</summary>
+        public int GlassIndex { get; set; }
+        /// <summary>滑動格內的玻璃滑動扇數（不含紗窗）；非滑動格為 0。</summary>
+        public int GlassCount { get; set; }
 
         public double X { get; set; }
         public double Y { get; set; }
@@ -38,14 +50,18 @@ namespace RevitMCP.Core.WindowFamily
         public double GlassWidth { get { return Width - 2 * SashFrameWidth; } }
         public double GlassHeight { get { return Height - 2 * SashFrameWidth; } }
 
-        /// <summary>玻璃面積 m²。</summary>
+        /// <summary>玻璃面積 m²（紗窗為 0）。</summary>
         public double GlassAreaM2 { get; set; }
         /// <summary>有效採光面積 m²（扣 FL+75 cm 以下）。</summary>
         public double DaylightAreaM2 { get; set; }
-        /// <summary>可開口面積 m²（橫拉只算半扇）。</summary>
+        /// <summary>可開口面積 m²（橫拉／垂直上下拉只算半扇；紗窗為 0）。</summary>
         public double OpenableAreaM2 { get; set; }
 
-        public bool IsOpenable { get { return Type != SashType.Fixed; } }
+        /// <summary>是否為紗窗扇。</summary>
+        public bool IsScreen { get { return Type == SashType.Screen; } }
+
+        /// <summary>可開扇：非固定、非紗窗。</summary>
+        public bool IsOpenable { get { return Type != SashType.Fixed && Type != SashType.Screen; } }
 
         public string CellId
         {
@@ -63,6 +79,9 @@ namespace RevitMCP.Core.WindowFamily
         public double Width { get; set; }
         public double Height { get; set; }
         public bool IsSlidingCell { get; set; }
+        public bool IsVerticalSlide { get; set; }
+        /// <summary>軌數（最大軌序＋1）；非滑動格為 0。</summary>
+        public int TrackCount { get; set; }
         public List<SashLayout> Sashes { get; set; } = new List<SashLayout>();
     }
 
@@ -78,7 +97,11 @@ namespace RevitMCP.Core.WindowFamily
     /// <summary>SPEC §8 輸出 JSON 的 derived 區塊。</summary>
     public class WindowDerived
     {
+        /// <summary>扇數：不含紗窗（紗窗另計於 <see cref="ScreenCount"/>）。</summary>
         public int SashCount { get; set; }
+        /// <summary>紗窗扇數（v0.2）。</summary>
+        public int ScreenCount { get; set; }
+        /// <summary>可開扇數：非固定、非紗窗。</summary>
         public int OpenableCount { get; set; }
         public double GlassAreaM2 { get; set; }
         public double DaylightAreaM2 { get; set; }
@@ -97,7 +120,7 @@ namespace RevitMCP.Core.WindowFamily
         public double SillHeight { get; set; }
         public double AvailWidth { get; set; }
         public double AvailHeight { get; set; }
-        /// <summary>橫拉交疊量（cm）。</summary>
+        /// <summary>滑動交疊量（cm；橫拉為水平、垂直上下拉為垂直）。</summary>
         public double Overlap { get; set; }
         public double[] RowHeights { get; set; }
         public double[] ColWidths { get; set; }
@@ -126,8 +149,15 @@ namespace RevitMCP.Core.WindowFamily
         /// <summary>採光有效高度下限（FL 以上 cm）。SPEC §7：採光扣 FL+75 cm 以下。</summary>
         public const double DaylightDatumCm = 75.0;
 
-        /// <summary>橫拉扇的可開口面積係數（半扇）。</summary>
+        /// <summary>橫拉／垂直上下拉扇的可開口面積係數（半扇）。</summary>
         public const double SlidingOpenableFactor = 0.5;
+
+        /// <summary>≤2 軌時，軌道中心距框心的係數（× 框深）；外軌（track 0）在室外側。</summary>
+        public const double SlidingTrackOffsetFactor = 0.22;
+        /// <summary>≤2 軌時，滑動扇框深度係數（× 框深）。</summary>
+        public const double SlidingSashDepthFactor = 0.35;
+        /// <summary>≥3 軌時，扇框深度佔單軌寬（框深 / 軌數）的比例。</summary>
+        public const double MultiTrackSashDepthFill = 0.8;
 
         /// <summary>固定扇的壓條係數：扇框寬 × 0.5。</summary>
         public const double FixedSashFrameFactor = 0.5;
@@ -188,9 +218,19 @@ namespace RevitMCP.Core.WindowFamily
                     y += cellH + mw;
 
                     var cellSpec = spec.Cells[r][c];
-                    bool sliding = cellSpec.AllSliding;
+                    bool sliding = cellSpec.IsSlidingCell;
+                    bool vertical = cellSpec.IsVerticalSlide;
                     int m = cellSpec.Sashes.Count;
-                    double sashW = sliding ? (bay.Width + (m - 1) * ov) / m : bay.Width / m;
+                    var placements = cellSpec.ResolveSlidePlacements();   // 非滑動格為 null
+                    int glassCount = sliding ? cellSpec.GlassSliderCount : 0;
+                    int trackCount = sliding ? cellSpec.TrackCount : 0;
+
+                    // 滑動格：玻璃扇沿滑動軸交疊分配（扇尺寸 = (格尺寸 + (G−1)·交疊) / G）；紗窗與所罩玻璃扇同尺寸
+                    double slideW = bay.Width;
+                    double slideH = cellH;
+                    if (sliding && !vertical) slideW = (bay.Width + (glassCount - 1) * ov) / glassCount;
+                    if (sliding && vertical) slideH = (cellH + (glassCount - 1) * ov) / glassCount;
+                    double evenW = bay.Width / m;
 
                     var cell = new CellLayout
                     {
@@ -200,13 +240,33 @@ namespace RevitMCP.Core.WindowFamily
                         Y = cellY,
                         Width = bay.Width,
                         Height = cellH,
-                        IsSlidingCell = sliding
+                        IsSlidingCell = sliding,
+                        IsVerticalSlide = vertical,
+                        TrackCount = trackCount
                     };
 
                     for (int k = 0; k < m; k++)
                     {
                         var sashSpec = cellSpec.Sashes[k];
                         double sashFrame = sashSpec.Type == SashType.Fixed ? sw * FixedSashFrameFactor : sw;
+
+                        double sx, sy, sWidth, sHeight;
+                        if (!sliding)
+                        {
+                            sWidth = evenW; sHeight = cellH;
+                            sx = bayX + k * evenW; sy = cellY;
+                        }
+                        else if (!vertical)
+                        {
+                            sWidth = slideW; sHeight = cellH;
+                            sx = bayX + placements[k].Position * (slideW - ov); sy = cellY;
+                        }
+                        else
+                        {
+                            sWidth = bay.Width; sHeight = slideH;
+                            sx = bayX; sy = cellY + placements[k].Position * (slideH - ov);
+                        }
+
                         var sash = new SashLayout
                         {
                             Row = r,
@@ -215,18 +275,31 @@ namespace RevitMCP.Core.WindowFamily
                             Count = m,
                             Type = sashSpec.Type,
                             Hinge = sashSpec.Hinge,
+                            Swing = sashSpec.Swing,
                             IsSlidingCell = sliding,
-                            IsOuterTrack = sliding && (k % 2 == 0),
-                            X = bayX + k * (sliding ? sashW - ov : sashW),
-                            Y = cellY,
-                            Width = sashW,
-                            Height = cellH,
+                            IsVerticalSlide = vertical,
+                            Track = sliding ? placements[k].Track : -1,
+                            TrackCount = trackCount,
+                            IsOuterTrack = sliding && placements[k].Track == 0,
+                            GlassIndex = sliding ? placements[k].Position : 0,
+                            GlassCount = glassCount,
+                            X = sx,
+                            Y = sy,
+                            Width = sWidth,
+                            Height = sHeight,
                             SashFrameWidth = sashFrame
                         };
 
                         if (sash.GlassWidth <= 0 || sash.GlassHeight <= 0)
                             throw new WindowSpecException(
                                 $"格 {sash.CellId} 第 {k + 1} 扇的玻璃尺寸算出非正值（{Fmt(sash.GlassWidth)} × {Fmt(sash.GlassHeight)} cm）。扇框寬 {Fmt(sashFrame)} cm 相對扇尺寸過大。");
+
+                        if (sash.IsScreen)
+                        {
+                            // 紗窗：不計入玻璃、有效採光、可開口面積（ADR D-009）
+                            cell.Sashes.Add(sash);
+                            continue;
+                        }
 
                         // 面積（沿用 demo summary()）
                         double areaM2 = sash.GlassWidth * sash.GlassHeight / 1e4;
@@ -237,9 +310,10 @@ namespace RevitMCP.Core.WindowFamily
                         double effectiveH = Math.Max(0.0, glassTopAboveFl - Math.Max(glassBottomAboveFl, DaylightDatumCm));
                         sash.DaylightAreaM2 = sash.GlassWidth * effectiveH / 1e4;
 
+                        bool halfOpen = sashSpec.Type == SashType.Sliding || sashSpec.Type == SashType.SlidingV;
                         sash.OpenableAreaM2 = sashSpec.Type == SashType.Fixed
                             ? 0.0
-                            : (sliding ? areaM2 * SlidingOpenableFactor : areaM2);
+                            : (halfOpen ? areaM2 * SlidingOpenableFactor : areaM2);
 
                         cell.Sashes.Add(sash);
                     }
@@ -253,7 +327,8 @@ namespace RevitMCP.Core.WindowFamily
             var all = layout.AllSashes.ToList();
             layout.Derived = new WindowDerived
             {
-                SashCount = all.Count,
+                SashCount = all.Count(s => !s.IsScreen),
+                ScreenCount = all.Count(s => s.IsScreen),
                 OpenableCount = all.Count(s => s.IsOpenable),
                 GlassAreaM2 = all.Sum(s => s.GlassAreaM2),
                 DaylightAreaM2 = all.Sum(s => s.DaylightAreaM2),
@@ -265,6 +340,31 @@ namespace RevitMCP.Core.WindowFamily
             };
 
             return layout;
+        }
+
+        // ────────────────────────────────────────────────
+        // 多軌深度位置（供 Revit 端使用；純算術，可單元測試）
+        // ────────────────────────────────────────────────
+
+        /// <summary>
+        /// 軌道中心相對框心的偏移（cm，正值朝室外）。
+        /// ≤2 軌：沿用 v0.1（外軌 +0.22·D、內軌 −0.22·D；單軌在外軌位置）；
+        /// ≥3 軌：框深 D 依軌數等分，第 t 軌取第 t 格的中心（track 0 最外）。
+        /// </summary>
+        public static double TrackCentreOffsetCm(int track, int trackCount, double frameDepth)
+        {
+            if (trackCount <= 2)
+                return (track <= 0 ? 1.0 : -1.0) * SlidingTrackOffsetFactor * frameDepth;
+            double lane = frameDepth / trackCount;
+            return frameDepth / 2.0 - lane * (track + 0.5);
+        }
+
+        /// <summary>滑動扇框的深度（cm）：≤2 軌 0.35·D；≥3 軌取 0.35·D 與單軌寬 80% 的較小者，避免相鄰軌實體重疊。</summary>
+        public static double SlidingSashDepthCm(int trackCount, double frameDepth)
+        {
+            double normal = SlidingSashDepthFactor * frameDepth;
+            if (trackCount <= 2) return normal;
+            return Math.Min(normal, MultiTrackSashDepthFill * frameDepth / trackCount);
         }
 
         // ────────────────────────────────────────────────

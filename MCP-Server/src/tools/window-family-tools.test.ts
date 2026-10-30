@@ -30,9 +30,29 @@ test("generation 規格：拓樸邊界與扇物件 schema", () => {
     assert.deepEqual(cellSchema.required, ["id", "sashes"]);
     const sashSchema = cellSchema.properties.sashes.items;
     assert.deepEqual(sashSchema.required, ["type"]);
-    assert.deepEqual(sashSchema.properties.type.enum, ["fixed", "casement", "sliding", "awning"]);
+    assert.deepEqual(sashSchema.properties.type.enum, [
+        "fixed", "casement", "sliding", "awning", "hopper", "sliding_v", "screen",
+    ]);
     assert.deepEqual(sashSchema.properties.hinge.enum, ["L", "R"]);
-    assert.deepEqual(sashSchema.properties.track.enum, ["outer", "inner"]);
+});
+
+test("v0.2 窗型擴充：swing 列舉、track 改整數軌序並註明相容舊字串", () => {
+    const tool = getTool();
+    const properties = tool.inputSchema.properties as Record<string, any>;
+    const sashSchema = properties.generation.properties.cells.items.items.properties.sashes.items;
+
+    assert.deepEqual(sashSchema.properties.swing.enum, ["out", "in"]);
+    assert.match(String(sashSchema.properties.swing.description), /hopper/);
+
+    const track = sashSchema.properties.track;
+    assert.equal(track.type, "integer");
+    assert.equal(track.minimum, 0);
+    assert.match(String(track.description), /outer/);
+    assert.match(String(track.description), /inner/);
+
+    assert.match(String(tool.description), /sliding_v/);
+    assert.match(String(tool.description), /screen/);
+    assert.match(String(tool.description), /不能單獨成格/);
 });
 
 test("typeParams 預設值符合 SPEC §5 表列值", () => {
@@ -42,7 +62,8 @@ test("typeParams 預設值符合 SPEC §5 表列值", () => {
     assert.equal(typeParams.frameOuter.default, 4.5);
     assert.equal(typeParams.mullion.default, 4.4);
     assert.equal(typeParams.sash.default, 5);
-    assert.equal(typeParams.frameDepth.default, 8);
+    // ADR D-010：框深預設 8 → 7（YKK AP YRB-A70）
+    assert.equal(typeParams.frameDepth.default, 7);
     assert.equal(typeParams.glass_mm.default, 8);
     // 交疊量無固定 default 值，依 ADR D-005 說明「未提供時預設＝扇框寬」
     assert.equal(typeParams.meetingRailOverlap_mm.default, undefined);
