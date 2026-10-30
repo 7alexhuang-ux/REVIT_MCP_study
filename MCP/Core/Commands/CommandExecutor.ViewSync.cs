@@ -58,11 +58,13 @@ namespace RevitMCP.Core
                 ["viewType"] = active.ViewType.ToString(),
             };
 
-            var known = ViewSyncKnownOrigin(out var originSource);
+            var resolved = ViewSyncResolveOrigin(doc);
+            var known = resolved.Origin;
             result["origin"] = new JObject
             {
                 ["offsetMeters"] = known.HasValue ? new JArray(known.Value.X, known.Value.Y, known.Value.Z) : null,
-                ["source"] = originSource,
+                ["source"] = resolved.Source,
+                ["fromRegistry"] = resolved.FromRegistry,
             };
 
             // 請求順便帶 model／originOffsetMeters 時，回報核對結果（網頁可在送出前先檢查）。
@@ -70,7 +72,7 @@ namespace RevitMCP.Core
             result["check"] = new JObject
             {
                 ["model"] = ViewSyncMath.CompareModel(req.ModelTitle, req.ModelGuid, info.Title, info.Guid).ToString(),
-                ["origin"] = req.HasOrigin ? ViewSyncMath.CompareOrigin(req.OriginOffsetMeters, known).ToString() : "Unspecified",
+                ["origin"] = req.HasOrigin ? ViewSyncOriginVerdict(req.OriginOffsetMeters, resolved) : "Unspecified",
             };
             return result;
         }
@@ -444,16 +446,79 @@ namespace RevitMCP.Core
         private static void ViewSyncCheckModelAndOrigin(ViewSyncRequest req, Document doc, List<string> warnings)
         {
             ViewSyncCheckModel(req, doc, warnings);
-            var known = ViewSyncKnownOrigin(out _);
-            switch (ViewSyncMath.CompareOrigin(req.OriginOffsetMeters, known))
+            var resolved = ViewSyncResolveOrigin(doc);
+            var cmp = ViewSyncMath.CompareOrigin(req.OriginOffsetMeters, resolved.Origin);
+            if (cmp == ViewSyncMath.OriginMatch.Match) return;
+            if (resolved.FromRegistry)
             {
-                case ViewSyncMath.OriginMatch.Mismatch:
-                    throw new ViewSyncException("origin_mismatch",
-                        "網頁模型的原點與最近一次匯出的 camera.json 不同（網頁模型可能已過期），請重新匯出並重新上傳模型。");
-                case ViewSyncMath.OriginMatch.Unverified:
-                    warnings.Add("找不到本機 camera.json，無法核對網頁模型原點（未驗證）。");
-                    break;
+                throw new ViewSyncException("origin_mismatch",
+                    "網頁模型的原點與這份 Revit 文件最近一次匯出的原點不同（網頁模型可能已過期），請重新匯出並重新上傳模型。");
             }
+            // 沒有這份文件自己的匯出紀錄：預設資料夾的 camera.json 可能是別的案，只警告、不擋。
+            warnings.Add("origin_unverified：找不到這份文件的匯出原點紀錄（export_origins.json），無法核對網頁模型原點（未驗證）。"
+                + "可先重新匯出，或用 viewsync_register_origin 補登。");
+        }
+
+        private static string ViewSyncOriginVerdict(Vec3 requested, ResolvedOrigin resolved)
+        {
+            var cmp = ViewSyncMath.CompareOrigin(requested, resolved.Origin);
+            if (cmp == ViewSyncMath.OriginMatch.Match) return "Match";
+            if (resolved.FromRegistry) return "Mismatch";
+            return "Unverified"; // origin_unverified：無本文件紀錄時不下 Mismatch 結論
+        }
+
+        /// <summary>核對用原點：這份文件的匯出登錄優先；找不到才退回預設資料夾 camera.json（只當警告用）。</summary>
+        private static ResolvedOrigin ViewSyncResolveOrigin(Document doc)
+        {
+            var info = ViewSyncModelInfo.FromDocument(doc);
+            return ExportOriginRegistry.Resolve(ExportOriginRegistry.DefaultPath, info.Guid, info.Path, () =>
+            {
+                var o = ViewSyncKnownOrigin(out var src);
+                return (o, src);
+            });
+        }
+
+        /// <summary>匯出成功後登錄這份文件的 GLB 原點；失敗只記 log，不影響匯出。</summary>
+        internal static void ViewSyncRecordExportOrigin(Document doc, Vec3 offset, string outputDir)
+        {
+            try
+            {
+                var info = ViewSyncModelInfo.FromDocument(doc);
+                ExportOriginRegistry.Upsert(ExportOriginRegistry.DefaultPath, new ExportOriginEntry
+                {
+                    DocumentPath = info.Path,
+                    DocumentGuid = info.Guid,
+                    Title = info.Title,
+                    OriginOffsetMeters = new[] { offset.X, offset.Y, offset.Z },
+                    OutputDir = outputDir,
+                    ExportedAt = DateTime.UtcNow.ToString("o"),
+                });
+            }
+            catch (Exception) { }
+        }
+
+        // ------------------------------------------------------------------ viewsync_register_origin（只給沒有 Origin 的本機呼叫）
+
+        /// <summary>補登目前作用中文件的 GLB 原點（例如 GLB 是別次匯出的）。參數 originOffsetMeters [x,y,z]、outputDir（選填）。</summary>
+        private object ViewSyncRegisterOrigin(JObject p)
+        {
+            var uiDoc = ViewSyncRequireDocument(false);
+            var token = p["originOffsetMeters"];
+            if (token == null) throw new ViewSyncException("bad_request", "缺少 originOffsetMeters（[x,y,z] 公尺）。");
+            var offset = ParseNamedViewsVector(token, "originOffsetMeters");
+            var outputDir = p["outputDir"]?.Value<string>() ?? "(manual)";
+            ViewSyncRecordExportOrigin(uiDoc.Document, offset, outputDir);
+            var info = ViewSyncModelInfo.FromDocument(uiDoc.Document);
+            var saved = ExportOriginRegistry.Find(ExportOriginRegistry.DefaultPath, info.Guid, info.Path);
+            if (saved == null) throw new ViewSyncException("register_failed", "寫入登錄檔失敗：" + ExportOriginRegistry.DefaultPath);
+            return new JObject
+            {
+                ["registered"] = true,
+                ["registryPath"] = ExportOriginRegistry.DefaultPath,
+                ["model"] = new JObject { ["title"] = info.Title, ["path"] = info.Path, ["guid"] = info.Guid },
+                ["originOffsetMeters"] = new JArray(saved.OriginOffsetMeters[0], saved.OriginOffsetMeters[1], saved.OriginOffsetMeters[2]),
+                ["outputDir"] = saved.OutputDir,
+            };
         }
 
         private static void ViewSyncEnsureEditable(Document doc, ElementId id, string what)

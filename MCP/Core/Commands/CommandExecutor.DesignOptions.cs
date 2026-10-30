@@ -238,6 +238,7 @@ namespace RevitMCP.Core
                 warnings.Add("已知非幾何成員 " + totalIgnored.ToString(CultureInfo.InvariantCulture) + " 筆（空嵌板、零尺寸帷幕嵌板、嵌入牆嵌板、帷幕格線、標註、參考平面、草圖線、開口切割、約束、Level／Sketch／SketchPlane、牆輪廓定義）不計入失敗，逐筆列在各分件 ignoredNoGeometry（含 reason 與 basis）；有尺寸的 Glazed、找不到已匯出宿主牆的 Wall 嵌板、牆等實體類無幾何仍算失敗。");
             if (totalRecovered > 0)
                 warnings.Add("有 " + totalRecovered.ToString(CultureInfo.InvariantCulture) + " 筆 0 面元素改用實例幾何或較低細緻度取得，列在各分件 recoveredGeometry；需人工比對。");
+            if (complete) ViewSyncRecordExportOrigin(doc, offset, outputDir);
             report["ignoredNoGeometryCount"] = totalIgnored;
             report["complete"] = complete;
             report["state"] = complete ? "complete" : "incomplete";

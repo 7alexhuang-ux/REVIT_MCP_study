@@ -93,6 +93,10 @@ namespace RevitMCP.Core
                         result = ViewSyncDebugFov(parameters);
                         break;
 
+                    case "viewsync_register_origin":
+                        result = ViewSyncRegisterOrigin(parameters);
+                        break;
+
                     case "create_wall":
                         result = CreateWall(parameters);
                         break;

@@ -272,6 +272,7 @@ namespace RevitMCP.Core
             files.Add(WebCompareFileEntry("camera.json", cameraJson, swCam, warnings));
             File.WriteAllText(cameraTxt, BuildWebCompareCameraText(camera), new UTF8Encoding(false));
             files.Add(WebCompareFileEntry("camera.txt", cameraTxt, swCam, warnings));
+            if (includeGlb) ViewSyncRecordExportOrigin(doc, offset, outputDir);
 
             Logger.Info($"[WebCompare] 完成：{files.Count} 個檔、{total.Elapsed.TotalSeconds:0.0} 秒、{warnings.Count} 則警告");
 

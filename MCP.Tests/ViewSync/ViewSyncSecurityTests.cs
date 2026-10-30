@@ -64,7 +64,7 @@ namespace RevitMCP.Tests.ViewSync
         {
             foreach (var c in new[] { "viewsync_pair", "viewsync_status", "viewsync_apply_temp", "viewsync_open_view", "viewsync_create_view", "VIEWSYNC_STATUS" })
                 Assert.That(ViewSyncCommands.IsBrowserAllowed(c), Is.True, c);
-            foreach (var c in new[] { "create_wall", "delete_element", "export_web_compare", "open_document", "viewsync_debug_fov", "viewsync_status ", "", null, "viewsync_" })
+            foreach (var c in new[] { "create_wall", "delete_element", "export_web_compare", "open_document", "viewsync_debug_fov", "viewsync_register_origin", "viewsync_status ", "", null, "viewsync_" })
                 Assert.That(ViewSyncCommands.IsBrowserAllowed(c), Is.False, c ?? "(null)");
         }
 
