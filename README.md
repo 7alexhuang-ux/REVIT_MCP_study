@@ -326,3 +326,9 @@ powershell -ExecutionPolicy Bypass -File scripts\release-port.ps1
 ## License
 
 MIT License
+
+## 網頁 3D 視角聯動（viewsync）的連線白名單
+
+瀏覽器要連 Revit 外掛，Origin 必須在 `config.json` 的 `allowedOrigins`。預設只有正式站 `https://issue-manager-sigma.vercel.app`；
+**本機開發（例如 `http://localhost:3600`）預設不允許**，需要時自己在 `config.json` 的 `allowedOrigins` 加一行，存檔後重啟外掛。
+瀏覽器連線另需先在 Revit 功能區按「網頁配對」取得配對碼，且只能呼叫 `viewsync_*` 白名單指令；`viewsync_debug_fov`、`viewsync_register_origin` 只開給沒有 Origin 的本機連線。

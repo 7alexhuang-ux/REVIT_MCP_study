@@ -46,7 +46,8 @@ namespace RevitMCP.Core
         private readonly System.Collections.Generic.Dictionary<Guid, BrowserConnection> _browserConnections =
             new System.Collections.Generic.Dictionary<Guid, BrowserConnection>();
         private const int MaxBrowserConnections = 8;
-        private const int MaxBrowserMessageBytes = 8 * 1024 * 1024;
+        private const int MaxBrowserMessageBytes = 1024 * 1024; // 1 MB
+        private int _browserConnectionCount; // 以 Interlocked 維護，名額在握手前先保留
         private const int MaxBrowserAuthFailures = 20;
 
         public event EventHandler<RevitCommandRequest> CommandReceived;
@@ -168,7 +169,13 @@ namespace RevitMCP.Core
                     var originHeader = context.Request.Headers["Origin"];
                     if (!string.IsNullOrEmpty(originHeader))
                     {
-                        await HandleBrowserConnectionAsync(context, originHeader, cancellationToken);
+                        // 握手丟到 Task，不阻塞接受連線的迴圈（慢速或惡意用戶端不能卡住其他連線）。
+                        var browserContext = context;
+                        _ = Task.Run(async () =>
+                        {
+                            try { await HandleBrowserConnectionAsync(browserContext, originHeader, cancellationToken); }
+                            catch (Exception ex) { Logger.Error("[Socket] 瀏覽器連線處理失敗", ex); }
+                        });
                         continue;
                     }
 
@@ -469,10 +476,10 @@ namespace RevitMCP.Core
                 return;
             }
 
-            int current;
-            lock (_browserLock) current = _browserConnections.Count;
-            if (current >= MaxBrowserConnections)
+            // 原子保留名額：先加再判斷，超過就退回，避免並行握手同時通過檢查。
+            if (Interlocked.Increment(ref _browserConnectionCount) > MaxBrowserConnections)
             {
+                Interlocked.Decrement(ref _browserConnectionCount);
                 Logger.Info("[Socket] 拒絕瀏覽器連線：同時連線數已達上限");
                 context.Response.StatusCode = 503;
                 context.Response.Close();
@@ -487,6 +494,7 @@ namespace RevitMCP.Core
             }
             catch (Exception ex)
             {
+                Interlocked.Decrement(ref _browserConnectionCount);
                 Logger.Error("[Socket] 瀏覽器 WebSocket 握手失敗", ex);
                 return;
             }
@@ -549,7 +557,9 @@ namespace RevitMCP.Core
             }
             finally
             {
-                lock (_browserLock) _browserConnections.Remove(connectionId);
+                bool removed;
+                lock (_browserLock) removed = _browserConnections.Remove(connectionId);
+                if (removed) Interlocked.Decrement(ref _browserConnectionCount);
                 Logger.Info($"[Socket] 瀏覽器已斷線 ({connectionId})");
             }
         }
@@ -621,6 +631,7 @@ namespace RevitMCP.Core
 
             connection.Paired = true; // 走到這裡＝token 已驗證通過
             parameters.Remove("token"); // token 不往下傳，也不進日誌
+            parameters["__browser"] = true; // 由 SocketService 無條件覆寫；執行器據此不回傳本機路徑
             request.Parameters = parameters;
             request.ConnectionId = connectionId;
             request.IsBrowser = true;

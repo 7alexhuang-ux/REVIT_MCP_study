@@ -51,7 +51,7 @@ namespace RevitMCP.Core.ViewSync
             var builder = new SchemaBuilder(SchemaGuid);
             builder.SetReadAccessLevel(AccessLevel.Public);
             builder.SetWriteAccessLevel(AccessLevel.Public);
-            builder.SetVendorId("revit-mcp");
+            builder.SetVendorId("RMCP"); // SchemaBuilder 只接受英數字；專案其他 Schema 同用 RMCP
             builder.SetSchemaName("IMViewSyncMarker");
             builder.SetDocumentation("issue-manager 網頁聯動專用視圖標記");
             builder.AddSimpleField(FieldName, typeof(string));

@@ -48,11 +48,10 @@ namespace RevitMCP.Core.ViewSync
     /// <summary>Origin 標頭正規化與白名單比對。</summary>
     public static class OriginPolicy
     {
-        /// <summary>預設白名單：正式站、本機開發。可在 config.json 的 allowedOrigins 增刪。</summary>
+        /// <summary>預設白名單：只有正式站。本機開發要連線，請自行在 config.json 的 allowedOrigins 加入（例如 "http://localhost:3600"）。</summary>
         public static readonly string[] DefaultAllowedOrigins =
         {
             "https://issue-manager-sigma.vercel.app",
-            "http://localhost:3600",
         };
 
         /// <summary>

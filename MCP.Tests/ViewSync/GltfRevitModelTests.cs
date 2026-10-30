@@ -30,7 +30,7 @@ namespace RevitMCP.Tests.ViewSync
             });
             Assert.That(extras["originOffsetMeters"].ToObject<double[]>(), Is.EqualTo(new[] { 1.0, 2.0, 3.0 }));
             Assert.That((string)extras["revitModel"]["title"], Is.EqualTo("Snowdon \"A\""));
-            Assert.That((string)extras["revitModel"]["path"], Is.EqualTo(@"C:\Models\Snowdon.rvt"));
+            Assert.That(extras["revitModel"]["path"], Is.Null, "GLB 會給外部夥伴看到，不可寫本機完整路徑");
             Assert.That((string)extras["revitModel"]["guid"], Is.EqualTo("0d2f7a1e-0000-4000-8000-000000000001"));
         }
 

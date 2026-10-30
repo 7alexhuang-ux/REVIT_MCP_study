@@ -688,7 +688,6 @@ namespace RevitMCP.Core.Walkthrough
             if (RevitModel != null)
             {
                 sceneExtraFields.Add("\"revitModel\":{\"title\":" + JsonString(RevitModel.Title ?? string.Empty)
-                    + ",\"path\":" + JsonString(RevitModel.Path ?? string.Empty)
                     + ",\"guid\":" + JsonString(RevitModel.Guid ?? string.Empty) + "}");
             }
 

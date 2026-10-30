@@ -332,6 +332,38 @@ namespace RevitMCP.Tests.ViewSync
         }
 
         [Test]
+        public void TitleMatches_IgnoresGlbAndGltfExtension()
+        {
+            Assert.That(ViewSyncMath.TitleMatches("Snowdon.glb", "Snowdon.rvt"), Is.True);
+            Assert.That(ViewSyncMath.TitleMatches("snowdon.GLTF", "Snowdon"), Is.True);
+            Assert.That(ViewSyncMath.TitleMatches("Snowdon.glb", "Snowdon2"), Is.False);
+        }
+
+        [Test]
+        public void CutHeightToRevitFeet_AddsOriginZOnce()
+        {
+            // 世界 y（glTF 公尺、已扣原點）3 m，原點 Z＝10 m → Revit (3+10) m
+            Assert.That(ViewSyncMath.CutHeightToRevitFeet(3, 10), Is.EqualTo(13 / 0.3048).Within(1e-9));
+            Assert.That(ViewSyncMath.CutHeightToRevitFeet(-1.5, 0), Is.EqualTo(-1.5 / 0.3048).Within(1e-9));
+        }
+
+        [Test]
+        public void FitCeilingRange_KeepsOrder_TopFromUpperLevelOrThreeMeters()
+        {
+            foreach (var cut in new[] { -2.0, 0.0, 2.5, 8.0, 40.0 })
+                foreach (double? upper in new double?[] { null, 0.5, 9.0, 12.0, 100.0 })
+                {
+                    var r = ViewSyncMath.FitCeilingRange(cut, upper);
+                    Assert.That(r.Top, Is.GreaterThan(r.Cut), $"cut={cut} upper={upper}");
+                    Assert.That(r.Cut, Is.GreaterThanOrEqualTo(r.Bottom));
+                    Assert.That(r.Bottom, Is.GreaterThanOrEqualTo(r.ViewDepth));
+                }
+            Assert.That(ViewSyncMath.FitCeilingRange(8, 12).Top, Is.EqualTo(12));                       // 用上一層
+            Assert.That(ViewSyncMath.FitCeilingRange(8, null).Top, Is.EqualTo(8 + 3 / 0.3048).Within(1e-9)); // 切高 + 3 m
+            Assert.That(ViewSyncMath.FitCeilingRange(8, 5).Top, Is.EqualTo(8 + 3 / 0.3048).Within(1e-9));    // 上一層比切高低 → 退回 +3 m
+        }
+
+        [Test]
         public void CompareModel_GuidWinsOverTitle()
         {
             var m = ViewSyncMath.ModelMatch.Match;

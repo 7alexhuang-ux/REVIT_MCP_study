@@ -54,7 +54,7 @@ namespace RevitMCP.Tests.ViewSync
         {
             foreach (var o in OriginPolicy.DefaultAllowedOrigins) Assert.That(OriginPolicy.Normalize(o), Is.Not.Null, o);
             Assert.That(OriginPolicy.DefaultAllowedOrigins, Does.Contain("https://issue-manager-sigma.vercel.app"));
-            Assert.That(OriginPolicy.DefaultAllowedOrigins, Does.Contain("http://localhost:3600"));
+            Assert.That(OriginPolicy.DefaultAllowedOrigins, Does.Not.Contain("http://localhost:3600"), "本機開發 Origin 不在預設白名單，要自行寫進 config.json");
         }
 
         // ---------------------------------------------------------------- 指令白名單

@@ -231,6 +231,28 @@ namespace RevitMCP.Core.ViewSync
             return new PlanRangeOffsets { Top = newTop, Cut = newCut, Bottom = newBottom, ViewDepth = newDepth };
         }
 
+        /// <summary>
+        /// 天花平面的視圖範圍（相對樓層的偏移，呎）：切高 desiredCut；頂部＝上一層樓的偏移（upperLevelOffset，沒有上一層給 null）
+        /// 或切高＋3 m，且至少比切高高 gap；底部與視圖深度不高於 min(0, 切高)。保證 top ≥ cut ≥ bottom ≥ viewDepth，視圖範圍不會不合法。
+        /// </summary>
+        public static PlanRangeOffsets FitCeilingRange(double desiredCut, double? upperLevelOffset)
+        {
+            const double gap = 0.1;
+            const double defaultAbove = 3.0 / FeetToMeters;
+            var top = upperLevelOffset.HasValue && upperLevelOffset.Value >= desiredCut + gap
+                ? upperLevelOffset.Value
+                : desiredCut + defaultAbove;
+            var bottom = Math.Min(0.0, desiredCut);
+            return new PlanRangeOffsets { Top = top, Cut = desiredCut, Bottom = bottom, ViewDepth = bottom };
+        }
+
+        /// <summary>
+        /// levelHint.cutHeightMeters ＝ 世界 y（glTF 公尺，已扣 originOffset）。換成 Revit 內部呎只加一次原點 Z。
+        /// 與 Clipping.Max.Y 備援同一座標系。
+        /// </summary>
+        public static double CutHeightToRevitFeet(double cutHeightMetersGltf, double originZMeters) =>
+            (cutHeightMetersGltf + originZMeters) / FeetToMeters;
+
         // ------------------------------------------------------------------ 名稱
 
         private static readonly char[] ForbiddenNameChars = { '\\', ':', '{', '}', '[', ']', '|', ';', '<', '>', '?', '`', '~' };
@@ -299,7 +321,8 @@ namespace RevitMCP.Core.ViewSync
             string N(string s)
             {
                 s = (s ?? string.Empty).Trim();
-                if (s.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase)) s = s.Substring(0, s.Length - 4);
+                foreach (var ext in new[] { ".rvt", ".glb", ".gltf" })
+                    if (s.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) { s = s.Substring(0, s.Length - ext.Length); break; }
                 return s;
             }
 

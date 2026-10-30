@@ -44,10 +44,14 @@ namespace RevitMCP.Core
             result["model"] = new JObject
             {
                 ["title"] = info.Title,
-                ["path"] = info.Path,
                 ["guid"] = info.Guid,
-                ["centralPath"] = ViewSyncModelInfo.CentralPath(doc),
             };
+            // 本機路徑只回給沒有 Origin 的本機連線；瀏覽器連線（SocketService 加 __browser）不回。
+            if (p["__browser"]?.Type != JTokenType.Boolean || !p["__browser"].Value<bool>())
+            {
+                ((JObject)result["model"])["path"] = info.Path;
+                ((JObject)result["model"])["centralPath"] = ViewSyncModelInfo.CentralPath(doc);
+            }
             result["isReadOnly"] = doc.IsReadOnly;
             result["isWorkshared"] = doc.IsWorkshared;
             var active = uiDoc.ActiveView;
@@ -263,14 +267,15 @@ namespace RevitMCP.Core
         {
             var ceiling = req.Kind == "ceiling";
             var type = ViewSyncFindViewFamilyType(doc, ceiling ? ViewFamily.CeilingPlan : ViewFamily.FloorPlan);
-            var cutFeet = (req.CutHeightMeters.Value + req.OriginOffsetMeters.Z) / ViewSyncFtToM;
+            // cutHeightMeters＝世界 y（glTF 公尺、已扣原點）→ 只加一次原點 Z。
+            var cutFeet = ViewSyncMath.CutHeightToRevitFeet(req.CutHeightMeters.Value, req.OriginOffsetMeters.Z);
 
             Level level = null;
             if (!string.IsNullOrWhiteSpace(req.LevelUniqueId)) level = doc.GetElement(req.LevelUniqueId) as Level;
             if (level == null)
             {
                 var levels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
-                    .Select(l => new LevelRef { UniqueId = l.UniqueId, Name = l.Name, ElevationFeet = l.Elevation }).ToList();
+                    .Select(l => new LevelRef { UniqueId = l.UniqueId, Name = l.Name, ElevationFeet = l.ProjectElevation }).ToList(); // 與相機管理一致用 ProjectElevation
                 var picked = ViewSyncMath.PickLevel(levels, cutFeet, out var belowAll);
                 if (picked == null) throw new ViewSyncException("no_level", "專案裡沒有樓層，無法建立平面視圖。");
                 if (belowAll) warnings.Add($"切高低於所有樓層，改用最低樓層「{picked.Name}」。");
@@ -282,15 +287,36 @@ namespace RevitMCP.Core
             plan.Name = name;
 
             // 視圖範圍：四個平面都明確綁到這個樓層，切高＝網頁切高 − 樓層高程（Revit 要求 top ≥ cut ≥ bottom ≥ depth）。
-            var fit = ViewSyncMath.FitPlanRange(0, 0, 0, 0, cutFeet - level.Elevation);
-            var range = plan.GetViewRange();
-            foreach (var plane in new[] { PlanViewPlane.TopClipPlane, PlanViewPlane.CutPlane, PlanViewPlane.BottomClipPlane, PlanViewPlane.ViewDepthPlane })
-                range.SetLevelId(plane, level.Id);
-            range.SetOffset(PlanViewPlane.TopClipPlane, fit.Top);
-            range.SetOffset(PlanViewPlane.CutPlane, fit.Cut);
-            range.SetOffset(PlanViewPlane.BottomClipPlane, fit.Bottom);
-            range.SetOffset(PlanViewPlane.ViewDepthPlane, fit.ViewDepth);
-            plan.SetViewRange(range);
+            // 偏移以 ProjectElevation 為基準（與 CameraKeyPlanService 一致）；ProjectElevation 與 Elevation 的差距（專案基準點）待實機核對。
+            var cutOffset = cutFeet - level.ProjectElevation;
+            PlanRangeOffsets fit;
+            if (ceiling)
+            {
+                var upper = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
+                    .Where(l => l.ProjectElevation > level.ProjectElevation + 1e-6)
+                    .OrderBy(l => l.ProjectElevation).FirstOrDefault();
+                fit = ViewSyncMath.FitCeilingRange(cutOffset, upper == null ? (double?)null : upper.ProjectElevation - level.ProjectElevation);
+            }
+            else
+            {
+                fit = ViewSyncMath.FitPlanRange(0, 0, 0, 0, cutOffset);
+            }
+            try
+            {
+                var range = plan.GetViewRange();
+                foreach (var plane in new[] { PlanViewPlane.TopClipPlane, PlanViewPlane.CutPlane, PlanViewPlane.BottomClipPlane, PlanViewPlane.ViewDepthPlane })
+                    range.SetLevelId(plane, level.Id);
+                range.SetOffset(PlanViewPlane.TopClipPlane, fit.Top);
+                range.SetOffset(PlanViewPlane.CutPlane, fit.Cut);
+                range.SetOffset(PlanViewPlane.BottomClipPlane, fit.Bottom);
+                range.SetOffset(PlanViewPlane.ViewDepthPlane, fit.ViewDepth);
+                plan.SetViewRange(range);
+            }
+            catch (Exception ex)
+            {
+                // 視圖範圍不合法不能讓整筆交易回復：保留 Revit 預設範圍並提醒。
+                warnings.Add("視圖範圍設定失敗，已保留預設範圍：" + ex.Message);
+            }
 
             if (clip != null)
             {
@@ -299,8 +325,8 @@ namespace RevitMCP.Core
                     plan.CropBoxActive = true;
                     var crop = plan.CropBox;
                     var inv = crop.Transform.Inverse;
-                    var a = inv.OfPoint(new XYZ(clip.MinFeet.X, clip.MinFeet.Y, level.Elevation));
-                    var b = inv.OfPoint(new XYZ(clip.MaxFeet.X, clip.MaxFeet.Y, level.Elevation));
+                    var a = inv.OfPoint(new XYZ(clip.MinFeet.X, clip.MinFeet.Y, level.ProjectElevation));
+                    var b = inv.OfPoint(new XYZ(clip.MaxFeet.X, clip.MaxFeet.Y, level.ProjectElevation));
                     crop.Min = new XYZ(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y), crop.Min.Z);
                     crop.Max = new XYZ(Math.Max(a.X, b.X), Math.Max(a.Y, b.Y), crop.Max.Z);
                     plan.CropBox = crop;
