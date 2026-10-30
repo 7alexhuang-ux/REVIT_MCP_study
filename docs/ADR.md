@@ -230,3 +230,24 @@
 - 決策：`.worktrees/universal-window` 自 main 開分支，所有萬用窗開發在此；不碰主工作樹。
 - 理由：避免並行 session 共用 git index 混入 commit（2026-09-02 日誌記錄的問題）。
 - 後果：文件、工具計數同步、QA/QC 都在 worktree 內跑；合併時走 PR。
+
+## D-008 萬用窗：add-in 與 MCP 兩個入口各自獨立運作，共用生成引擎
+- 日期：2026-10-31
+- 背景：研究（`docs/universal-window/research/addin-market.md`）顯示同類產品（UniversalDW、id:door&window）全是純介面、沒有 AI；開源 Revit MCP 專案沒有生成族功能。Alex 要求「MCP 和 add-in 各自要獨立運作」。
+- 決策：add-in 對話框不依賴 MCP 服務與 AI；MCP 工具不依賴對話框；兩者共用 `MCP/Core/WindowFamily/` 引擎與同一份規格 JSON。
+- 理由：同事不用 AI 也能用；同一規格不會因入口不同生出不同的窗；引擎只維護一份。
+- 後果：對話框直接在 Revit UI 執行緒呼叫引擎（IExternalCommand），不經 WebSocket；若 Alex 日後要求連引擎都分開，以新 ADR 取代本條。
+
+## D-009 萬用窗型擴充：格子模型納入三軌含紗窗、下懸／內倒、垂直上下拉；百葉／凸窗／轉角窗另立生成器
+- 日期：2026-10-31
+- 背景：窗型研究（`research/window-taxonomy.md`）判定格子模型已涵蓋固定、外推、橫拉二扇、上懸、景觀、側開；三軌含紗窗、下懸／內倒、垂直上下拉、轉軸可小擴充；百葉、凸窗、轉角窗、折疊窗結構不同。Alex 全數選入。
+- 決策：sash type 新增 hopper、sliding_v、screen；track 由 outer/inner 改整數軌序；新增 swing（in/out）。百葉、凸窗、轉角窗排入 Phase 5 另立生成器。
+- 理由：前三者仍是「格內扇」的變化，加欄位即可；後三者的幾何（多平面、葉片陣列、轉角框）超出單一牆面矩形格子。
+- 後果：既有規格 JSON 的 `track: outer/inner` 需相容讀取（outer→0、inner→1）；佈局數學與測試要擴充。台灣使用頻率無數據、三軌型錄未查證，屬已知弱點。
+
+## D-010 框深預設改 7 cm（YKK AP YRB-A70）
+- 日期：2026-10-31
+- 背景：Alex 指定事務所慣用 YKK AP。查證確認 YRB-A70 框深 70 mm（另有 A100）；外框寬、中框寬、扇框寬、召合框交疊量因型錄為純影像未能確認。
+- 決策：框深預設 8 → 7 cm；框寬類維持估值並標未查證；交疊量維持 D-005（＝扇框寬）。
+- 理由：只採用有一手來源的數字。
+- 後果：佈局測試期望值隨框深不變（框深不影響立面佈局），但 MO 空心預設深度與剖面圖會變；框寬回填待人工判讀斷面。

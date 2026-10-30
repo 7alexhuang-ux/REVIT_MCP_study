@@ -80,6 +80,7 @@ These must remain understandable by both sides.
 | `docs/camera-manager-spec.zh-TW.md` | redirect | Former single-file spec, kept only so existing links do not rot; points to `docs/camera-manager/`. Do not add content. |
 | `docs/claude-code-cheatsheet.html`, `docs/karpathy-gist-zh-tw.html` | readers | Reference pages |
 | `docs/universal-window/ROADMAP.md` | Universal Window Family Generator roadmap | Traditional Chinese; phase tracking for `docs/universal-window/SPEC.md` |
+| `docs/universal-window/research/*.md` | Universal Window research notes (add-in market, window taxonomy, YKK AP frames) | Traditional Chinese; shared evidence base for `docs/universal-window/SPEC.md` and `docs/ADR.md` D-008～D-010; unverified items are marked 未查證 |
 | `docs/universal-window/configurator-demo.html` | Universal Window Family Generator interactive demo | Traditional Chinese UI; Phase 0 reference — the shape of the `generate_window_family` spec JSON follows this demo |
 | other `docs/*.md` topic guides | mixed | Per-topic guides (agent handoff, guard rails, architecture, slope analysis, docs structure); classify individually if promoted to canonical |
 | root-level Chinese notes (`HJPLUS *.md`, `[好學生筆記]*.md`) | community readers | Event notes and adoption guides |

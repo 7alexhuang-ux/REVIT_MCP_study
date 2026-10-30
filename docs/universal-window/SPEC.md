@@ -1,8 +1,8 @@
 # 萬用窗族生成器 規格書（SPEC）
 
-> 狀態：v0.1 草案（2026-09-14）｜受眾：人＋AI 共用｜語言：zh-TW
+> 狀態：v0.2（2026-10-31：窗型擴充、YKK AP 框深、入口架構；v0.1 為 2026-09-14）｜受眾：人＋AI 共用｜語言：zh-TW
 > 互動示意：`docs/universal-window/configurator-demo.html`（規格 JSON 的形狀以它為準）
-> 決策紀錄：`docs/ADR.md` D-001 ～ D-007｜路線圖：`docs/universal-window/ROADMAP.md`
+> 決策紀錄：`docs/ADR.md` D-001 ～ D-010｜路線圖：`docs/universal-window/ROADMAP.md`
 
 ## 1. 目標
 
@@ -27,14 +27,20 @@ Phase 1 明確不做：巢狀零件族、陣列、可見性參數切換開啟方
 整組窗（family）
 └─ 格子 grid：rows R（1–3，上→下）× cols C（1–4，左→右，自室外看）
    └─ 格 cell R#C#：sashes[]（1–4 扇）
-      └─ 扇 sash：type ∈ {fixed 固定, casement 外推, sliding 橫拉, awning 上懸}
+      └─ 扇 sash：type ∈ {fixed 固定, casement 外推, sliding 橫拉, awning 上懸,
+                          hopper 下懸／內倒, sliding_v 垂直上下拉, screen 紗窗}   ← v0.2 新增後三者
                   hinge ∈ {L, R}（僅 casement）
-                  track ∈ {outer, inner}（僅 sliding；偶數索引外軌）
+                  swing ∈ {out, in}（casement／awning／hopper；hopper 預設 in＝內倒）
+                  track ∈ 整數 0…n−1（sliding／sliding_v／screen；0＝最外軌）   ← v0.2 由 outer/inner 改整數
 ```
 
 - 排高與樘寬用**比例（%）**描述，實際尺寸由總寬總高與框料尺寸算出。
-- 同一格內若全部是 sliding，扇與扇之間交疊；否則等分。
-- 一格內混用 sliding 與其他型式視為無效規格（回錯誤）。
+- 同一格內若全部是 sliding（可加 screen），扇與扇之間水平交疊；全部是 sliding_v（可加 screen），垂直交疊；否則等分。
+- 一格內混用「滑動類」與「開啟類」視為無效規格（回錯誤）。滑動類＝sliding、sliding_v、screen；sliding 與 sliding_v 不可同格。
+- **三軌橫拉含紗窗**（v0.2，ADR D-009）：軌數＝格內最大 track＋1；screen 扇佔一軌，不計入玻璃面積、有效採光面積與可開口面積；圖面以細虛線表示網面。未指定 track 時，玻璃扇依索引交錯放 0／1 軌、screen 放最內軌。
+- **下懸／內倒**（hopper）：鉸鏈在下緣；swing＝in 為內倒（台灣廁所高窗、氣窗常用）。IFC OperationType＝BOTTOMHUNG。
+- **垂直上下拉**（sliding_v）：交疊邏輯沿垂直軸，扇高 = (格高 + (n−1)·交疊) / n；IFC OperationType＝SLIDINGVERTICAL。
+- 百葉、凸窗、轉角窗、折疊窗**不進格子模型**，另立生成器（ADR D-009，ROADMAP Phase 5）。
 
 ## 4. 參數分層（ADR D-001）
 
@@ -65,13 +71,14 @@ Phase 1 明確不做：巢狀零件族、陣列、可見性參數切換開啟方
 
 | 參數 | 預設 | 來源 |
 |---|---|---|
-| 框深 | 8 cm（可選 10） | YKK AP 台灣 YRB-A 70/100 mm；大同鋁業 896/1096 系列 8/10 cm（型錄） |
-| 外框寬 / 中框寬 / 扇框寬 | 4.5 / 4.4 / 5 cm | **未查證**估值，以事務所常用鋁窗廠斷面為準 |
+| 框深 | **7 cm**（可選 10） | 事務所慣用 YKK AP（Alex 2026-10-31 拍板）：台灣 YRB-A70 框深 70 mm、A100 為 100 mm（https://www.ykkap.com.tw/pdt01-01.aspx 及型錄 PDF 第 18 頁斷面）；見 `research/ykkap-frames.md` |
+| 外框寬 / 中框寬 / 扇框寬 | 4.5 / 4.4 / 5 cm | **未查證**估值。YRB-A70 型錄斷面讀到 2.5／54／40／54／2.5 mm 尺寸串，構件對應未確認（型錄為純影像）；待人工看斷面圖後回填 |
+| 玻璃溝槽 | 16–42 mm | YKK AP YRB-A（pdt01-01） |
 | 玻璃 | 8 mm 單層（膠合 5+5 為替代） | 裝修媒體 |
 | 交疊 | ＝扇框寬 | 事務所慣例（Alex 2026-09-14 拍板） |
 | 窗台高 | 90 cm | 媒體；建技規 §45 特定類組 ≥110 cm（10 層以上 120） |
 | MO 每側預留 | 2.5 cm | 示意值，**未查證** |
-| 氣密／水密／耐風壓 | 8 級／35 級／280 kgf/m² | CNS 11527／11528／11526，大同型錄印證 |
+| 氣密／水密／耐風壓 | 8 級／35 級／280 kgf/m² | CNS 11527／11528／11526，大同型錄印證。YKK AP YRB-A 型錄標示 2 級／750 或 1500 Pa／3600 Pa（單位制不同，換算未查證，預設暫不改） |
 
 ## 6. 圖面表示（ADR D-004）
 
@@ -146,3 +153,13 @@ IFC：型別參數 `IfcExportAs = IfcWindow`，`PartitioningType` 依 R×C 對�
 - CNS 等級是否為建照送審必要欄位：未查證。
 - Revit 2024 是否已有 enum 型參數：未查證（Phase 1 不依賴）。
 - 樣板 Metric Window.rft 的室外方向與參考平面命名：實作時實測後回填本節。
+
+## 11. 入口架構（v0.2，ADR D-008）
+
+| 入口 | 給誰 | 依賴 | 主要功能 |
+|---|---|---|---|
+| Revit add-in（ribbon「萬用窗」面板＋對話框） | 不用 AI 的同事 | 只要 add-in 載入；**不需開 MCP 服務、不需 AI** | 選窗型生成（格子預覽，等同 configurator-demo）、從 Excel 門窗表批次生成、窗型庫管理 |
+| MCP 工具 `generate_window_family` | AI 客戶端 | MCP 服務開啟 | 自然語言轉規格、競圖快速變體、放窗後切割飾板（Phase 3）、送審檢核（Phase 4） |
+| 共用 | — | — | `MCP/Core/WindowFamily/` 生成引擎與規格 JSON；兩個入口都只做「組規格 → 呼叫引擎」，不各自畫幾何 |
+
+依據：`research/addin-market.md`（UniversalDW、id:door&window 等同類產品全為純介面；開源 Revit MCP 專案無生成族功能；ArchSmarterRevitMcpServer 的 Core／Server／Addin 分層）。
