@@ -16,6 +16,12 @@
 - **計數同步**：Runtime MCP tools 192 → 201（含 main 既有 8 個整地工具未計入的漂移與新增 generate_window_family）。
 - **已知未處理**：`revit-tools.ts` 在 full／architect／structural profile 會把 grading 工具重複註冊（既有 bug，另案處理）；ADR D-006 專案端「放窗後自動切割相交飾板」留待 Phase 3。
 
+### 📐 規格 v0.2（2026-10-31）
+
+- `docs/universal-window/SPEC.md` v0.2：窗型擴充（下懸／內倒、垂直上下拉、紗窗扇、整數軌序）、框深預設 7 cm（YKK AP YRB-A70）、§11 入口架構。
+- `docs/ADR.md` 新增 D-008（add-in 與 MCP 各自獨立、共用引擎）、D-009（窗型擴充範圍）、D-010（框深 7 cm）。
+- 新增研究：`docs/universal-window/research/{addin-market,window-taxonomy,ykkap-frames}.md`。
+
 ### 📚 調查（2026-09-13～14，見 SPEC §10 未查證清單）
 
 - 社群族群標準（NBS BIM Object Standard、Autodesk Content Style Guide、IFC4.3 IfcWindow 枚舉）、台灣送審三軌（節能 §310、EEWH、建照 §41/§43/§79/§110＋消防 §188–189）、踩坑 20 條、台灣鋁窗框料預設值（框深 8/10 cm 有型錄來源，框寬類估值未查證）。
