@@ -56,11 +56,8 @@ namespace RevitMCP.Core.WindowFamily
         // ── 幾何常數（相對框深 D 的比例；SPEC §5 與 demo 平剖圖一致）──
         /// <summary>非橫拉扇框的深度係數（× 框深）。</summary>
         private const double SashDepthFactor = 0.60;
-        /// <summary>橫拉扇框的深度係數（× 框深）。</summary>
-        private const double SlidingSashDepthFactor = 0.35;
-        /// <summary>橫拉軌道中心距框心的係數（× 框深），外軌在室外側。</summary>
-        private const double SlidingTrackOffsetFactor = 0.22;
-        /// <summary>上懸平面示意虛線距框心的係數（× 框深，室外側）。</summary>
+        // 滑動扇框深度與軌道中心位置（含 ≥3 軌等分）見 WindowLayoutMath.SlidingSashDepthCm／TrackCentreOffsetCm
+        /// <summary>上懸／下懸平面示意虛線距框心的係數（× 框深；朝開啟方向那側）。</summary>
         private const double AwningPlanHintFactor = 0.90;
 
         /// <summary>
@@ -442,7 +439,9 @@ namespace RevitMCP.Core.WindowFamily
             foreach (var sash in layout.AllSashes)
             {
                 double sashCentreY = SashCentreY(sash, frameCentreY, depth, exteriorSign);
-                double sashDepth = depth * (sash.IsSlidingCell ? SlidingSashDepthFactor : SashDepthFactor);
+                double sashDepth = sash.IsSlidingCell
+                    ? WindowLayoutMath.SlidingSashDepthCm(sash.TrackCount, depth)
+                    : depth * SashDepthFactor;
 
                 var sashFrame = CreateExtrusion(famDoc, plane, true,
                     new[]
@@ -451,7 +450,11 @@ namespace RevitMCP.Core.WindowFamily
                         RectProfile(sash.GlassX, sash.GlassY, sash.GlassX + sash.GlassWidth, sash.GlassY + sash.GlassHeight, W, H)
                     },
                     sashCentreY - sashDepth / 2, sashCentreY + sashDepth / 2);
-                SetDetailLevels(sashFrame, false, true, true, $"扇框 {sash.CellId}#{sash.Index + 1}");
+                SetDetailLevels(sashFrame, false, true, true,
+                    $"{(sash.IsScreen ? "紗窗框" : "扇框")} {sash.CellId}#{sash.Index + 1}");
+
+                // 紗窗：只有框，網面以立面／平面符號線表示（ADR D-009），不建玻璃實體
+                if (sash.IsScreen) continue;
 
                 var glass = CreateExtrusion(famDoc, plane, true,
                     new[] { RectProfile(sash.GlassX, sash.GlassY, sash.GlassX + sash.GlassWidth, sash.GlassY + sash.GlassHeight, W, H) },
@@ -460,12 +463,15 @@ namespace RevitMCP.Core.WindowFamily
             }
         }
 
-        /// <summary>扇框深度方向的中心（橫拉外軌偏室外、內軌偏室內）。</summary>
+        /// <summary>
+        /// 扇框深度方向的中心：滑動格依軌序放在框深內的軌道位置（track 0＝最外軌、偏室外；
+        /// ≥3 軌時框深等分，見 <see cref="WindowLayoutMath.TrackCentreOffsetCm"/>）。
+        /// </summary>
         private static double SashCentreY(SashLayout sash, double frameCentreY, double depth, double exteriorSign)
         {
             if (!sash.IsSlidingCell) return frameCentreY;
-            double offset = depth * SlidingTrackOffsetFactor * exteriorSign;
-            return sash.IsOuterTrack ? frameCentreY + offset : frameCentreY - offset;
+            double offset = WindowLayoutMath.TrackCentreOffsetCm(sash.Track, sash.TrackCount, depth);
+            return frameCentreY + exteriorSign * offset;
         }
 
         private void BuildVoid(Document famDoc, WindowFamilySpec spec, WindowLayout layout,
@@ -496,11 +502,13 @@ namespace RevitMCP.Core.WindowFamily
         {
             double W = layout.Width, H = layout.Height;
             bool apexAtHinge = spec.Symbols.ApexAtHinge;
-            double sashW = spec.TypeParams.Sash;
+            GraphicsStyle hiddenStyle = FindHiddenLineStyle(famDoc);
 
             foreach (var sash in layout.AllSashes)
             {
                 var curves = new List<Curve>();
+                // 向室內開（內開／內倒）與紗窗網面用虛線（ISO 立面慣例：虛線三角＝向內開）
+                bool dashed = false;
                 double cx = sash.X + sash.Width / 2.0;
                 double cy = sash.Y + sash.Height / 2.0;
 
@@ -515,6 +523,7 @@ namespace RevitMCP.Core.WindowFamily
                             double baseX = apexAtHinge ? handleX : hingeX;
                             curves.Add(ElevLine(baseX, sash.Y, apexX, cy, W, H));
                             curves.Add(ElevLine(baseX, sash.Y + sash.Height, apexX, cy, W, H));
+                            dashed = sash.Swing == SwingDirection.In;
                             break;
                         }
                     case SashType.Awning:
@@ -524,14 +533,26 @@ namespace RevitMCP.Core.WindowFamily
                             double baseY = apexAtHinge ? sash.Y + sash.Height - ins : sash.Y + ins;
                             curves.Add(ElevLine(sash.X + ins, baseY, cx, apexY, W, H));
                             curves.Add(ElevLine(sash.X + sash.Width - ins, baseY, cx, apexY, W, H));
+                            dashed = sash.Swing == SwingDirection.In;
+                            break;
+                        }
+                    case SashType.Hopper:
+                        {
+                            // SPEC §6（v0.2）：三角形頂點在下緣中點（鉸鏈在下）；apexAtHinge=false 時頂點翻到上緣（把手側）
+                            double ins = sash.SashFrameWidth + 1.0;
+                            double apexY = apexAtHinge ? sash.Y + sash.Height - ins : sash.Y + ins;
+                            double baseY = apexAtHinge ? sash.Y + ins : sash.Y + sash.Height - ins;
+                            curves.Add(ElevLine(sash.X + ins, baseY, cx, apexY, W, H));
+                            curves.Add(ElevLine(sash.X + sash.Width - ins, baseY, cx, apexY, W, H));
+                            dashed = sash.Swing == SwingDirection.In;
                             break;
                         }
                     case SashType.Sliding:
                         {
                             double len = sash.Width * 0.35;
-                            int dir = sash.Index % 2 == 0 ? 1 : -1;
+                            int dir = sash.GlassIndex % 2 == 0 ? 1 : -1;
                             double x1, x2;
-                            if (sash.Count == 1) { x1 = cx - len / 2; x2 = cx + len / 2; }
+                            if (sash.GlassCount == 1) { x1 = cx - len / 2; x2 = cx + len / 2; }
                             else { x1 = cx - dir * len / 2; x2 = cx + dir * len / 2; }
                             curves.Add(ElevLine(x1, cy, x2, cy, W, H));
                             // 箭頭：兩支倒鉤
@@ -541,15 +562,49 @@ namespace RevitMCP.Core.WindowFamily
                             curves.Add(ElevLine(x2, cy, x2 - sign * barb, cy + barb * 0.45, W, H));
                             break;
                         }
+                    case SashType.SlidingV:
+                        {
+                            // 垂直箭頭：上扇向下、下扇向上（兩扇時相向）；單扇居中
+                            double len = sash.Height * 0.35;
+                            int dir = sash.GlassIndex % 2 == 0 ? 1 : -1;   // +1＝向下（demo Y 向下為正）
+                            double y1, y2;
+                            if (sash.GlassCount == 1) { y1 = cy - len / 2; y2 = cy + len / 2; }
+                            else { y1 = cy - dir * len / 2; y2 = cy + dir * len / 2; }
+                            curves.Add(ElevLine(cx, y1, cx, y2, W, H));
+                            double barb = Math.Min(6.0, Math.Abs(y2 - y1) * 0.25);
+                            int sign = y2 > y1 ? 1 : -1;
+                            curves.Add(ElevLine(cx, y2, cx - barb * 0.45, y2 - sign * barb, W, H));
+                            curves.Add(ElevLine(cx, y2, cx + barb * 0.45, y2 - sign * barb, W, H));
+                            break;
+                        }
+                    case SashType.Screen:
+                        {
+                            // 紗窗：玻璃範圍內縮 1 cm 的虛線框＋一條對角虛線（細虛線網面示意）
+                            double inset = 1.0;
+                            double x1 = sash.GlassX + inset, x2 = sash.GlassX + sash.GlassWidth - inset;
+                            double y1 = sash.GlassY + inset, y2 = sash.GlassY + sash.GlassHeight - inset;
+                            if (x2 > x1 && y2 > y1)
+                            {
+                                curves.Add(ElevLine(x1, y1, x2, y1, W, H));
+                                curves.Add(ElevLine(x2, y1, x2, y2, W, H));
+                                curves.Add(ElevLine(x2, y2, x1, y2, W, H));
+                                curves.Add(ElevLine(x1, y2, x1, y1, W, H));
+                                curves.Add(ElevLine(x1, y1, x2, y2, W, H));
+                            }
+                            dashed = true;
+                            break;
+                        }
                     default:
                         break; // 固定扇無開啟符號
                 }
 
-                // SPEC §6：立面粗略級仍畫開啟符號
+                // SPEC §6：立面粗略級仍畫開啟符號；紗窗網面只在中等以上顯示，避免粗略圖雜亂
+                bool coarse = sash.Type != SashType.Screen;
                 foreach (var curve in curves)
                 {
                     var sc = CreateSymbolicCurve(famDoc, curve, plane, $"立面符號 {sash.CellId}");
-                    SetDetailLevels(sc, true, true, true, "立面符號");
+                    SetDetailLevels(sc, coarse, true, true, "立面符號");
+                    if (dashed) ApplyHiddenStyle(sc, hiddenStyle);
                 }
             }
         }
@@ -560,6 +615,7 @@ namespace RevitMCP.Core.WindowFamily
             double W = layout.Width;
             double angle = spec.Symbols.PlanSwingAngle * Math.PI / 180.0;
             double exteriorFaceY = frameCentreY + exteriorSign * depth / 2.0;
+            double interiorFaceY = frameCentreY - exteriorSign * depth / 2.0;
             GraphicsStyle hiddenStyle = FindHiddenLineStyle(famDoc);
 
             // 只畫最下排（平面剖切位置）的開啟示意，與 demo drawPlan 一致
@@ -570,26 +626,30 @@ namespace RevitMCP.Core.WindowFamily
 
                 foreach (var sash in bottomCell.Sashes)
                 {
+                    // 開啟方向：out＝朝室外、in＝朝室內（v0.2）；sideSign 乘在 exteriorSign 上
+                    double sideSign = sash.Swing == SwingDirection.In ? -exteriorSign : exteriorSign;
+                    double faceY = sash.Swing == SwingDirection.In ? interiorFaceY : exteriorFaceY;
+
                     if (sash.Type == SashType.Casement && spec.Symbols.PlanSwingAngle > 0)
                     {
                         double hingeXCm = sash.Hinge == HingeSide.Left ? sash.X : sash.X + sash.Width;
                         double hingeX = WindowLayoutMath.ToFamilyX(hingeXCm, W);
                         int dir = sash.Hinge == HingeSide.Left ? 1 : -1;
 
-                        // ADR D-004：30° 實線自鉸鏈點畫出（不畫成門的 90°）
+                        // ADR D-004：30° 實線自鉸鏈點畫出（不畫成門的 90°）；swing=in 時畫向室內側
                         double tipX = hingeX + dir * Math.Cos(angle) * sash.Width;
-                        double tipY = exteriorFaceY + exteriorSign * Math.Sin(angle) * sash.Width;
+                        double tipY = faceY + sideSign * Math.Sin(angle) * sash.Width;
                         var swing = CreateSymbolicCurve(famDoc,
-                            Line.CreateBound(PlanPoint(hingeX, exteriorFaceY), PlanPoint(tipX, tipY)),
+                            Line.CreateBound(PlanPoint(hingeX, faceY), PlanPoint(tipX, tipY)),
                             plane, $"平面開啟線 {sash.CellId}");
                         SetDetailLevels(swing, false, true, true, "平面開啟線");
 
                         // 開啟弧（虛線）：自關閉位置轉到 30°
                         try
                         {
-                            XYZ centre = PlanPoint(hingeX, exteriorFaceY);
+                            XYZ centre = PlanPoint(hingeX, faceY);
                             XYZ xAxis = new XYZ(dir, 0, 0);
-                            XYZ yAxis = new XYZ(0, exteriorSign, 0);
+                            XYZ yAxis = new XYZ(0, sideSign, 0);
                             Arc arc = Arc.Create(centre, sash.Width * CmToFeet, 0.0, angle, xAxis, yAxis);
                             var arcCurve = CreateSymbolicCurve(famDoc, arc, plane, $"平面開啟弧 {sash.CellId}");
                             SetDetailLevels(arcCurve, false, true, true, "平面開啟弧");
@@ -600,23 +660,38 @@ namespace RevitMCP.Core.WindowFamily
                             _warnings.Add($"平面開啟弧建立失敗（{sash.CellId}）：{ex.Message}");
                         }
                     }
-                    else if (sash.Type == SashType.Awning)
+                    else if (sash.Type == SashType.Awning || sash.Type == SashType.Hopper)
                     {
-                        double hintY = frameCentreY + exteriorSign * depth * AwningPlanHintFactor;
+                        // 上懸／下懸：平面以虛線示意，放在開啟方向那側（hopper 預設內倒＝室內側）
+                        double hintY = frameCentreY + sideSign * depth * AwningPlanHintFactor;
                         double x1 = WindowLayoutMath.ToFamilyX(sash.X + sash.SashFrameWidth, W);
                         double x2 = WindowLayoutMath.ToFamilyX(sash.X + sash.Width - sash.SashFrameWidth, W);
+                        string label = sash.Type == SashType.Hopper ? "平面下懸示意" : "平面上懸示意";
                         var hint = CreateSymbolicCurve(famDoc,
                             Line.CreateBound(PlanPoint(x1, hintY), PlanPoint(x2, hintY)),
-                            plane, $"平面上懸示意 {sash.CellId}");
-                        SetDetailLevels(hint, false, true, true, "平面上懸示意");
+                            plane, $"{label} {sash.CellId}");
+                        SetDetailLevels(hint, false, true, true, label);
                         ApplyHiddenStyle(hint, hiddenStyle);
+                    }
+                    else if (sash.Type == SashType.Screen)
+                    {
+                        // 紗窗：平面佔一條軌線（虛線），位在該軌道中心
+                        double trackY = frameCentreY + exteriorSign *
+                            WindowLayoutMath.TrackCentreOffsetCm(sash.Track, sash.TrackCount, depth);
+                        double x1 = WindowLayoutMath.ToFamilyX(sash.X, W);
+                        double x2 = WindowLayoutMath.ToFamilyX(sash.X + sash.Width, W);
+                        var screenLine = CreateSymbolicCurve(famDoc,
+                            Line.CreateBound(PlanPoint(x1, trackY), PlanPoint(x2, trackY)),
+                            plane, $"平面紗窗軌線 {sash.CellId}");
+                        SetDetailLevels(screenLine, false, true, true, "平面紗窗軌線");
+                        ApplyHiddenStyle(screenLine, hiddenStyle);
                     }
                 }
             }
 
             if (hiddenStyle == null)
             {
-                _warnings.Add("族樣板內找不到虛線線型（Hidden Lines），平面開啟弧與上懸示意沿用預設符號線線型；需要虛線請在族內指定線型。");
+                _warnings.Add("族樣板內找不到虛線線型（Hidden Lines），平面開啟弧、上／下懸示意、紗窗與內開立面符號沿用預設符號線線型；需要虛線請在族內指定線型。");
             }
         }
 

@@ -25,7 +25,22 @@ namespace RevitMCP.Core.WindowFamily
         /// <summary>橫拉</summary>
         Sliding,
         /// <summary>上懸</summary>
-        Awning
+        Awning,
+        /// <summary>下懸／內倒（鉸鏈在下緣；v0.2，ADR D-009）</summary>
+        Hopper,
+        /// <summary>垂直上下拉（交疊沿垂直軸；v0.2，ADR D-009）</summary>
+        SlidingV,
+        /// <summary>紗窗扇（滑動類，佔一軌，不計玻璃／採光／可開口面積；v0.2，ADR D-009）</summary>
+        Screen
+    }
+
+    /// <summary>開啟方向（casement／awning／hopper 適用；v0.2）。</summary>
+    public enum SwingDirection
+    {
+        /// <summary>向室外開</summary>
+        Out,
+        /// <summary>向室內開（hopper 的預設＝內倒）</summary>
+        In
     }
 
     /// <summary>外推扇的鉸鏈側（自室外看）。</summary>
@@ -51,7 +66,39 @@ namespace RevitMCP.Core.WindowFamily
         /// <summary>僅 Casement 有意義。</summary>
         public HingeSide Hinge { get; set; } = HingeSide.Left;
 
-        /// <summary>縮寫：F / C / S / A，用於 UW_開啟方式。</summary>
+        /// <summary>使用者明確指定的開啟方向；null＝用型式預設。</summary>
+        public SwingDirection? SwingRaw { get; set; }
+
+        /// <summary>
+        /// 開啟方向（casement／awning／hopper 適用）。未指定時：hopper＝In（內倒），其餘＝Out。
+        /// </summary>
+        public SwingDirection Swing
+        {
+            get { return SwingRaw ?? (Type == SashType.Hopper ? SwingDirection.In : SwingDirection.Out); }
+        }
+
+        /// <summary>
+        /// 軌序（0＝最外軌，整數）；僅滑動類（Sliding／SlidingV／Screen）有意義。
+        /// null＝未指定，由 <see cref="CellSpec.ResolveSlidePlacements"/> 自動分配。
+        /// </summary>
+        public int? Track { get; set; }
+
+        /// <summary>是否為滑動類（橫拉／垂直上下拉／紗窗）。</summary>
+        public bool IsSlidingClass
+        {
+            get { return Type == SashType.Sliding || Type == SashType.SlidingV || Type == SashType.Screen; }
+        }
+
+        /// <summary>是否為玻璃滑動扇（橫拉或垂直上下拉，不含紗窗）。</summary>
+        public bool IsGlassSlider
+        {
+            get { return Type == SashType.Sliding || Type == SashType.SlidingV; }
+        }
+
+        /// <summary>
+        /// 縮寫，用於 UW_開啟方式：F／CL／CR／S／A／H／V／SC。
+        /// 開啟方向與型式預設相反時加尾碼：casement／awning 內開 → i（例 CLi）、hopper 外開 → o（Ho）。
+        /// </summary>
         public string Abbreviation
         {
             get
@@ -59,15 +106,21 @@ namespace RevitMCP.Core.WindowFamily
                 switch (Type)
                 {
                     case SashType.Fixed: return "F";
-                    case SashType.Casement: return Hinge == HingeSide.Left ? "CL" : "CR";
+                    case SashType.Casement: return (Hinge == HingeSide.Left ? "CL" : "CR") + (Swing == SwingDirection.In ? "i" : "");
                     case SashType.Sliding: return "S";
-                    case SashType.Awning: return "A";
+                    case SashType.Awning: return "A" + (Swing == SwingDirection.In ? "i" : "");
+                    case SashType.Hopper: return "H" + (Swing == SwingDirection.Out ? "o" : "");
+                    case SashType.SlidingV: return "V";
+                    case SashType.Screen: return "SC";
                     default: return "?";
                 }
             }
         }
 
-        /// <summary>IFC WindowPanelOperationEnum 對應（demo specJSON 的 ifcOperationType）。</summary>
+        /// <summary>
+        /// IFC WindowPanelOperationEnum 對應（demo specJSON 的 ifcOperationType）。
+        /// Screen 不輸出玻璃扇的操作屬性（NOTDEFINED，呼叫端應略過該扇）。
+        /// </summary>
         public string IfcOperationType
         {
             get
@@ -78,10 +131,26 @@ namespace RevitMCP.Core.WindowFamily
                     case SashType.Casement: return Hinge == HingeSide.Left ? "SIDEHUNGLEFTHAND" : "SIDEHUNGRIGHTHAND";
                     case SashType.Sliding: return "SLIDINGHORIZONTAL";
                     case SashType.Awning: return "TOPHUNG";
+                    case SashType.Hopper: return "BOTTOMHUNG";
+                    case SashType.SlidingV: return "SLIDINGVERTICAL";
                     default: return "NOTDEFINED";
                 }
             }
         }
+    }
+
+    /// <summary>滑動格內單一扇的軌序與位置（由 <see cref="CellSpec.ResolveSlidePlacements"/> 算出）。</summary>
+    public struct SlidePlacement
+    {
+        /// <summary>實際軌序（0＝最外軌）。</summary>
+        public int Track;
+        /// <summary>
+        /// 位置索引：玻璃扇＝玻璃扇序（0 起算，只計玻璃滑動扇）；
+        /// 紗窗＝所罩的玻璃扇序（第 j 片紗窗罩第 j mod G 片玻璃）。
+        /// </summary>
+        public int Position;
+        /// <summary>true＝紗窗。</summary>
+        public bool IsScreen;
     }
 
     /// <summary>一格（R#C#）的規格。</summary>
@@ -98,16 +167,81 @@ namespace RevitMCP.Core.WindowFamily
             get { return string.Format(CultureInfo.InvariantCulture, "R{0}C{1}", Row + 1, Col + 1); }
         }
 
-        /// <summary>全部都是橫拉 → 扇與扇交疊；否則等分。</summary>
-        public bool AllSliding
+        /// <summary>是否為滑動格：含任何滑動類扇（橫拉／垂直上下拉／紗窗）。驗證後保證整格都是滑動類。</summary>
+        public bool IsSlidingCell
         {
-            get { return Sashes.Count > 0 && Sashes.All(s => s.Type == SashType.Sliding); }
+            get { return Sashes.Any(s => s.IsSlidingClass); }
         }
 
-        /// <summary>是否有任何一扇為橫拉。</summary>
-        public bool AnySliding
+        /// <summary>整格都是滑動類（橫拉／垂直上下拉／紗窗），且至少一扇。</summary>
+        public bool AllSlidingClass
         {
-            get { return Sashes.Any(s => s.Type == SashType.Sliding); }
+            get { return Sashes.Count > 0 && Sashes.All(s => s.IsSlidingClass); }
+        }
+
+        /// <summary>垂直滑動格：含 sliding_v（交疊沿垂直軸）。</summary>
+        public bool IsVerticalSlide
+        {
+            get { return Sashes.Any(s => s.Type == SashType.SlidingV); }
+        }
+
+        /// <summary>玻璃滑動扇數（橫拉＋垂直上下拉，不含紗窗）。</summary>
+        public int GlassSliderCount
+        {
+            get { return Sashes.Count(s => s.IsGlassSlider); }
+        }
+
+        /// <summary>紗窗扇數。</summary>
+        public int ScreenCount
+        {
+            get { return Sashes.Count(s => s.Type == SashType.Screen); }
+        }
+
+        /// <summary>
+        /// 解析滑動格內每扇的軌序與位置（非滑動格回傳 null）。
+        /// 規則（SPEC §3、ADR D-009）：
+        /// 玻璃扇未指定 track → 依玻璃扇序交錯 0／1；紗窗未指定 track → 玻璃最大軌＋1（多片依序再加）；
+        /// 明確指定的 track 一律採用。紗窗位置：第 j 片罩第 (j mod G) 片玻璃扇。
+        /// </summary>
+        public SlidePlacement[] ResolveSlidePlacements()
+        {
+            if (!IsSlidingCell) return null;
+
+            var result = new SlidePlacement[Sashes.Count];
+            int g = 0;
+            int maxGlassTrack = -1;
+            for (int k = 0; k < Sashes.Count; k++)
+            {
+                var s = Sashes[k];
+                if (!s.IsGlassSlider) continue;
+                int track = s.Track ?? (g % 2);
+                result[k] = new SlidePlacement { Track = track, Position = g, IsScreen = false };
+                if (track > maxGlassTrack) maxGlassTrack = track;
+                g++;
+            }
+
+            int glassCount = g;
+            int j = 0;
+            for (int k = 0; k < Sashes.Count; k++)
+            {
+                var s = Sashes[k];
+                if (s.Type != SashType.Screen) continue;
+                int track = s.Track ?? (maxGlassTrack + 1 + j);
+                int pos = glassCount > 0 ? j % glassCount : 0;
+                result[k] = new SlidePlacement { Track = track, Position = pos, IsScreen = true };
+                j++;
+            }
+            return result;
+        }
+
+        /// <summary>軌數＝最大軌序＋1（非滑動格回傳 0）。</summary>
+        public int TrackCount
+        {
+            get
+            {
+                var placements = ResolveSlidePlacements();
+                return placements == null ? 0 : placements.Max(p => p.Track) + 1;
+            }
         }
     }
 
@@ -117,7 +251,8 @@ namespace RevitMCP.Core.WindowFamily
         public double FrameOuter { get; set; } = 4.5;
         public double Mullion { get; set; } = 4.4;
         public double Sash { get; set; } = 5.0;
-        public double FrameDepth { get; set; } = 8.0;
+        /// <summary>框深（cm）。預設 7＝YKK AP YRB-A70（ADR D-010；A100 為 10）。</summary>
+        public double FrameDepth { get; set; } = 7.0;
         public double GlassMm { get; set; } = 8.0;
         public double? MeetingRailOverlapMm { get; set; }
         public OverlapMode OverlapMode { get; set; } = OverlapMode.EqualsSashFrameWidth;
@@ -174,6 +309,8 @@ namespace RevitMCP.Core.WindowFamily
         public const int MaxRows = 3;
         public const int MaxCols = 4;
         public const int MaxSashesPerCell = 4;
+        /// <summary>軌序上限（0 起算；最多 4 軌）。</summary>
+        public const int MaxTrack = 3;
 
         public string FamilyName { get; set; }
         public string TypeName { get; set; }
@@ -230,25 +367,39 @@ namespace RevitMCP.Core.WindowFamily
         /// <summary>IFC PartitioningType（沿用 demo 的 ifcPartition()）。</summary>
         public string IfcPartitioningType()
         {
+            // v0.2：紗窗不是玻璃扇，不計入分割數；垂直上下拉的扇上下疊（分割線水平）
             if (Rows == 1 && Cols == 1)
             {
-                int n = Cells[0][0].Sashes.Count;
+                var cell = Cells[0][0];
+                int n = PanelCount(cell);
                 if (n == 1) return "SINGLE_PANEL";
+                if (cell.IsVerticalSlide)
+                {
+                    if (n == 2) return "DOUBLE_PANEL_HORIZONTAL";
+                    if (n == 3) return "TRIPLE_PANEL_HORIZONTAL";
+                    return "USERDEFINED";
+                }
                 if (n == 2) return "DOUBLE_PANEL_VERTICAL";
                 if (n == 3) return "TRIPLE_PANEL_VERTICAL";
                 return "USERDEFINED";
             }
             if (Rows == 2 && Cols == 1)
             {
-                int a = Cells[0][0].Sashes.Count;
-                int b = Cells[1][0].Sashes.Count;
+                int a = PanelCount(Cells[0][0]);
+                int b = PanelCount(Cells[1][0]);
                 if (a == 1 && b == 1) return "DOUBLE_PANEL_HORIZONTAL";
                 if (a == 1 && b == 2) return "TRIPLE_PANEL_TOP";
                 if (a == 2 && b == 1) return "TRIPLE_PANEL_BOTTOM";
             }
-            if (Rows == 1 && Cols == 2 && Cells[0].All(c => c.Sashes.Count == 1))
+            if (Rows == 1 && Cols == 2 && Cells[0].All(c => PanelCount(c) == 1))
                 return "DOUBLE_PANEL_VERTICAL";
             return "USERDEFINED";
+        }
+
+        /// <summary>格內「面板」數：不含紗窗。</summary>
+        private static int PanelCount(CellSpec cell)
+        {
+            return cell.Sashes.Count(s => s.Type != SashType.Screen);
         }
 
         // ────────────────────────────────────────────────
@@ -372,11 +523,28 @@ namespace RevitMCP.Core.WindowFamily
                 case "casement": type = SashType.Casement; break;
                 case "sliding": type = SashType.Sliding; break;
                 case "awning": type = SashType.Awning; break;
+                case "hopper": type = SashType.Hopper; break;
+                case "sliding_v": type = SashType.SlidingV; break;
+                case "screen": type = SashType.Screen; break;
                 default:
-                    throw new WindowSpecException($"格 {cellId} 的 type「{typeText}」無效，只接受 fixed／casement／sliding／awning。");
+                    throw new WindowSpecException($"格 {cellId} 的 type「{typeText}」無效，只接受 fixed／casement／sliding／awning／hopper／sliding_v／screen。");
             }
 
             var sash = new SashSpec { Type = type };
+
+            string swingText = obj["swing"]?.Value<string>();
+            if (!string.IsNullOrWhiteSpace(swingText))
+            {
+                string sw = swingText.Trim().ToLowerInvariant();
+                if (sw == "out") sash.SwingRaw = SwingDirection.Out;
+                else if (sw == "in") sash.SwingRaw = SwingDirection.In;
+                else throw new WindowSpecException($"格 {cellId} 的 swing「{swingText}」無效，只接受 out 或 in。");
+            }
+
+            JToken trackToken = obj["track"];
+            if (trackToken != null && trackToken.Type != JTokenType.Null)
+                sash.Track = ParseTrack(trackToken, cellId);
+
             string hinge = (obj["hinge"] ?? obj["h"])?.Value<string>();
             if (!string.IsNullOrWhiteSpace(hinge))
             {
@@ -386,6 +554,41 @@ namespace RevitMCP.Core.WindowFamily
                 else throw new WindowSpecException($"格 {cellId} 的 hinge「{hinge}」無效，只接受 L 或 R。");
             }
             return sash;
+        }
+
+        /// <summary>
+        /// 解析軌序：整數（0＝最外軌）；相容 v0.1 的字串 "outer"→0、"inner"→1，亦接受數字字串。
+        /// </summary>
+        private static int ParseTrack(JToken token, string cellId)
+        {
+            int value;
+            if (token.Type == JTokenType.Integer)
+            {
+                value = token.Value<int>();
+            }
+            else if (token.Type == JTokenType.Float)
+            {
+                double d = token.Value<double>();
+                if (Math.Abs(d - Math.Round(d)) > 1e-9)
+                    throw new WindowSpecException($"格 {cellId} 的 track {d.ToString(CultureInfo.InvariantCulture)} 必須是整數。");
+                value = (int)Math.Round(d);
+            }
+            else if (token.Type == JTokenType.String)
+            {
+                string t = token.Value<string>().Trim();
+                if (t.Equals("outer", StringComparison.OrdinalIgnoreCase)) value = 0;
+                else if (t.Equals("inner", StringComparison.OrdinalIgnoreCase)) value = 1;
+                else if (!int.TryParse(t, NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
+                    throw new WindowSpecException($"格 {cellId} 的 track「{t}」無效，請用整數（0＝最外軌），或舊值 outer／inner。");
+            }
+            else
+            {
+                throw new WindowSpecException($"格 {cellId} 的 track 必須是整數（0＝最外軌）。");
+            }
+
+            if (value < 0 || value > MaxTrack)
+                throw new WindowSpecException($"格 {cellId} 的 track {value} 超出範圍 0–{MaxTrack}。");
+            return value;
         }
 
         private static double[] ParseRatios(JArray array, int expectedCount, string fieldName)
@@ -436,9 +639,7 @@ namespace RevitMCP.Core.WindowFamily
                         throw new WindowSpecException($"格 R{r + 1}C{c + 1} 沒有扇。");
                     if (cell.Sashes.Count > MaxSashesPerCell)
                         throw new WindowSpecException($"格 R{r + 1}C{c + 1} 的扇數超過上限 {MaxSashesPerCell}。");
-                    // SPEC §3：一格內混用 sliding 與其他型式視為無效規格
-                    if (cell.AnySliding && !cell.AllSliding)
-                        throw new WindowSpecException($"格 {cell.Id} 內混用了橫拉與其他開啟型式；橫拉必須整格都是橫拉。");
+                    ValidateSlidingCell(cell);
                 }
             }
 
@@ -463,6 +664,41 @@ namespace RevitMCP.Core.WindowFamily
             if (InstanceParams.Mo.GapPerSide < 0) throw new WindowSpecException("mo.gapPerSide 不可為負。");
             if (Symbols.PlanSwingAngle < 0 || Symbols.PlanSwingAngle >= 90)
                 throw new WindowSpecException("symbols.planSwingAngle 必須在 0–90 度之間。");
+        }
+
+        /// <summary>
+        /// SPEC §3 滑動類規則（v0.2）：
+        /// ① 滑動類（sliding／sliding_v／screen）不可與開啟類同格；② sliding 與 sliding_v 不可同格；
+        /// ③ screen 不能單獨成格（至少一個玻璃滑動扇）；④ 同軌且位置相鄰（會互卡）的扇視為衝突。
+        /// </summary>
+        private static void ValidateSlidingCell(CellSpec cell)
+        {
+            if (!cell.IsSlidingCell) return;
+
+            if (!cell.AllSlidingClass)
+                throw new WindowSpecException(
+                    $"格 {cell.Id} 內混用了滑動類（橫拉／垂直上下拉／紗窗）與其他開啟型式；滑動類必須整格都是滑動類。");
+
+            bool anyH = cell.Sashes.Any(s => s.Type == SashType.Sliding);
+            bool anyV = cell.Sashes.Any(s => s.Type == SashType.SlidingV);
+            if (anyH && anyV)
+                throw new WindowSpecException($"格 {cell.Id} 同時有橫拉與垂直上下拉；兩者不可同格。");
+
+            if (cell.GlassSliderCount == 0)
+                throw new WindowSpecException(
+                    $"格 {cell.Id} 只有紗窗；紗窗不能單獨成格，至少要有一個玻璃滑動扇（橫拉或垂直上下拉）。");
+
+            var placements = cell.ResolveSlidePlacements();
+            for (int a = 0; a < placements.Length; a++)
+            {
+                for (int b = a + 1; b < placements.Length; b++)
+                {
+                    if (placements[a].Track != placements[b].Track) continue;
+                    if (Math.Abs(placements[a].Position - placements[b].Position) > 1) continue;
+                    throw new WindowSpecException(
+                        $"格 {cell.Id} 第 {a + 1} 與第 {b + 1} 扇都在第 {placements[a].Track} 軌且位置相鄰（交疊處），軌道會互卡；請改用不同軌序。");
+                }
+            }
         }
 
         private static void ValidateRatios(double[] ratios, int expectedCount, string fieldName)

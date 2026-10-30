@@ -16,6 +16,15 @@
 - **計數同步**：Runtime MCP tools 192 → 201（含 main 既有 8 個整地工具未計入的漂移與新增 generate_window_family）。
 - **已知未處理**：`revit-tools.ts` 在 full／architect／structural profile 會把 grading 工具重複註冊（既有 bug，另案處理）；ADR D-006 專案端「放窗後自動切割相交飾板」留待 Phase 3。
 
+### 🆕 新增 — 窗型擴充 v0.2 實作（2026-10-31，universal-window 分支）
+
+- **規格模型**：sash type 新增 `hopper`（下懸／內倒，預設內開）、`sliding_v`（垂直上下拉）、`screen`（紗窗）；新增 `swing`（out／in）；`track` 改整數軌序（0＝最外軌），**相容舊 JSON**（`"outer"`→0、`"inner"`→1）。驗證：滑動類不可與開啟類同格、sliding 與 sliding_v 不可同格、screen 不能單獨成格、同軌相鄰衝突。
+- **佈局數學**：sliding_v 垂直交疊（扇高 = (格高 + (n−1)·交疊)/n）；紗窗與所罩玻璃扇同尺寸、佔自己的軌道，不計玻璃／有效採光／可開口面積與扇數（另計 `screenCount`）；多軌深度位置（≥3 軌框深等分）。框深預設 8 → 7 cm（ADR D-010）。
+- **Builder**：下懸／垂直上下拉／紗窗的立面與平面符號，內開改虛線、平面開啟線畫向室內側；IFC OperationType BOTTOMHUNG／SLIDINGVERTICAL，紗窗不輸出玻璃扇屬性；`UW_開啟方式` 用代號 H／V／SC。**未在 Revit 內實測**。
+- **MCP schema**：`window-family-tools.ts` 同步 type enum、`swing`、`track` 整數；工具數不變（仍 201）。
+- **demo**：`configurator-demo.html` 加入三種新窗型、三個範例（三軌含紗窗、垂直上下拉、下懸內倒氣窗）、軌序與方向控制，JSON 輸出為 v0.2 形狀。
+- **測試**：MCP.Tests 新增 16 個（總計 101）、MCP-Server 新增 1 個。
+
 ### 📐 規格 v0.2（2026-10-31）
 
 - `docs/universal-window/SPEC.md` v0.2：窗型擴充（下懸／內倒、垂直上下拉、紗窗扇、整數軌序）、框深預設 7 cm（YKK AP YRB-A70）、§11 入口架構。

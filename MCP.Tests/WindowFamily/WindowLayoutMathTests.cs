@@ -411,7 +411,7 @@ namespace MCP.Tests.WindowFamily
         public void VoidDepth_DefaultsCoverFrameAndCutAllowances()
         {
             var spec = Ufl();
-            // 未指定 → max(50, 8 + 5 + 5 + 20) = 50
+            // 未指定 → max(50, 框深 8（此規格明填 8）+ 5 + 5 + 20 = 38) = 50
             Assert.That(spec.ResolveVoidDepth(), Is.EqualTo(50.0).Within(0.001));
 
             spec.InstanceParams.Mo.VoidDepth = 72.5;
