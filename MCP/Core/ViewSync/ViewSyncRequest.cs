@@ -15,7 +15,7 @@ namespace RevitMCP.Core.ViewSync
         public double? FovVerticalDeg;
         public double? Aspect;
         public bool Orthographic;
-        public FovCropModel FovModel = FovCropModel.TargetPlane;
+        public FovCropModel FovModel = FovCropModel.FocalPlane;
     }
 
     public sealed class ViewSyncClipping
@@ -176,9 +176,19 @@ namespace RevitMCP.Core.ViewSync
                 Aspect = Num(cam["aspect"], "camera.aspect"),
                 Orthographic = cam["orthographic"]?.Type == JTokenType.Boolean && cam["orthographic"].Value<bool>(),
             };
-            var model = (Str(cam["fovModel"]) ?? string.Empty).Trim().ToLowerInvariant();
-            if (model == "near" || model == "nearplane") c.FovModel = FovCropModel.NearPlane;
+            c.FovModel = ParseFovModel(Str(cam["fovModel"]));
             return c;
+        }
+
+        /// <summary>fovModel 字串：near／nearplane、target／targetplane 是已證偽的舊模型（只供對照）；其餘（含空白、focal）＝FocalPlane。</summary>
+        public static FovCropModel ParseFovModel(string s)
+        {
+            switch ((s ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "near": case "nearplane": return FovCropModel.NearPlane;
+                case "target": case "targetplane": return FovCropModel.TargetPlane;
+                default: return FovCropModel.FocalPlane;
+            }
         }
 
         public static ViewSyncClipping ParseClipping(JObject clip)

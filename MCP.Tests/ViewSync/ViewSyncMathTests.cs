@@ -107,6 +107,59 @@ namespace RevitMCP.Tests.ViewSync
             Near(min, emin.X, emin.Y, emin.Z); Near(max, emax.X, emax.Y, emax.Z);
         }
 
+        // 2026-10-31 Revit 2024 實測（Snowdon「IM 對位（臨時）」視圖 2492777）：
+        //   裁剪框 X ±0.07373、Y ±0.04142 ft（近 1.09 ft、遠 1090 ft）→ Revit 裁剪形狀讀回 垂直 45.00°、水平 72.80°；
+        //   X／Y 加倍 → 79.28°／111.71°（tan 線性、焦距 0.1 ft 固定，與近裁剪 1.09 ft 無關）。
+        [Test]
+        public void PerspectiveCrop_FocalPlane_MatchesRevitMeasurement()
+        {
+            var (min, max) = ViewSyncMath.ComputePerspectiveCrop(45, 1.78, 207.0, 1.0903314498558707, 1090.3314498558707, FovCropModel.FocalPlane);
+            Assert.That(max.Y, Is.EqualTo(0.0414213562373095).Within(1e-12));
+            Assert.That(max.X, Is.EqualTo(0.07373001410241091).Within(1e-12));
+            Assert.That(min.X, Is.EqualTo(-max.X)); Assert.That(min.Y, Is.EqualTo(-max.Y));
+            Assert.That(max.Z, Is.EqualTo(-1.0903314498558707)); Assert.That(min.Z, Is.EqualTo(-1090.3314498558707));
+            Assert.That(ViewSyncMath.ImpliedFovDegrees(max.Y, ViewSyncMath.RevitPerspectiveFocalFeet), Is.EqualTo(45).Within(1e-9));
+            Assert.That(ViewSyncMath.ImpliedFovDegrees(max.X, ViewSyncMath.RevitPerspectiveFocalFeet), Is.EqualTo(72.80).Within(0.01));
+            Assert.That(ViewSyncMath.ImpliedFovDegrees(2 * max.Y, ViewSyncMath.RevitPerspectiveFocalFeet), Is.EqualTo(79.28).Within(0.01), "實測加倍點");
+        }
+
+        // 重現空白畫面：p_temp.json（相機 [473.8,30,-1375.6] → 目標 [433.8,2,-1415.6]，距離約 63 m）用舊 TargetPlane
+        // 換算出 X ±152.68、Y ±85.78 ft；Revit 以 0.1 ft 焦距解讀 → 視角約 179.9°，建築縮成幾個像素。
+        [Test]
+        public void PerspectiveCrop_OldTargetPlane_ReproducesBlankView()
+        {
+            var cam = ViewSyncMath.ComputeCamera(new Vec3(473.8, 30, -1375.6), new Vec3(433.8, 2, -1415.6), new Vec3(0, 1, 0), new Vec3(-433.698, -1414.604, 0));
+            var (_, oldMax) = ViewSyncMath.ComputePerspectiveCrop(45, 1.78, cam.TargetDistanceFeet, 1.0903314498558707, 1090.3314498558707, FovCropModel.TargetPlane);
+            Assert.That(oldMax.Y, Is.EqualTo(85.77663735383068).Within(1e-6), "與 Revit 讀到的舊裁剪框一致");
+            Assert.That(ViewSyncMath.ImpliedFovDegrees(oldMax.Y, ViewSyncMath.RevitPerspectiveFocalFeet), Is.GreaterThan(179.8));
+
+            var (_, newMax) = ViewSyncMath.ComputePerspectiveCrop(45, 1.78, cam.TargetDistanceFeet, 1.0903314498558707, 1090.3314498558707, FovCropModel.FocalPlane);
+            Assert.That(ViewSyncMath.ImpliedFovDegrees(newMax.Y, ViewSyncMath.RevitPerspectiveFocalFeet), Is.EqualTo(45).Within(1e-9));
+            Assert.That(newMax.Y, Is.EqualTo(0.0414213562373095).Within(1e-12), "焦距模型與目標距離無關");
+        }
+
+        [Test]
+        public void RescaleCropToFov_CorrectsDifferentFocalDistance()
+        {
+            // 既有相機焦距 24 mm（Snowdon Camera at Kitchen 01 實測）：以 0.1 ft 算出的框，Revit 讀回會比較寬。
+            const double focal = 0.024 / 0.3048;
+            var (min, max) = ViewSyncMath.ComputePerspectiveCrop(45, 1.78, 1, 1, 100, FovCropModel.FocalPlane);
+            double Fov(double half) => ViewSyncMath.ImpliedFovDegrees(half, focal);
+            var (fmin, fmax) = ViewSyncMath.RescaleCropToFov(min, max, 45, ViewSyncMath.HorizontalFovDegrees(45, 1.78), Fov(max.Y), Fov(max.X));
+            Assert.That(Fov(fmax.Y), Is.EqualTo(45).Within(1e-9));
+            Assert.That(Fov(fmax.X), Is.EqualTo(ViewSyncMath.HorizontalFovDegrees(45, 1.78)).Within(1e-9));
+            Assert.That(fmin.X, Is.EqualTo(-fmax.X)); Assert.That(fmin.Z, Is.EqualTo(min.Z)); Assert.That(fmax.Z, Is.EqualTo(max.Z));
+        }
+
+        [Test]
+        public void ParseFovModel_DefaultsToFocalPlane()
+        {
+            Assert.That(ViewSyncRequestParser.ParseFovModel(null), Is.EqualTo(FovCropModel.FocalPlane));
+            Assert.That(ViewSyncRequestParser.ParseFovModel("focal"), Is.EqualTo(FovCropModel.FocalPlane));
+            Assert.That(ViewSyncRequestParser.ParseFovModel("Target"), Is.EqualTo(FovCropModel.TargetPlane));
+            Assert.That(ViewSyncRequestParser.ParseFovModel("near"), Is.EqualTo(FovCropModel.NearPlane));
+        }
+
         [Test]
         public void PerspectiveCrop_RoundTripsThroughImpliedFov()
         {

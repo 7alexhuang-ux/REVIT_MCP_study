@@ -34,7 +34,7 @@ namespace RevitMCP.Tests.ViewSync
             Assert.That(r.HasOrigin, Is.True); Assert.That(r.OriginOffsetMeters.X, Is.EqualTo(100));
             Assert.That(r.Camera.Position.Z, Is.EqualTo(20)); Assert.That(r.Camera.FovVerticalDeg, Is.EqualTo(50)); Assert.That(r.Camera.Aspect, Is.EqualTo(1.6));
             Assert.That(r.Camera.Orthographic, Is.False);
-            Assert.That(r.Camera.FovModel, Is.EqualTo(RevitMCP.Core.ViewSync.FovCropModel.TargetPlane));
+            Assert.That(r.Camera.FovModel, Is.EqualTo(RevitMCP.Core.ViewSync.FovCropModel.FocalPlane), "預設＝Revit 實測的焦距平面模型");
             Assert.That(r.Clipping.Enabled, Is.True); Assert.That(r.Clipping.Max.Value.Y, Is.EqualTo(8));
         }
 

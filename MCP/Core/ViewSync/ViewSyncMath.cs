@@ -50,12 +50,19 @@ namespace RevitMCP.Core.ViewSync
         public double ViewDepth { get; set; }
     }
 
-    /// <summary>透視視野的裁剪框換算模型（Revit 透視裁剪框 X／Y 範圍是在哪個距離定義的，需實測校正）。</summary>
+    /// <summary>透視視野的裁剪框換算模型。</summary>
     public enum FovCropModel
     {
-        /// <summary>規格公式：X／Y 半寬 ＝ 目標距離 × tan(視角/2)（裁剪框寬＝2×目標距離×tan(水平視角/2)）。預設。</summary>
+        /// <summary>
+        /// 預設（2026-10-31 Revit 2024 實測，Snowdon「IM 對位（臨時）」視圖）：透視裁剪框的 X／Y 是對稱矩形，
+        /// 位於眼睛前方固定的焦距平面（新建透視視圖＝<see cref="ViewSyncMath.RevitPerspectiveFocalFeet"/>＝0.1 ft），
+        /// 與 Max.Z（近裁剪）、遠裁剪、目標距離都無關：半高 ＝ 焦距 × tan(垂直視角/2)。
+        /// 實測：半高 0.04142 ft → 讀回垂直 45.00°；半高加倍 → 79.28°（tan 線性，焦距固定 0.1 ft）。
+        /// </summary>
+        FocalPlane,
+        /// <summary>已證偽（只留給 viewsync_debug_fov 對照）：X／Y 半寬 ＝ 目標距離 × tan(視角/2)。目標距離 63 m 時視角變成約 180°，畫面全空白。</summary>
         TargetPlane,
-        /// <summary>CameraPathMath 既有假設：Max 角在近裁剪面，X／Y 半寬 ＝ 近距 × tan(視角/2)。</summary>
+        /// <summary>已證偽（只留給 viewsync_debug_fov 對照）：CameraPathMath 舊假設，Max 角在近裁剪面、Min 角在遠裁剪面；Revit 把 Min／Max 當同一平面的矩形，結果不對稱。</summary>
         NearPlane,
     }
 
@@ -65,6 +72,9 @@ namespace RevitMCP.Core.ViewSync
     {
         public const double FeetToMeters = CameraPathMath.FeetToMeters;
         private const double Eps = 1e-9;
+
+        /// <summary>Revit 新建透視視圖的裁剪框焦距平面距離（呎）。2026-10-31 實測 0.1 ft（＝30.48 mm）；既有相機可能不同，套用後須讀回校正。</summary>
+        public const double RevitPerspectiveFocalFeet = 0.1;
 
         // ------------------------------------------------------------------ 座標
 
@@ -108,10 +118,11 @@ namespace RevitMCP.Core.ViewSync
 
         /// <summary>
         /// 由垂直視角＋寬高比算 Revit 透視裁剪框的 Min／Max（呎，裁剪框座標：X 右、Y 上、Z 朝向觀看者，眼睛在原點）。
-        /// Max.Z＝−nearFeet（近裁剪面）、Min.Z＝−farFeet（遠裁剪面），X／Y 範圍依 <paramref name="model"/>。
+        /// Max.Z＝−nearFeet（近裁剪面）、Min.Z＝−farFeet（遠裁剪面），X／Y 範圍依 <paramref name="model"/>：
+        /// FocalPlane（預設）＝對稱矩形，半寬／半高 ＝ <paramref name="focalFeet"/> × tan(視角/2)，與目標距離無關。
         /// </summary>
         public static (Vec3 Min, Vec3 Max) ComputePerspectiveCrop(double fovVerticalDeg, double aspect, double targetDistanceFeet,
-            double nearFeet, double farFeet, FovCropModel model)
+            double nearFeet, double farFeet, FovCropModel model, double focalFeet = RevitPerspectiveFocalFeet)
         {
             ValidateFov(fovVerticalDeg, aspect);
             if (!(nearFeet > 0) || !(farFeet > nearFeet))
@@ -125,10 +136,28 @@ namespace RevitMCP.Core.ViewSync
                 return (new Vec3(-farFeet * tanX, -farFeet * tanY, -farFeet), new Vec3(halfX, halfY, -nearFeet));
             }
 
-            if (!(targetDistanceFeet > Eps))
-                throw new ViewSyncException("fov_invalid", "目標距離必須大於 0。");
-            halfX = targetDistanceFeet * tanX; halfY = targetDistanceFeet * tanY;
+            var dist = model == FovCropModel.FocalPlane ? focalFeet : targetDistanceFeet;
+            if (!(dist > Eps))
+                throw new ViewSyncException("fov_invalid", model == FovCropModel.FocalPlane ? "焦距平面距離必須大於 0。" : "目標距離必須大於 0。");
+            halfX = dist * tanX; halfY = dist * tanY;
             return (new Vec3(-halfX, -halfY, -farFeet), new Vec3(halfX, halfY, -nearFeet));
+        }
+
+        /// <summary>
+        /// 讀回校正：套用裁剪框後 Revit 實際視角（measured，度）與想要的不同時（既有相機焦距不是 0.1 ft），
+        /// 依 tan 比例縮放 X／Y 半寬（焦距固定時 tan(半角) 與半寬成正比），Z 不動，維持對稱。
+        /// measured 不合理（≤0 或 ≥180）→ 回原框。
+        /// </summary>
+        public static (Vec3 Min, Vec3 Max) RescaleCropToFov(Vec3 min, Vec3 max, double desiredVDeg, double desiredHDeg,
+            double measuredVDeg, double measuredHDeg)
+        {
+            double Ratio(double want, double got) =>
+                got > 0 && got < 180 && want > 0 && want < 180 ? Math.Tan(want * Math.PI / 360.0) / Math.Tan(got * Math.PI / 360.0) : 1.0;
+            var kx = Ratio(desiredHDeg, measuredHDeg);
+            var ky = Ratio(desiredVDeg, measuredVDeg);
+            var halfX = (max.X - min.X) / 2 * kx;
+            var halfY = (max.Y - min.Y) / 2 * ky;
+            return (new Vec3(-halfX, -halfY, min.Z), new Vec3(halfX, halfY, max.Z));
         }
 
         /// <summary>半高（或半寬）與距離換算隱含視角（度）。除錯用：同一個裁剪框在不同模型假設下的 FOV。</summary>

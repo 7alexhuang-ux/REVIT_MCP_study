@@ -344,7 +344,7 @@ namespace RevitMCP.Core
 
         /// <summary>
         /// 透視視野校正：讀出 3D 視圖的裁剪框（Transform／Min／Max）與在各種假設下隱含的 FOV；
-        /// 帶 set = { fovVerticalDeg, aspect, model: "target"|"near" } 時，在該視圖（預設作用中視圖）套用一次再讀回。
+        /// 帶 set = { fovVerticalDeg, aspect, model: "focal"（預設）|"target"|"near" } 時，在該視圖（預設作用中視圖）套用一次再讀回。
         /// 參數 viewUniqueId 可指定視圖，targetDistanceMeters 可指定目標距離（缺省取裁剪框遠近平面中點）。
         /// </summary>
         private object ViewSyncDebugFov(JObject p)
@@ -359,18 +359,19 @@ namespace RevitMCP.Core
             JObject before = ViewSyncDescribeCrop(view, targetM);
             var set = p["set"] as JObject;
             JObject after = null;
+            string setNote = null;
             if (set != null)
             {
                 var fov = set["fovVerticalDeg"]?.Value<double>() ?? 60;
                 var aspect = set["aspect"]?.Value<double>() ?? 16.0 / 9.0;
-                var model = (set["model"]?.Value<string>() ?? "target").ToLowerInvariant() == "near" ? FovCropModel.NearPlane : FovCropModel.TargetPlane;
+                var model = ViewSyncRequestParser.ParseFovModel(set["model"]?.Value<string>());
                 var targetFeet = targetM.HasValue ? targetM.Value / ViewSyncFtToM : 30.0;
                 using (var tx = new Transaction(doc, "IM 透視視野實測"))
                 {
                     tx.Start();
                     try
                     {
-                        ViewSyncSetPerspectiveCrop(view, fov, aspect, targetFeet, model);
+                        setNote = ViewSyncSetPerspectiveCrop(view, fov, aspect, targetFeet, model);
                         tx.Commit();
                     }
                     catch
@@ -383,7 +384,7 @@ namespace RevitMCP.Core
                 after = ViewSyncDescribeCrop(view, targetM);
             }
 
-            return new JObject { ["viewUniqueId"] = view.UniqueId, ["name"] = view.Name, ["before"] = before, ["after"] = after };
+            return new JObject { ["viewUniqueId"] = view.UniqueId, ["name"] = view.Name, ["before"] = before, ["after"] = after, ["setNote"] = setNote };
         }
 
         private static JObject ViewSyncDescribeCrop(View3D view, double? targetMeters)
@@ -407,14 +408,24 @@ namespace RevitMCP.Core
                 var target = targetMeters.HasValue ? targetMeters.Value / ViewSyncFtToM : (near + far) / 2;
                 o3["targetDistanceFeetUsed"] = target;
                 // 同一個裁剪框，用不同距離當分母會得到不同 FOV；對照畫面實際視野就知道 Revit 用的是哪個。
+                // Revit 實際視野（裁剪形狀換算，2026-10-31 實測與 0.1 ft 焦距平面一致）。
+                var actual = CameraMath.ComputePerspectiveFov(view);
+                o3["revitFov"] = new JObject
+                {
+                    ["source"] = actual?.Source,
+                    ["verticalDeg"] = actual?.VFovDeg,
+                    ["horizontalDeg"] = actual?.HFovDeg,
+                };
                 o3["impliedFovVerticalDeg"] = new JObject
                 {
+                    ["ifRectangleAtFocalPlane"] = ViewSyncMath.ImpliedFovDegrees(crop.Max.Y, ViewSyncMath.RevitPerspectiveFocalFeet),
                     ["ifRectangleAtNearPlane"] = ViewSyncMath.ImpliedFovDegrees(crop.Max.Y, near),
                     ["ifRectangleAtFarPlane"] = ViewSyncMath.ImpliedFovDegrees(crop.Max.Y, far),
                     ["ifRectangleAtTargetDistance"] = ViewSyncMath.ImpliedFovDegrees(crop.Max.Y, target),
                 };
                 o3["impliedFovHorizontalDeg"] = new JObject
                 {
+                    ["ifRectangleAtFocalPlane"] = ViewSyncMath.ImpliedFovDegrees(crop.Max.X, ViewSyncMath.RevitPerspectiveFocalFeet),
                     ["ifRectangleAtNearPlane"] = ViewSyncMath.ImpliedFovDegrees(crop.Max.X, near),
                     ["ifRectangleAtFarPlane"] = ViewSyncMath.ImpliedFovDegrees(crop.Max.X, far),
                     ["ifRectangleAtTargetDistance"] = ViewSyncMath.ImpliedFovDegrees(crop.Max.X, target),
@@ -616,8 +627,8 @@ namespace RevitMCP.Core
             {
                 var aspect = input.Aspect ?? 16.0 / 9.0;
                 if (!input.Aspect.HasValue) warnings.Add("網頁沒有送畫面寬高比 camera.aspect，視野以 16:9 換算。");
-                ViewSyncSetPerspectiveCrop(view, input.FovVerticalDeg.Value, aspect, cam.TargetDistanceFeet, input.FovModel);
-                warnings.Add("透視視野已依裁剪框換算（換算模型尚未經 Revit 實測校正，視野可能略有差異；可用 viewsync_debug_fov 校正）。");
+                var msg = ViewSyncSetPerspectiveCrop(view, input.FovVerticalDeg.Value, aspect, cam.TargetDistanceFeet, input.FovModel);
+                if (msg != null) warnings.Add(msg);
             }
             catch (Exception ex)
             {
@@ -625,7 +636,11 @@ namespace RevitMCP.Core
             }
         }
 
-        private static void ViewSyncSetPerspectiveCrop(View3D view, double fovVerticalDeg, double aspect, double targetDistanceFeet, FovCropModel model)
+        /// <summary>
+        /// 設定透視視野（需在交易內）。FocalPlane（預設）套用後 Regenerate，以 CameraMath.ComputePerspectiveFov（裁剪形狀＝Revit 實際視野）讀回；
+        /// 差超過 0.2° 就依 tan 比例縮放 X／Y 再套一次（既有視圖焦距可能不是 0.1 ft）。回傳給使用者看的說明（null＝不需說明）。
+        /// </summary>
+        private static string ViewSyncSetPerspectiveCrop(View3D view, double fovVerticalDeg, double aspect, double targetDistanceFeet, FovCropModel model)
         {
             if (!view.IsPerspective) throw new ViewSyncException("fov_invalid", "只有透視視圖可以設定視野。");
             var crop = view.CropBox;
@@ -638,6 +653,33 @@ namespace RevitMCP.Core
             crop.Min = ViewSyncXyz(box.Min);
             crop.Max = ViewSyncXyz(box.Max);
             view.CropBox = crop;
+            if (model != FovCropModel.FocalPlane) return $"透視視野以舊換算模型 {model} 套用（已證偽，僅供對照）。";
+
+            var wantH = ViewSyncMath.HorizontalFovDegrees(fovVerticalDeg, aspect);
+            CameraMath.PerspectiveFov got;
+            try
+            {
+                view.Document.Regenerate();
+                got = CameraMath.ComputePerspectiveFov(view);
+            }
+            catch (Exception ex)
+            {
+                return "透視視野已套用，但無法讀回確認：" + ex.Message;
+            }
+
+            if (got?.VFovDeg == null || got.HFovDeg == null || got.Source != "C(cropShape)")
+                return "透視視野已套用，但讀不到 Revit 實際視角（" + (got?.Source ?? "none") + "），未校正。";
+            if (Math.Abs(got.VFovDeg.Value - fovVerticalDeg) <= 0.2 && Math.Abs(got.HFovDeg.Value - wantH) <= 0.2) return null;
+
+            var fixedBox = ViewSyncMath.RescaleCropToFov(box.Min, box.Max, fovVerticalDeg, wantH, got.VFovDeg.Value, got.HFovDeg.Value);
+            crop = view.CropBox;
+            crop.Min = ViewSyncXyz(fixedBox.Min);
+            crop.Max = ViewSyncXyz(fixedBox.Max);
+            view.CropBox = crop;
+            view.Document.Regenerate();
+            var again = CameraMath.ComputePerspectiveFov(view);
+            return $"透視視野依 Revit 讀回校正一次：第一次 垂直 {got.VFovDeg:F1}°／水平 {got.HFovDeg:F1}°，" +
+                   $"校正後 垂直 {again?.VFovDeg:F1}°／水平 {again?.HFovDeg:F1}°（目標 {fovVerticalDeg:F1}°／{wantH:F1}°）。";
         }
 
         private static void ViewSyncApplyDisplayMode(View view, string mode, List<string> warnings)

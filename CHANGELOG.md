@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+### 🔧 修正 — viewsync 透視視野：IM 對位視圖畫面空白（2026-10-31）
+
+- Revit 2024 實測：透視裁剪框 X／Y 是對稱矩形，位於眼睛前方固定 0.1 ft 的焦距平面（與近裁剪、目標距離無關）。舊 TargetPlane 換算以目標距離 63 m 算出 X ±152.7、Y ±85.8 ft，Revit 解讀為約 180° 視角，畫面空白。
+- `ViewSyncMath`：新增 `FovCropModel.FocalPlane`（預設）與 `RevitPerspectiveFocalFeet`、`RescaleCropToFov`；TargetPlane／NearPlane 標為已證偽、只供 debug 對照。`ViewSyncSetPerspectiveCrop` 套用後 Regenerate、以裁剪形狀讀回實際視角，差超過 0.2° 依 tan 比例校正一次。`viewsync_debug_fov` 預設模型同步，讀回多 `revitFov` 與焦距平面隱含視角。
+- NUnit 464 通過（新增實測重現案例）；R24 建置 0 錯誤。未部署，待主線重部署後送 p_temp.json 驗證畫面。
+
 ### 新增 — 設計選項實體幾何、命名視圖與無人操作工具（2026-10-23）
 
 - 新增 list_design_options／export_design_options／export_named_views；export_web_compare 以 designOptions:true 選用新流程，預設保留原匯出。穩定 UniqueId、逐元素 designOption extras、design_options.json 及共用原點相機資料。
