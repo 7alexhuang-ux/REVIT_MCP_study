@@ -65,6 +65,20 @@ namespace RevitMCP
                 switchButtonData.ToolTip = "關閉目前連線，讓下一個重新連線的 MCP 客戶端取得連線（無法指定特定客戶端）";
                 panel.AddItem(switchButtonData);
 
+                // 5. 萬用窗面板：不依賴 MCP 服務，給不用 AI 的同事直接生成窗族（SPEC §11、ADR D-008）
+                RibbonPanel windowPanel = application.CreateRibbonPanel("萬用窗");
+                PushButtonData windowButtonData = new PushButtonData(
+                    "UniversalWindow",
+                    "產生\n窗族",
+                    assemblyPath,
+                    "RevitMCP.Commands.UniversalWindowCommand");
+                windowButtonData.ToolTip = "開啟萬用窗生成對話框：選窗型、調尺寸，直接產生並載入窗族（不需開啟 MCP 服務）";
+                var windowLargeIcon = Core.WindowFamily.UniversalWindowIcon.Create(32);
+                var windowSmallIcon = Core.WindowFamily.UniversalWindowIcon.Create(16);
+                if (windowLargeIcon != null) windowButtonData.LargeImage = windowLargeIcon;
+                if (windowSmallIcon != null) windowButtonData.Image = windowSmallIcon;
+                windowPanel.AddItem(windowButtonData);
+
                 // 初始化 ExternalEventManager (必須在 UI 執行緒建立)
                 _ = ExternalEventManager.Instance;
 

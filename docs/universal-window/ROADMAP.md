@@ -17,7 +17,8 @@
 - [x] 引擎：hopper（下懸／內倒）、sliding_v（垂直上下拉）、screen（紗窗）、整數軌序、swing；舊 outer/inner 相容
 - [x] 圖面：三種新型式的立面／平面／剖面符號；紗窗細虛線（剖面開啟線未做，族內無剖面符號線；未在 Revit 實測）
 - [x] MCP schema 同步；測試擴充
-- [ ] add-in：ribbon「萬用窗」面板＋WPF 對話框（格子預覽、範例、產生並載入），不依賴 MCP 服務
+- [x] add-in：ribbon「萬用窗」面板＋WPF 對話框（格子預覽、範例、產生並載入），不依賴 MCP 服務 — **已編譯（R23／R24／R25 0 error）、對話框煙霧測試通過，未在 Revit 內實測**；使用說明見 `ADDIN-GUIDE.md`
+- [ ] add-in 後續：Excel 門窗表批次生成、窗型庫管理（SPEC §11）
 - [ ] 框深預設 7 cm；YKK AP 框寬類回填（待人工判讀型錄斷面）
 
 ## Phase 2 Type 層活拉

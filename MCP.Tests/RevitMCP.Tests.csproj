@@ -23,5 +23,6 @@
     <Compile Include="..\MCP\Core\WindowFamily\WindowFamilySpec.cs" Link="Core\WindowFamily\WindowFamilySpec.cs" />
     <Compile Include="..\MCP\Core\WindowFamily\WindowLayoutMath.cs" Link="Core\WindowFamily\WindowLayoutMath.cs" />
     <Compile Include="..\MCP\Core\WindowFamily\UniversalWindowParameters.cs" Link="Core\WindowFamily\UniversalWindowParameters.cs" />
+    <Compile Include="..\MCP\Core\WindowFamily\WindowSpecBuilder.cs" Link="Core\WindowFamily\WindowSpecBuilder.cs" />
   </ItemGroup>
 </Project>
