@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+### 新增 — 坵塊法送審強化：縣市預設、基地裁切面積加權、平移與半格比對、CSV 計算書（2026-10-31）
+
+- preview_parcel_slope／create_parcel_slope_map 新增 `jurisdiction`（central／soil_conservation／taipei／new_taipei，未核實者帶 verified=false 警告）、`originOffsetX/YMeters`（對 L 取餘）、`compareHalfShift`、`boundaryLayerName`／`boundaryElementId`、`csvPath`（限絕對路徑）、`labelEdgeCounts`。工具總數不變。
+- 基地範圍裁切後平均坡度改為面積加權 Σ(S×A)/ΣA；n 仍依整格四邊計。無基地範圍時結果與舊版相同。
+- 判定欄改為引用第262條第3項的分段描述，不輸出可否開發結論；第262條第一項第一款 15% 但書僅提示。
+- 修正 domain 項次：法定空地規定為第262條第3項（原誤記第2項，已核全國法規資料庫）。
+- NUnit 383 全過；未連 Revit 實機，基地範圍讀取與 CSV 寫檔待驗證。詳 domain/parcel-slope-analysis.md v1.1。
+
 ### 新增 — 設計選項實體幾何、命名視圖與無人操作工具（2026-10-23）
 
 - 新增 list_design_options／export_design_options／export_named_views；export_web_compare 以 designOptions:true 選用新流程，預設保留原匯出。穩定 UniqueId、逐元素 designOption extras、design_options.json 及共用原點相機資料。

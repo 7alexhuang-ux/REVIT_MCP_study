@@ -169,6 +169,54 @@ test("坵塊限建疊圖檢查工具存在且參數正確", () => {
     assert.match(String(tool.description), /不輸出可否開發建築之結論/);
 });
 
+test("坵塊法工具具備縣市預設檔、平移、半格比對與基地範圍參數", () => {
+    const extension = [
+        "jurisdiction",
+        "originOffsetXMeters",
+        "originOffsetYMeters",
+        "compareHalfShift",
+        "boundaryLayerName",
+        "boundaryElementId",
+    ];
+
+    for (const name of ["preview_parcel_slope", "create_parcel_slope_map"]) {
+        const tool = gradingTools.find(item => item.name === name);
+        assert.ok(tool, name);
+        // 既有必填欄位不變：新參數全部選填，不帶時行為與第一期相同
+        assert.deepEqual(tool.inputSchema.required, ["layerName", "contourIntervalMeters"]);
+        const properties = tool.inputSchema.properties as Record<string, Record<string, unknown>>;
+        for (const key of extension) {
+            assert.ok(properties[key], `${name} 缺少 ${key}`);
+        }
+        assert.equal(properties.jurisdiction.default, "central");
+        assert.equal(properties.originOffsetXMeters.default, 0);
+        assert.equal(properties.originOffsetYMeters.default, 0);
+        assert.equal(properties.compareHalfShift.type, "boolean");
+        assert.equal(properties.compareHalfShift.default, false);
+        assert.equal(properties.boundaryElementId.type, "integer");
+        assert.equal(properties.rotationDegrees.default, 0);
+        assert.equal(properties.cellSizeMeters.maximum, 25);
+        assert.match(String(properties.jurisdiction.description), /verified|未核原文/);
+        assert.match(String(properties.boundaryLayerName.description), /面積加權/);
+    }
+
+    const create = gradingTools.find(item => item.name === "create_parcel_slope_map");
+    assert.ok(create);
+    const createProps = create.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(createProps.csvPath.type, "string");
+    assert.match(String(createProps.csvPath.description), /UTF-8 with BOM/);
+    assert.match(String(createProps.csvPath.description), /絕對路徑/);
+    assert.match(String(createProps.csvPath.description), /下邊.*右邊.*上邊.*左邊交點數/);
+    assert.equal(createProps.labelEdgeCounts.default, false);
+
+    // 計算書與邊標示只屬於繪圖工具
+    const preview = gradingTools.find(item => item.name === "preview_parcel_slope");
+    assert.ok(preview);
+    const previewProps = preview.inputSchema.properties as Record<string, Record<string, unknown>>;
+    assert.equal(previewProps.csvPath, undefined);
+    assert.equal(previewProps.labelEdgeCounts, undefined);
+});
+
 test("整地工具只註冊於核准的 Profile", () => {
     const originalProfile = process.env.MCP_PROFILE;
     const gradingToolNames = [

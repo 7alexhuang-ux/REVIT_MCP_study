@@ -1,5 +1,46 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 
+/**
+ * 坵塊法（preview_parcel_slope／create_parcel_slope_map）第二期共用的擴充參數。
+ * 全部選填；不帶任何一個時行為與第一期完全相同（central 預設檔、整格計算、無平移）。
+ * 方法定義見 domain/parcel-slope-analysis.md。
+ */
+const parcelExtensionProperties = {
+    jurisdiction: {
+        type: "string",
+        default: "central",
+        description:
+            "縣市／法規預設檔：central（預設，建築技術規則第261/262條，已核原文）、soil_conservation（水保計畫，格邊長10m或25m、七級分級，未核原文）、taipei（格邊長<10m、比例尺≥1/1000，僅搜尋摘要待人工核對）、new_taipei（25m、須原始地形與現況各算一次，僅搜尋摘要待人工核對）。其他縣市無查證到的特別規定，會落到 central 並在回應註明「本縣市無查證到的特別規定，沿用中央」。cellSizeMeters 違反預設檔規定時拒絕執行；verified=false 的預設檔會附警告。回應與計算書都會列出所用預設檔、verified 狀態與來源。",
+    },
+    originOffsetXMeters: {
+        type: "number",
+        default: 0,
+        description:
+            "網格起點在網格自身 X 軸方向的平移量（公尺，相對預設原點）。法規未訂網格起點，不同起點會得到不同逐格結果，須記錄於計算書。旋轉中心仍為網格範圍中心。",
+    },
+    originOffsetYMeters: {
+        type: "number",
+        default: 0,
+        description: "網格起點在網格自身 Y 軸方向的平移量（公尺，相對預設原點）。",
+    },
+    compareHalfShift: {
+        type: "boolean",
+        default: false,
+        description:
+            "true＝另以「起點再平移 L/2、L/2」重算一組並列比對（陳璁慶 2004，水土保持學報建議：平移半格再算一次檢驗穩定性）。回應列出兩組的平均坡度、各分級面積、超過30%坵塊面積與差異；比對組只回數字、不繪圖。",
+    },
+    boundaryLayerName: {
+        type: "string",
+        description:
+            "基地範圍所在的 DWG 圖層（需為封閉曲線；端點相差 ≤1cm 視為相接）。與 boundaryElementId 擇一。指定後：只保留與基地相交的坵塊；每格面積 A 為基地內面積；平均坡度採面積加權 Σ(S×A)/ΣA；交點數 n 仍依整格四邊計；基地內坵塊重新連號。串出多個封閉輪廓時只採面積最大者並警告。未指定時整格計算（A=L²，與第一期相同）。",
+    },
+    boundaryElementId: {
+        type: "integer",
+        description:
+            "基地範圍的 Revit 元素 ID：PropertyLine（地界線）、封閉的模型線／詳圖線，或包含這些線的群組（Group）。與 boundaryLayerName 擇一，效果同上。",
+    },
+};
+
 /** Toposolid 依樓板底面投影範圍進行整地。 */
 export const gradingTools: Tool[] = [
     {
@@ -378,7 +419,7 @@ export const gradingTools: Tool[] = [
     {
         name: "preview_parcel_slope",
         description:
-            "坵塊法平均坡度計算（只算不畫）：依建築技術規則建築設計施工編第261條，劃 ≤25m 正方格坵塊，數等高線與坵塊四邊交點數 n，以 S(%)=n×3.14×h/(8×L)×100 求各格平均坡度，再依第262條分段（>30% 限空地、>55% 不得計入法定空地）。先用本工具確認參數與統計合理，再用 create_parcel_slope_map 繪圖。",
+            "坵塊法平均坡度計算（只算不畫）：依建築技術規則建築設計施工編第261條，劃 ≤25m 正方格坵塊，數等高線與坵塊四邊交點數 n，以 S(%)=n×3.14×h/(8×L)×100 求各格平均坡度，再依第262條分段（>30% 限空地、>55% 不得計入法定空地）。先用本工具確認參數與統計合理，再用 create_parcel_slope_map 繪圖。第二期擴充：jurisdiction 縣市預設檔（verified=false 者附警告）、originOffsetX/YMeters 網格平移、compareHalfShift 半格平移比對、boundaryLayerName／boundaryElementId 基地範圍裁切＋面積加權平均坡度 Σ(S×A)/ΣA；有基地範圍時另算基地內等高線最高低點的概略坡度，<15% 時提示可能適用第262條但書（不自動豁免任何坵塊）。回應含逐格明細（四邊各自交點數、基地內面積、坡度面積、等級、判定）。",
         inputSchema: {
             type: "object",
             properties: {
@@ -404,8 +445,9 @@ export const gradingTools: Tool[] = [
                     type: "number",
                     default: 0,
                     description:
-                        "坵塊網格旋轉角（度，逆時針為正），用於對齊基地主軸減少破格。旋轉中心為網格範圍中心。不同角度會得到不同逐格坡度，須標註於圖面。",
+                        "坵塊網格旋轉角（度，逆時針為正），用於對齊基地主軸減少破格。預設 0°；旋轉中心為網格範圍中心。不同角度會得到不同逐格坡度，計算書必載角度。",
                 },
+                ...parcelExtensionProperties,
                 viewId: {
                     type: "integer",
                     description: "目標平面視圖 ID；未提供時使用作用中視圖",
@@ -417,7 +459,7 @@ export const gradingTools: Tool[] = [
     {
         name: "create_parcel_slope_map",
         description:
-            "產生坵塊圖：執行坵塊法計算並在平面視圖畫出坵塊網格線，每格中央標註編號／交點數 n／平均坡度 S%，受第262條限制者加標示並上色（30~55% 橘、>55% 紅）。注意：工具不自動劃分均質區、不輸出可否開發建築之結論（§262 但書需人工判讀地形）。",
+            "產生坵塊圖：執行坵塊法計算並在平面視圖畫出坵塊網格線，每格中央標註編號／交點數 n／平均坡度 S%，受第262條限制者加標示並上色（30~55% 橘、>55% 紅）。注意：工具不自動劃分均質區、不輸出可否開發建築之結論（§262 但書需人工判讀地形）。支援與 preview_parcel_slope 相同的縣市預設檔、網格平移、半格比對（比對組只回數字不繪圖）、基地範圍裁切與面積加權；另可用 csvPath 輸出計算書 CSV（UTF-8 with BOM），labelEdgeCounts 在圖上標各邊交點數。",
         inputSchema: {
             type: "object",
             properties: {
@@ -440,7 +482,19 @@ export const gradingTools: Tool[] = [
                 rotationDegrees: {
                     type: "number",
                     default: 0,
-                    description: "坵塊網格旋轉角（度）",
+                    description: "坵塊網格旋轉角（度），預設 0°，計算書必載角度",
+                },
+                ...parcelExtensionProperties,
+                labelEdgeCounts: {
+                    type: "boolean",
+                    default: false,
+                    description:
+                        "圖上是否在每格各邊中點標示該邊的交點數（對應第261條第（二）目「記於各方格邊上」）。預設 false。共用邊只標一次。",
+                },
+                csvPath: {
+                    type: "string",
+                    description:
+                        "計算書 CSV 輸出路徑（選填，必須是絕對路徑，例如 C:\\Temp\\parcel.csv；相對路徑會被拒絕）。UTF-8 with BOM；欄位：編號、交點數(n)、坡度(%)、基地內面積(㎡)、坡度面積(S×A)、坡度等級、判定（只陳述§262法律效果，不下可否建築結論）、下邊/右邊/上邊/左邊交點數（方向為網格自身座標軸，旋轉角0°時即圖面上下右左，四邊之和=n）；尾端列載明 jurisdiction 與來源、方格邊長、等高線首曲線間距、旋轉角、原點平移、平均坡度＝Σ坡度面積/Σ面積。寫檔失敗只在回應 csv.error 回報，不回滾已畫的圖。",
                 },
                 textSizeMm: {
                     type: "number",

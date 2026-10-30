@@ -31,6 +31,7 @@
     <Compile Include="..\MCP\Core\Grading\DisturbanceContour.cs" Link="Core\Grading\DisturbanceContour.cs" Condition="Exists('..\MCP\Core\Grading\DisturbanceContour.cs')" />
     <Compile Include="..\MCP\Core\Grading\AnnotationLayoutMath.cs" Link="Core\Grading\AnnotationLayoutMath.cs" Condition="Exists('..\MCP\Core\Grading\AnnotationLayoutMath.cs')" />
     <Compile Include="..\MCP\Core\Grading\ParcelSlopeMath.cs" Link="Core\Grading\ParcelSlopeMath.cs" Condition="Exists('..\MCP\Core\Grading\ParcelSlopeMath.cs')" />
+    <Compile Include="..\MCP\Core\Grading\ParcelAnalysis.cs" Link="Core\Grading\ParcelAnalysis.cs" />
     <Compile Include="..\MCP\Core\Grading\ParcelLimitCheck.cs" Link="Core\Grading\ParcelLimitCheck.cs" Condition="Exists('..\MCP\Core\Grading\ParcelLimitCheck.cs')" />
     <Compile Include="..\MCP\Core\Walkthrough\CameraPathMath.cs" Link="Core\Walkthrough\CameraPathMath.cs" />
     <Compile Include="..\MCP\Core\Walkthrough\PlanProjection.cs" Link="Core\Walkthrough\PlanProjection.cs" />
