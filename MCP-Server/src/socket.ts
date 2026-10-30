@@ -249,6 +249,11 @@ export class RevitSocketClient {
             'open_document',
             'reload_links',
             'export_walkthrough_depth',
+            // 相機管理：Key Plan／總覽／出圖會建立多張視圖並匯出影像，常超過預設逾時
+            'run_camera_keyplan',
+            'list_cameras',
+            'run_camera_overview',
+            'create_camera_sheet',
         ]);
         return longCommands.has(commandName) ? Math.max(defaultTimeout, LONG_COMMAND_TIMEOUT_MS) : defaultTimeout;
     }

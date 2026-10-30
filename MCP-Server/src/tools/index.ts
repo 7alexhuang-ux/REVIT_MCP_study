@@ -30,6 +30,8 @@ import { listSeedsTools } from "./list-seeds-tools.js";
 import { dwgColumnTools } from "./dwg-column-tools.js";
 import { walkthroughTools } from "./walkthrough-tools.js";
 import { webCompareTools } from "./web-compare-tools.js";
+import { cameraTools } from "./camera-tools.js";
+import { cameraManagerTools } from "./camera-manager-tools.js";
 
 /**
  * Profile 對照表：每個 profile 包含哪些模組
@@ -41,6 +43,13 @@ const PROFILE_MODULES: Record<string, Tool[][]> = {
     structural: [documentTools, baseTools, wallTools, visualizationTools, dwgColumnTools, clashTools],
     "fire-safety": [documentTools, baseTools, roomTools, corridorAnalysisTools, visualizationTools, smokeExhaustTools],
 };
+
+// 相機管理工具（get_camera_info + 8 支相機管理工具）對每個 profile 都補上。
+// 用迴圈而不是往五個陣列各貼一次，避免日後新增 profile 時漏掉（漏掉不會報錯，只會安靜地少工具）。
+const CAMERA_TOOLS = [cameraTools, cameraManagerTools];
+for (const profileName of Object.keys(PROFILE_MODULES)) {
+    PROFILE_MODULES[profileName] = [...PROFILE_MODULES[profileName], ...CAMERA_TOOLS];
+}
 
 /**
  * 根據 MCP_PROFILE 環境變數註冊工具
