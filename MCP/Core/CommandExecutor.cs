@@ -564,6 +564,10 @@ namespace RevitMCP.Core
                         result = ExportNamedViews(parameters);
                         break;
 
+                    case "export_view_positions":
+                        result = ExportViewPositions(parameters);
+                        break;
+
                     case "open_document":
                         result = OpenDocument(parameters);
                         break;

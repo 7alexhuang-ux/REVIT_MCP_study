@@ -184,4 +184,19 @@ webCompareTools.push(
             },
         },
     },
+    {
+        name: "export_view_positions",
+        description: "唯讀匯出平面／天花／剖面／立面（詳圖列出但無位置）的位置到 view_positions.json，供 issue-manager 把圖紙視口連到 3D。座標為 glTF 公尺（Y 向上），與 GLB／named_views.json 共用同一原點：需明示 originOffsetMeters 或既有 camera.json。平面輸出 viewRange（切高必填）與 crop；剖面／立面輸出 frame（origin／right／up／寬高深／viewDirection）。預設只輸出放在圖紙上的視圖。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                outputDir: exportProperties.outputDir,
+                viewIds: { type: "array", items: { type: "integer" }, uniqueItems: true, description: "只輸出這些 View ElementId；明指時預設不再以圖紙過濾" },
+                uniqueIds: { type: "array", items: { type: "string" }, uniqueItems: true, description: "只輸出這些視圖 UniqueId" },
+                onlyOnSheets: { type: "boolean", default: true, description: "只輸出放在圖紙上的視圖（有指定 viewIds／uniqueIds 時預設 false）" },
+                originOffsetMeters: { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3, description: "Revit XYZ 公尺原點偏移，必須與同次 GLB 相同；省略讀 camera.json" },
+                cameraPath: { type: "string", description: "camera.json 路徑；省略讀 outputDir/camera.json" },
+            },
+        },
+    },
 );

@@ -11,7 +11,7 @@ test("選項與命名視圖工具註冊，所有文件管理工具可跨 profile
             const tools = registerRevitTools();
             assert.equal(new Set(tools.map(t => t.name)).size, tools.length);
             for (const name of ["open_document", "list_open_documents", "close_document", "list_links", "reload_links"]) assert.ok(tools.some(t => t.name === name), `${profile}:${name}`);
-            for (const name of ["list_design_options", "export_design_options", "export_named_views"]) assert.equal(tools.some(t => t.name === name), ["full", "architect"].includes(profile));
+            for (const name of ["list_design_options", "export_design_options", "export_named_views", "export_view_positions"]) assert.equal(tools.some(t => t.name === name), ["full", "architect"].includes(profile));
         }
         process.env.MCP_PROFILE = "full";
         const tools = registerRevitTools();
@@ -21,6 +21,9 @@ test("選項與命名視圖工具註冊，所有文件管理工具可跨 profile
         assert.equal(properties("close_document").discard.default, false);
         assert.equal(properties("export_named_views").originOffsetMeters.minItems, 3);
         assert.equal(properties("export_named_views").originOffsetMeters.maxItems, 3);
+        assert.equal(properties("export_view_positions").originOffsetMeters.minItems, 3);
+        assert.equal(properties("export_view_positions").onlyOnSheets.default, true);
+        assert.equal(properties("export_view_positions").viewIds.items.type, "integer");
         assert.equal(properties("export_web_compare").designOptions.default, false);
         assert.deepEqual(properties("export_design_options").excludeElements, properties("export_web_compare").excludeElements);
     } finally { if (previous === undefined) delete process.env.MCP_PROFILE; else process.env.MCP_PROFILE = previous; }

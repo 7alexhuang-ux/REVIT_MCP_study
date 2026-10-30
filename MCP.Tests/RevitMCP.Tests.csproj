@@ -8,6 +8,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="NUnit" Version="3.14.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\MCP\Core\Grading\GradingModels.cs" Link="Core\Grading\GradingModels.cs" />
@@ -37,6 +38,7 @@
     <Compile Include="..\MCP\Core\Walkthrough\LinkPartsManifest.cs" Link="Core\Walkthrough\LinkPartsManifest.cs" />
     <Compile Include="..\MCP\Core\Walkthrough\MeshSimplifier.cs" Link="Core\Walkthrough\MeshSimplifier.cs" />
     <Compile Include="..\MCP\Core\Walkthrough\WebCompareMath.cs" Link="Core\Walkthrough\WebCompareMath.cs" />
+    <Compile Include="..\MCP\Core\Walkthrough\ViewPositionsMath.cs" Link="Core\Walkthrough\ViewPositionsMath.cs" />
     <Compile Include="..\MCP\Core\Walkthrough\DesignOptionNoGeometryPolicy.cs" Link="Core\Walkthrough\DesignOptionNoGeometryPolicy.cs" />
   </ItemGroup>
 </Project>
