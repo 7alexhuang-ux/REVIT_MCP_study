@@ -1,0 +1,20 @@
+你在 C:\Project\REVIT_MCP_study（Revit 2024 MCP 外掛，C#，命令在 MCP\Core\Commands\CommandExecutor.*.cs，Node 端在 MCP-Server）。先讀 CLAUDE.md 遵守專案規則。
+
+目標：新增一個 MCP 命令 export_web_compare（名稱可依專案慣例調整），讓使用者在 Revit 打開專案後一次產出 issue-manager S1 驗證所需的 5 個檔，輸出到 outputDir（預設 C:\Project\issue-manager\spikes\s1-glb\input\）：
+1. cpc_consistent.png：指定 3D 視圖（參數 viewName，預設 WEB_COMPARE；若不存在則從目前作用中的 3D 視圖複製一個並命名 WEB_COMPARE）以 DisplayStyle 一致色彩(FlatColors) 用 ImageExportOptions 匯出，寬 1920，只匯出可見部分，PNG。
+2. cpc_realistic.png：同一視圖、同一相機，改寫實(Realistic) 再匯出；匯出後把視圖樣式還原。
+3. cpc.ifc：用 Revit API doc.Export(folder, name, IFCExportOptions)，IFC4 Reference View（失敗則退 IFC2x3 CV2.0 並在回傳 warnings 註明），只匯出該視圖可見元素(FilterViewId)，含 Revit 與 IFC common property sets。注意 IFC 匯出需在 Transaction 外或依 API 要求處理。
+4. cpc.glb：重用既有 MCP\Core\Walkthrough 的 GltfBuilder／RevitGltfExportContext（參考 CommandExecutor.Walkthrough.cs 的 ExportModelGltf），但不依賴走動展示 manifest，bounds 等同 none（沿用視圖範圍），每個節點要帶 ElementId、UniqueId、Category、Family 到 extras（若既有 context 已有就沿用，沒有就補上，不要破壞走動展示功能）。
+5. camera.txt：寫入視圖名稱、相機眼點/目標/上向量（公尺）、是否透視，一行中文描述留給使用者補。
+回傳每個檔的路徑、大小、耗時、warnings。檔案 > 500MB 時在 warnings 提醒。
+
+同時在 MCP-Server 註冊對應工具（含參數說明），補單元測試（若專案有 MCP.Tests 慣例），更新 CHANGELOG.md、相關 skill 或 docs。
+
+建置：用專案既有方式建 Release.R24（參考 .agents/skills/build-revit）。
+重要限制：使用者目前開著 Revit 2024 和模型。不要關閉或結束 Revit 程序，不要部署覆蓋 %APPDATA%\Autodesk\Revit\Addins\2024\RevitMCP\ 裡的 DLL（會被鎖住）。建置成功後停在這裡，把「部署指令」寫在最後回報裡，等使用者關掉 Revit 後再部署。
+完成後 git commit（只 commit 本次相關檔案）。
+
+最後回報（繁體中文，簡短）：新增了什麼命令與參數、建置是否成功、測試結果、commit hash、部署步驟、使用者重開 Revit 後要怎麼呼叫（給一句可以在 Claude Code 對 revit-mcp 說的話）。
+【追加需求，優先】使用者要「每種顯示模式兩兩對照」：
+A. Revit 端：同一 WEB_COMPARE 視圖、同一相機，依序以 Wireframe、HiddenLine、Shading、ShadingWithEdges（著色含邊）、FlatColors（一致色彩）、Realistic 各匯出一張 PNG，存為 revit_<mode>.png（cpc_consistent.png／cpc_realistic.png 照舊另外保留）。
+B. 網頁端：camera.txt 另輸出 camera.json（機器可讀，含公尺座標與 FOV/正交尺度）。之後會由 issue-manager 用 Playwright 以相同相機載入 cpc.glb，在網頁檢視器五種模式各截一張 web_<mode>.png。這部分在 issue-manager 那邊做，你這次只要確保 camera.json 座標系與 GLB（Y-up、公尺、含原點偏移資訊）一致，並在回報中寫清楚對應關係與 Revit 模式↔網頁模式的對照表（consistent↔FlatColors、shaded↔Shading、realistic↔Realistic、wireframe↔Wireframe、hiddenLine↔HiddenLine）。
