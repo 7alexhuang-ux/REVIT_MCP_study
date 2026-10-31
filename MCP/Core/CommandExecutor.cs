@@ -31,22 +31,77 @@ namespace RevitMCP.Core
         }
 
         /// <summary>
-        /// 共用方法：查找樓層
+        /// 共用方法：查找樓層（確定性比對階梯）
+        ///
+        /// 1. 名稱完全相同
+        /// 2. 名稱忽略大小寫相同
+        /// 3. 僅當「恰好一個」樓層名稱包含 levelName 時才採用；多個候選就拋例外並列出候選名單
+        ///
+        /// 舊版用 l.Name == levelName || l.Name.Contains(levelName) || levelName.Contains(l.Name)
+        /// 做雙向模糊比對，會讓 "1F" 命中 "B1F"、"L1" 命中 "L10"，而且先命中者勝
+        /// （取決於 FilteredElementCollector 的順序），屬於單純的 bug，不是刻意的寬鬆比對。
         /// </summary>
-        private Level FindLevel(Document doc, string levelName, bool useFirstIfNotFound = true)
+        /// <param name="useFirstIfNotFound">
+        /// 找不到時是否退回最低樓層。各呼叫端的既有預設值刻意不動（改動的影響面無法在沒有
+        /// 實機 Revit 的情況下驗證），這一輪只負責「讓退路不再靜默」。
+        /// </param>
+        /// <param name="fellBackToLowest">
+        /// 最低樓層退路真的被觸發時為 true。呼叫端必須把這件事回報給使用者，
+        /// 不可讓打錯的樓層名稱看起來像成功。
+        /// </param>
+        private Level FindLevel(Document doc, string levelName, bool useFirstIfNotFound, out bool fellBackToLowest)
         {
-            var level = new FilteredElementCollector(doc)
+            fellBackToLowest = false;
+
+            var levels = new FilteredElementCollector(doc)
                 .OfClass(typeof(Level))
                 .Cast<Level>()
-                .FirstOrDefault(l => l.Name == levelName || l.Name.Contains(levelName) || levelName.Contains(l.Name));
+                .ToList();
+
+            Level level = null;
+
+            if (!string.IsNullOrEmpty(levelName))
+            {
+                // 階梯 1：完全相符
+                level = levels.FirstOrDefault(l => l.Name == levelName);
+
+                // 階梯 2：忽略大小寫完全相符
+                if (level == null)
+                {
+                    level = levels.FirstOrDefault(l => string.Equals(l.Name, levelName, StringComparison.OrdinalIgnoreCase));
+                }
+
+                // 階梯 3：唯一的部分相符才算命中；曖昧就報錯並列出候選
+                if (level == null)
+                {
+                    var partial = levels
+                        .Where(l => l.Name.IndexOf(levelName, StringComparison.OrdinalIgnoreCase) >= 0)
+                        .ToList();
+
+                    if (partial.Count == 1)
+                    {
+                        level = partial[0];
+                    }
+                    else if (partial.Count > 1)
+                    {
+                        throw new Exception(
+                            $"樓層名稱「{levelName}」同時符合多個樓層，無法判定：" +
+                            string.Join("、", partial.Select(l => l.Name).OrderBy(n => n)) +
+                            "。請改用完整樓層名稱。");
+                    }
+                }
+            }
 
             if (level == null && useFirstIfNotFound)
             {
-                level = new FilteredElementCollector(doc)
-                    .OfClass(typeof(Level))
-                    .Cast<Level>()
-                    .OrderBy(l => l.Elevation)
-                    .FirstOrDefault();
+                level = levels.OrderBy(l => l.Elevation).FirstOrDefault();
+
+                if (level != null)
+                {
+                    fellBackToLowest = true;
+                    // Logger 目前沒有 Warning()，以 [WARN] 前綴寫入 Info 以免靜默。
+                    Logger.Info($"[WARN] FindLevel: 你指定的樓層「{levelName}」找不到，已改用最低樓層「{level.Name}」。");
+                }
             }
 
             if (level == null)
@@ -55,6 +110,17 @@ namespace RevitMCP.Core
             }
 
             return level;
+        }
+
+        /// <summary>
+        /// 共用方法：查找樓層（不回報退路的相容多載）。
+        /// 既有呼叫端沿用此簽章，行為與 out 版本完全相同；新寫的程式若會用到
+        /// useFirstIfNotFound 的退路，請改用 out 版本並把退路回報給使用者。
+        /// </summary>
+        private Level FindLevel(Document doc, string levelName, bool useFirstIfNotFound = true)
+        {
+            bool ignored;
+            return FindLevel(doc, levelName, useFirstIfNotFound, out ignored);
         }
 
         /// <summary>
@@ -77,7 +143,27 @@ namespace RevitMCP.Core
                         result = GetProjectInfo();
                         break;
 
-                    
+                    case "set_project_units":
+                        result = SetProjectUnits(parameters);
+                        break;
+
+                    case "get_mep_segments_and_sizes":
+                        result = GetMepSegmentsAndSizes(parameters);
+                        break;
+
+                    case "get_mep_settings":
+                        result = GetMepSettings(parameters);
+                        break;
+
+                    case "get_mep_size_usage":
+                        result = GetMepSizeUsage(parameters);
+                        break;
+
+                    case "curate_mep_sizes":
+                        result = CurateMepSizes(parameters);
+                        break;
+
+
                     case "create_floor":
                         result = CreateFloor(parameters);
                         break;
@@ -89,6 +175,14 @@ namespace RevitMCP.Core
                     case "get_element_info":
                         result = GetElementInfo(parameters);
                         break;
+
+                    case "get_door_window_coordinates":
+                        result = GetDoorWindowCoordinates(parameters);
+                        break;
+
+                    case "get_all_tags":
+                        result = GetAllTags(parameters);
+                        break;
                     
                     case "delete_element":
                         result = DeleteElement(parameters);
@@ -97,7 +191,52 @@ namespace RevitMCP.Core
                     case "modify_element_parameter":
                         result = ModifyElementParameter(parameters);
                         break;
-                    
+
+                    case "load_shared_parameters":
+                        result = LoadSharedParameters(parameters);
+                        break;
+
+                    case "create_green_material":
+                        result = CreateGreenMaterial(parameters);
+                        break;
+
+                    case "get_all_materials":
+                        result = GetAllMaterials(parameters);
+                        break;
+                    case "create_material":
+                        result = CreateCustomMaterial(parameters);
+                        break;
+                    case "create_material_by_domain":
+                        result = CreateMaterialByDomain(parameters);
+                        break;
+                    case "duplicate_element_type":
+                        result = DuplicateElementType(parameters);
+                        break;
+
+                    case "set_green_material_type_parameters":
+                        result = SetGreenMaterialTypeParameters(parameters);
+                        break;
+
+                    case "create_single_material_type":
+                        result = CreateSingleMaterialType(parameters);
+                        break;
+
+                    case "create_multi_layer_type":
+                        result = CreateMultiLayerType(parameters);
+                        break;
+
+                    case "duplicate_type_only":
+                        result = DuplicateTypeOnly(parameters);
+                        break;
+
+                    case "set_material_surface_pattern":
+                        result = SetMaterialSurfacePattern(parameters);
+                        break;
+
+                    case "inject_green_material_into_family":
+                        result = InjectGreenMaterialIntoFamily(parameters);
+                        break;
+
                     case "create_door":
                         result = CreateDoor(parameters);
                         break;
@@ -113,9 +252,29 @@ namespace RevitMCP.Core
                     case "list_seeds":
                         result = ListSeeds(parameters);
                         break;
+
+                    case "list_dimension_types":
+                        result = ListDimensionTypes(parameters);
+                        break;
+
+                    case "list_legend_views":
+                        result = ListLegendViews(parameters);
+                        break;
                     
                     case "get_all_grids":
                         result = GetAllGrids();
+                        break;
+
+                    case "create_grids":
+                        result = CreateGrids(parameters);
+                        break;
+
+                    case "preview_dwg_grids":
+                        result = PreviewDwgGrids(parameters);
+                        break;
+
+                    case "create_grids_from_dwg":
+                        result = CreateGridsFromDwg(parameters);
                         break;
                     
                     case "get_column_types":
@@ -133,13 +292,33 @@ namespace RevitMCP.Core
                     case "place_furniture":
                         result = PlaceFurniture(parameters);
                         break;
-                    
+
+                    case "place_family_instances":
+                        result = PlaceFamilyInstances(parameters);
+                        break;
+
                     case "get_room_info":
                         result = GetRoomInfo(parameters);
                         break;
                     
                     case "get_rooms_by_level":
                         result = GetRoomsByLevel(parameters);
+                        break;
+
+                    case "renumber_rooms_by_level":
+                        result = RenumberRoomsByLevel(parameters);
+                        break;
+
+                    case "renumber_parking_spaces":
+                        result = RenumberParkingSpaces(parameters);
+                        break;
+
+                    case "create_sequence_numbers":
+                        result = CreateSequenceNumbers(parameters);
+                        break;
+
+                    case "create_floor_area_formula":
+                        result = CreateFloorAreaFormula(parameters);
                         break;
 
                     case "get_room_surface_areas":
@@ -156,6 +335,87 @@ namespace RevitMCP.Core
                     
                     case "get_active_view":
                         result = GetActiveView();
+                        break;
+
+                    case "capture_view_image":
+                        result = CaptureViewImage(parameters);
+                        break;
+
+                    case "list_fill_patterns":
+                        result = ListFillPatterns(parameters);
+                        break;
+
+                    case "get_view_range":
+                        result = GetViewRange(parameters);
+                        break;
+
+                    case "get_camera_info":
+                        result = GetCameraInfo(parameters);
+                        break;
+
+                    // 相機管理（Camera Manager）MCP 測試工具，見 Commands/CommandExecutor.CameraManager.cs
+                    case "list_cameras":
+                        result = ListCameras(parameters);
+                        break;
+
+                    case "run_camera_keyplan":
+                        result = RunCameraKeyPlan(parameters);
+                        break;
+
+                    case "set_camera_pose":
+                        result = SetCameraPose(parameters);
+                        break;
+
+                    case "copy_camera_to_level":
+                        result = CopyCameraToLevel(parameters);
+                        break;
+
+                    case "get_view_extents":
+                        result = GetViewExtents(parameters);
+                        break;
+
+                    case "run_camera_overview":
+                        result = RunCameraOverview(parameters);
+                        break;
+
+                    case "create_camera_sheet":
+                        result = CreateCameraSheet(parameters);
+                        break;
+
+                    case "camera_version":
+                        result = CameraVersion(parameters);
+                        break;
+
+                    case "get_material_graphics":
+                        result = GetMaterialGraphics(parameters);
+                        break;
+
+                    case "set_material_graphics":
+                        result = SetMaterialGraphics(parameters);
+                        break;
+
+                    case "relink_material_images":
+                        result = RelinkMaterialImages(parameters);
+                        break;
+
+                    case "set_view_range":
+                        result = SetViewRange(parameters);
+                        break;
+
+                    case "get_link_display_settings":
+                        result = GetLinkDisplaySettings(parameters);
+                        break;
+
+                    case "set_link_display_settings":
+                        result = SetLinkDisplaySettings(parameters);
+                        break;
+
+                    case "save_document":
+                        result = SaveDocument(parameters);
+                        break;
+
+                    case "get_view_graphics_diagnostics":
+                        result = GetViewGraphicsDiagnostics(parameters);
                         break;
                     
                     case "rename_view":
@@ -230,13 +490,32 @@ namespace RevitMCP.Core
                         break;
                     
                     case "unjoin_wall_joins":
-                        result = UnjoinWallJoins(parameters);
+                        // 相容 shim（#138 C3）：工具已自 registry 移除，保留命令名給舊版 MCP-Server 與既有腳本
+                        result = UnjoinWallJoinsCompat(parameters);
                         break;
                     
                     case "rejoin_wall_joins":
                         result = RejoinWallJoins(parameters);
                         break;
-                    
+
+                    case "join_wall_tops":
+                        result = JoinWallTops(parameters);
+                        break;
+
+                    case "create_wall_sweeps":
+                        result = CreateWallSweeps(parameters);
+                        break;
+
+                    // === 解除幾何接合（劉可 PR#30 bundle②）===
+                    case "unjoin_column_joins":
+                        // 相容 shim（#138 C3）：同上
+                        result = UnjoinColumnJoinsCompat(parameters);
+                        break;
+
+                    case "unjoin_element_joins":
+                        result = UnjoinElementJoins(parameters);
+                        break;
+
                     case "check_exterior_wall_openings":
                         result = CheckExteriorWallOpenings(parameters);
                         break;
@@ -245,12 +524,32 @@ namespace RevitMCP.Core
                         result = GetRoomDaylightInfo(parameters);
                         break;
 
+                    case "sync_room_ceiling_finish_from_ceilings":
+                        result = SyncRoomCeilingFinishFromCeilings(parameters);
+                        break;
+
+                    case "remap_room_finish_codes":
+                        result = RemapRoomFinishCodes(parameters);
+                        break;
+
                     case "get_view_templates":
                         result = GetViewTemplates(parameters);
                         break;
 
+                    case "set_view_template_controls":
+                        result = SetViewTemplateControls(parameters);
+                        break;
+
                     case "create_view_schedule":
                         result = CreateViewSchedule(parameters);
+                        break;
+
+                    case "list_schedules":
+                        result = ListSchedules(parameters);
+                        break;
+
+                    case "read_schedule":
+                        result = ReadSchedule(parameters);
                         break;
 
                     case "get_selected_elements":
@@ -263,6 +562,14 @@ namespace RevitMCP.Core
 
                     case "add_pipe_cap":
                         result = AddPipeCap(parameters);
+                        break;
+
+                    case "export_families":
+                        result = ExportFamilies(parameters);
+                        break;
+
+                    case "list_categories":
+                        result = ListCategories(parameters);
                         break;
 
                     // === 帷幕牆模組 (PR#11) ===
@@ -283,6 +590,22 @@ namespace RevitMCP.Core
                         break;
                     case "create_facade_from_analysis":
                         result = CreateFacadeFromAnalysis(parameters);
+                        break;
+
+                    // === 牆面平行剖面 ===
+                    case "create_parallel_section_view":
+                        result = CreateParallelSectionView(parameters);
+                        break;
+                    case "batch_create_wall_sections":
+                        result = BatchCreateWallSections(parameters);
+                        break;
+
+                    // === 偵煙探測器設置檢討 ===
+                    case "analyze_smoke_detectors":
+                        result = AnalyzeSmokeDetectors(parameters);
+                        break;
+                    case "visualize_detector_results":
+                        result = VisualizeDetectorResults(parameters);
                         break;
 
                     // === 排煙窗模組 (PR#12) ===
@@ -345,6 +668,71 @@ namespace RevitMCP.Core
                         result = ExportSheetsPdf(parameters);
                         break;
 
+                    // === 圖紙/視埠管理（劉可 PR#30 bundle①）===
+                    case "get_sheet_viewport_details":
+                        result = GetSheetViewportDetails(parameters);
+                        break;
+                    case "arrange_viewports_on_sheet":
+                        result = ArrangeViewportsOnSheet(parameters);
+                        break;
+                    case "scale_drafting_view_width":
+                        result = ScaleDraftingViewWidth(parameters);
+                        break;
+                    case "scale_drafting_view_height":
+                        result = ScaleDraftingViewHeight(parameters);
+                        break;
+                    case "create_floor_plans_from_template":
+                        result = CreateFloorPlansFromTemplate(parameters);
+                        break;
+                    case "batch_apply_view_template":
+                        result = BatchApplyViewTemplate(parameters);
+                        break;
+                    case "position_viewports_on_sheet":
+                        result = PositionViewportsOnSheet(parameters);
+                        break;
+                    case "debug_viewport_geometry":
+                        result = DebugViewportGeometry(parameters);
+                        break;
+                    case "align_titleblocks_on_sheets":
+                        result = AlignTitleblocksOnSheets(parameters);
+                        break;
+                    case "move_viewport_titles":
+                        result = MoveViewportTitles(parameters);
+                        break;
+
+                    // === 跨檔案圖紙複製（劉可 PR#30 bundle③）===
+                    case "read_source_file_sheets":
+                        result = ReadSourceFileSheets(parameters);
+                        break;
+                    case "copy_sheets_from_file":
+                        result = CopySheetsFromFile(parameters);
+                        break;
+                    case "sync_sheet_parameters_from_source":
+                        result = SyncSheetParametersFromSource(parameters);
+                        break;
+
+                    // === Excel/Legend 批次（劉可 PR#30 bundle④）===
+                    case "create_legends":
+                        result = CreateLegends(parameters);
+                        break;
+                    case "read_excel_tables":
+                        result = ReadExcelTables(parameters);
+                        break;
+                    case "import_excel_to_drafting_views":
+                        result = ImportExcelToDraftingViews(parameters);
+                        break;
+
+                    // === 材質批次修改（劉可 PR#30 bundle④）===
+                    case "get_types_by_category":
+                        result = GetTypesByCategory(parameters);
+                        break;
+                    case "batch_set_material":
+                        result = BatchSetMaterial(parameters);
+                        break;
+                    case "assign_existing_material":
+                        result = AssignExistingMaterial(parameters);
+                        break;
+
                     // === 詳圖元件模組 ===
                     case "get_detail_components":
                         result = GetDetailComponents(parameters);
@@ -359,12 +747,70 @@ namespace RevitMCP.Core
                         result = ListFamilySymbols(parameters);
                         break;
 
+                    case "create_opening_types":
+                        result = CreateOpeningTypes(parameters);
+                        break;
+
+                    // === 詳圖項目複製 / 去重（劉可 PR#30 bundle②）===
+                    case "copy_detail_items_to_views":
+                        result = CopyDetailItemsToViews(parameters);
+                        break;
+                    case "dedup_detail_elements_in_view":
+                        result = DedupDetailElementsInView(parameters);
+                        break;
+
+                    // === 房間高度 / 視圖細部（劉可 PR#30 bundle⑥）===
+                    case "batch_set_room_height":
+                        result = BatchSetRoomHeight(parameters);
+                        break;
+                    case "set_scope_box_for_views":
+                        result = SetScopeBoxForViews(parameters);
+                        break;
+                    case "align_view_cropbox_to_element":
+                        result = AlignViewCropBoxToElement(parameters);
+                        break;
+                    case "set_3d_section_box":
+                        result = Set3DSectionBox(parameters);
+                        break;
+                    case "set_section_box":
+                        result = SetSectionBox(parameters);
+                        break;
+                    case "shift_view_cropbox":
+                        result = ShiftViewCropBox(parameters);
+                        break;
+                    case "move_text_notes_in_views":
+                        result = MoveTextNotesInViews(parameters);
+                        break;
+                    case "hide_elements":
+                        result = HideElements(parameters);
+                        break;
+                    case "unhide_elements":
+                        result = UnhideElements(parameters);
+                        break;
+                    case "set_category_visibility":
+                        result = SetCategoryVisibility(parameters);
+                        break;
+
+                    // === 視圖篩選器（規則式表現法控制）===
+                    case "get_filterable_parameters":
+                        result = GetFilterableParameters(parameters);
+                        break;
+                    case "create_view_filter":
+                        result = CreateViewFilter(parameters);
+                        break;
+                    case "remove_view_filter":
+                        result = RemoveViewFilter(parameters);
+                        break;
+
                     // === 尺寸標註模組 ===
                     case "create_dimension_by_ray":
                         result = CreateDimensionByRay(parameters);
                         break;
                     case "create_dimension_by_bounding_box":
                         result = CreateDimensionByBoundingBox(parameters);
+                        break;
+                    case "auto_dimension_walls":
+                        result = AutoDimensionWalls(parameters);
                         break;
 
                     // === 從屬視圖模組 ===
@@ -405,6 +851,37 @@ namespace RevitMCP.Core
                         result = DwgColumnExecutor.CreateColumnsFromDwg(_uiApp.ActiveUIDocument.Document, parameters);
                         break;
 
+                    // === CAD 圖塊點位放置模組（Block/INSERT → FamilyInstance，issue #100/#113）===
+                    case "get_dwg_block_instances":
+                        result = CadBlockPlacementExecutor.GetDwgBlockInstances(_uiApp.ActiveUIDocument.Document, parameters);
+                        break;
+                    case "preview_family_instances_from_dwg_blocks":
+                        result = CadBlockPlacementExecutor.PreviewFamilyInstancesFromDwgBlocks(_uiApp.ActiveUIDocument.Document, parameters);
+                        break;
+                    case "create_family_instances_from_dwg_blocks":
+                        result = CadBlockPlacementExecutor.CreateFamilyInstancesFromDwgBlocks(_uiApp.ActiveUIDocument.Document, parameters);
+                        break;
+
+                    // === CAD 連結模組 ===
+                    case "link_cad_to_view":
+                        result = CadLinkExecutor.LinkCadToView(_uiApp.ActiveUIDocument.Document, parameters);
+                        break;
+
+                    case "link_cads_by_floor":
+                        result = CadLinkExecutor.LinkCadsByFloor(_uiApp.ActiveUIDocument.Document, parameters);
+                        break;
+
+                    // === DWG 圖層批次建樑模組 ===
+                    case "get_dwg_beam_layers":
+                        result = DwgBeamExecutor.GetDwgBeamLayers(_uiApp.ActiveUIDocument.Document);
+                        break;
+                    case "preview_dwg_beams":
+                        result = DwgBeamExecutor.PreviewDwgBeams(_uiApp.ActiveUIDocument.Document, parameters);
+                        break;
+                    case "create_beams_from_dwg":
+                        result = DwgBeamExecutor.CreateBeamsFromDwg(_uiApp.ActiveUIDocument.Document, parameters);
+                        break;
+
                     case "get_linked_models":
                         result = GetLinkedModels();
                         break;
@@ -416,6 +893,9 @@ namespace RevitMCP.Core
                         break;
                     case "detect_clashes":
                         result = DetectClashes(parameters);
+                        break;
+                    case "scan_opening_candidates":
+                        result = ScanOpeningCandidates(parameters);
                         break;
                     case "colorize_clashes":
                         result = ColorizeClashes(parameters);
@@ -604,6 +1084,110 @@ namespace RevitMCP.Core
                         result = CreateCameraStations(parameters);
                         break;
 
+                    // === RC 穿梁套管自動檢核（PR #68, 作者 鈺傑 SEven777-a）===
+                    case "analyze_beam_penetration":
+                        result = AnalyzeBeamPenetration(parameters);
+                        break;
+                    case "scan_penetrated_beams_in_view":
+                        result = ScanPenetratedBeamsInView(parameters);
+                        break;
+                    case "clear_previous_annotations":
+                        result = ClearPreviousAnnotations(parameters);
+                        break;
+
+                    // === 結構構架自動端點對齊/切齊 ===
+                    case "align_structural_framing":
+                        result = AlignStructuralFraming(parameters);
+                        break;
+
+                    // === 施工架/隔間/門窗/RC填充 算量 + 圖案轉換 (PR #79/#81/#82, 作者 Jacky820507) ===
+                    case "calculate_exterior_wall_scaffold_perimeter":
+                        result = CalculateExteriorWallScaffoldPerimeter(parameters);
+                        break;
+                    case "calculate_room_scaffold_perimeters":
+                        result = CalculateRoomScaffoldPerimeters(parameters);
+                        break;
+                    case "calculate_selected_detail_line_perimeter":
+                        result = CalculateSelectedDetailLinePerimeter(parameters);
+                        break;
+                    case "analyze_tall_partition_rooms":
+                        result = AnalyzeTallPartitionRooms(parameters);
+                        break;
+                    case "duplicate_views_with_detailing":
+                        result = DuplicateViewsWithDetailing(parameters);
+                        break;
+                    case "create_room_filled_regions":
+                        result = CreateRoomFilledRegions(parameters);
+                        break;
+                    case "get_room_door_counts":
+                        result = GetRoomDoorCounts(parameters);
+                        break;
+                    case "get_room_window_counts":
+                        result = GetRoomWindowCounts(parameters);
+                        break;
+                    case "get_space_centroid":
+                        result = GetSpaceCentroid(parameters);
+                        break;
+                    case "auto_convert_rotated_viewport_patterns":
+                        result = AutoConvertRotatedViewportPatterns();
+                        break;
+                    case "batch_create_rc_filled_region":
+                        result = BatchCreateRCFilledRegions(parameters);
+                        break;
+                    case "convert_drafting_to_model_pattern":
+                        result = ConvertDraftingToModelPattern();
+                        break;
+                    case "create_rc_filled_region":
+                        result = CreateRCFilledRegion(parameters);
+                        break;
+                    case "sync_ifc_structural_to_native":
+                        result = SyncIfcStructuralToNative(parameters);
+                        break;
+
+                    // === 帷幕立面 (PR #85, 作者 林孟毅 916kevin-gif) ===
+                    case "create_curtain_wall_elevations":
+                        result = CreateCurtainWallElevations(parameters);
+                        break;
+                    case "diagnose_curtain_wall_elevation_direction":
+                        result = DiagnoseCurtainWallElevationDirection(parameters);
+                        break;
+                    case "diagnose_curtain_wall_elevation_dimensions":
+                        result = DiagnoseCurtainWallElevationDimensions(parameters);
+                        break;
+                    case "diagnose_curtain_wall_elevation_directions":
+                        result = DiagnoseCurtainWallElevationDirections(parameters);
+                        break;
+
+                    // === MEP 風管系統 (Stage 1) ===
+                    case "create_duct_system":
+                        result = CreateDuctSystem(parameters);
+                        break;
+
+                    case "get_model_snapshot":
+                        result = GetModelSnapshot(parameters);
+                        break;
+                    case "get_model_warnings":
+                        result = GetModelWarnings(parameters);
+                        break;
+                    case "get_recent_changes":
+                        result = GetRecentChanges(parameters);
+                        break;
+                    case "export_view_image":
+                        result = ExportViewImage(parameters);
+                        break;
+                    case "batch_modify_elements":
+                        result = BatchModifyElements(parameters);
+                        break;
+                    case "check_beam_clear_height":
+                        result = CheckBeamClearHeight(parameters);
+                        break;
+                    case "check_mep_spacing":
+                        result = CheckMepSpacing(parameters);
+                        break;
+                    case "clear_review_markers":
+                        result = ClearReviewMarkers(parameters);
+                        break;
+
                     default:
                         throw new NotImplementedException($"未實作的命令: {request.CommandName}");
                 }
@@ -631,21 +1215,98 @@ namespace RevitMCP.Core
         #region 命令實作
 
         /// <summary>
-        /// 建立牆
+        /// 建立牆（issue #144）
+        ///
+        /// 舊版有兩個各自獨立的缺陷：
+        /// (1) 樓層用未排序的 FirstOrDefault() 隨便抓一個，連「最低樓層」都不是；
+        /// (2) TS schema 宣告的 wallType 從頭到尾沒有被讀取——Wall.Create(doc, line, level.Id, false)
+        ///     用的是文件預設牆類型，使用者指定的類型被靜默忽略，且回傳值裡看不出來。
+        ///
+        /// 現在：可明確指定 levelId/levelName 與 wallTypeId/wallType（同時給 id 與名稱時必須一致）；
+        /// 未指定樓層時改用目前平面視圖的樓層，沒有樓層就報錯而不是亂抓；限定基本牆（拒絕帷幕／堆疊牆）；
+        /// 基準線放在選定樓層標高、基準偏移為零、定位線為牆中心線；並一律回報實際採用的樓層與牆類型。
+        ///
+        /// 來源 fork：raychiu/fix/create-wall-level-type（@ray92chiu-png）
         /// </summary>
         private object CreateWall(JObject parameters)
         {
             Document doc = _uiApp.ActiveUIDocument.Document;
 
-            double startX = parameters["startX"]?.Value<double>() ?? 0;
-            double startY = parameters["startY"]?.Value<double>() ?? 0;
-            double endX = parameters["endX"]?.Value<double>() ?? 0;
-            double endY = parameters["endY"]?.Value<double>() ?? 0;
+            foreach (string key in new[] { "startX", "startY", "endX", "endY" })
+                if (parameters[key] == null || parameters[key].Type == JTokenType.Null)
+                    throw new ArgumentException($"缺少牆座標: {key}");
+
+            double startX = parameters["startX"].Value<double>();
+            double startY = parameters["startY"].Value<double>();
+            double endX = parameters["endX"].Value<double>();
+            double endY = parameters["endY"].Value<double>();
             double height = parameters["height"]?.Value<double>() ?? 3000;
 
-            // 轉換為英尺 (Revit 內部單位)
-            XYZ start = new XYZ(startX / 304.8, startY / 304.8, 0);
-            XYZ end = new XYZ(endX / 304.8, endY / 304.8, 0);
+            if (new[] { startX, startY, endX, endY, height }.Any(v => double.IsNaN(v) || double.IsInfinity(v)) || height <= 0)
+                throw new ArgumentException("牆座標必須為有限數值，高度必須大於零。");
+
+            // 絕不靜默退回「專案的第一個樓層」。
+            IdType? levelId = parameters["levelId"]?.Value<IdType>();
+            string levelName = parameters["levelName"]?.Value<string>();
+            string levelSource;
+            Level level;
+            if (levelId.HasValue)
+            {
+                level = doc.GetElement(new ElementId(levelId.Value)) as Level;
+                if (level == null || (levelName != null && level.Name != levelName))
+                    throw new ArgumentException("指定的樓層 ID 無效或與樓層名稱不一致。");
+                levelSource = "levelId";
+            }
+            else if (levelName != null)
+            {
+                var levelMatches = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
+                    .Where(l => l.Name == levelName).ToList();
+                if (levelMatches.Count != 1)
+                    throw new ArgumentException($"樓層名稱必須唯一且存在: {levelName}");
+                level = levelMatches[0];
+                levelSource = "levelName";
+            }
+            else
+            {
+                level = (doc.ActiveView as ViewPlan)?.GenLevel;
+                if (level == null)
+                    throw new ArgumentException("目前視圖沒有基準樓層；請指定 levelId 或 levelName。");
+                levelSource = "activeViewGenLevel";
+            }
+
+            IdType? wallTypeId = parameters["wallTypeId"]?.Value<IdType>();
+            string wallTypeName = parameters["wallType"]?.Value<string>();
+            string wallTypeSource;
+            WallType wallType;
+            if (wallTypeId.HasValue)
+            {
+                wallType = doc.GetElement(new ElementId(wallTypeId.Value)) as WallType;
+                if (wallType == null || (wallTypeName != null && wallType.Name != wallTypeName))
+                    throw new ArgumentException("指定的牆類型 ID 無效或與類型名稱不一致。");
+                wallTypeSource = "wallTypeId";
+            }
+            else if (wallTypeName != null)
+            {
+                var typeMatches = new FilteredElementCollector(doc).OfClass(typeof(WallType)).Cast<WallType>()
+                    .Where(t => t.Name == wallTypeName && t.Kind == WallKind.Basic).ToList();
+                if (typeMatches.Count != 1)
+                    throw new ArgumentException($"基本牆類型名稱必須唯一且存在: {wallTypeName}");
+                wallType = typeMatches[0];
+                wallTypeSource = "wallType";
+            }
+            else
+            {
+                wallType = doc.GetElement(doc.GetDefaultElementTypeId(ElementTypeGroup.WallType)) as WallType;
+                wallTypeSource = "projectDefault";
+            }
+            if (wallType == null || wallType.Kind != WallKind.Basic)
+                throw new ArgumentException("請指定基本牆類型；此工具不建立帷幕牆或堆疊牆。");
+
+            // 模型 XY 為公釐；基準線放在選定樓層的標高，基準偏移為零。
+            XYZ start = new XYZ(startX / 304.8, startY / 304.8, level.Elevation);
+            XYZ end = new XYZ(endX / 304.8, endY / 304.8, level.Elevation);
+            if (start.DistanceTo(end) <= _uiApp.Application.ShortCurveTolerance)
+                throw new ArgumentException("牆長度小於 Revit 最短曲線容許值。");
 
             using (Transaction trans = new Transaction(doc, "建立牆"))
             {
@@ -654,33 +1315,27 @@ namespace RevitMCP.Core
                 // 建立線
                 Line line = Line.CreateBound(start, end);
 
-                // 取得預設樓層
-                Level level = new FilteredElementCollector(doc)
-                    .OfClass(typeof(Level))
-                    .Cast<Level>()
-                    .FirstOrDefault();
+                Wall wall = Wall.Create(doc, line, wallType.Id, level.Id, height / 304.8, 0, false, false);
 
-                if (level == null)
-                {
-                    throw new Exception("找不到樓層");
-                }
+                // 定位線 = 牆中心線
+                Parameter keyRef = wall.get_Parameter(BuiltInParameter.WALL_KEY_REF_PARAM);
+                if (keyRef != null && !keyRef.IsReadOnly) keyRef.Set(0);
 
-                // 建立牆
-                Wall wall = Wall.Create(doc, line, level.Id, false);
-                
-                // 設定高度
-                Parameter heightParam = wall.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM);
-                if (heightParam != null && !heightParam.IsReadOnly)
-                {
-                    heightParam.Set(height / 304.8);
-                }
-
-                trans.Commit();
+                if (trans.Commit() != TransactionStatus.Committed)
+                    throw new InvalidOperationException("建立牆未提交；請檢查 Revit 錯誤訊息，勿自動重試。");
 
                 return new
                 {
                     ElementId = wall.Id.GetIdValue(),
-                    Message = $"成功建立牆，ID: {wall.Id.GetIdValue()}"
+                    LevelId = level.Id.GetIdValue(),
+                    LevelName = level.Name,
+                    LevelSource = levelSource,
+                    WallTypeId = wallType.Id.GetIdValue(),
+                    WallTypeName = wallType.Name,
+                    WallTypeSource = wallTypeSource,
+                    BaseElevationMm = level.Elevation * 304.8,
+                    HeightMm = height,
+                    Message = $"成功建立牆，ID: {wall.Id.GetIdValue()}（樓層 {level.Name}／類型 {wallType.Name}）"
                 };
             }
         }
@@ -801,14 +1456,20 @@ namespace RevitMCP.Core
 
         /// <summary>
         /// 建立樓板
+        ///
+        /// 修正（與 issue #144 同一類缺陷）：TS schema 宣告的 floorType 原本沒有被讀取，
+        /// 型別一律用 FloorType…FirstOrDefault() 隨便抓；樓層找不到時 FindLevel 的最低樓層
+        /// 退路也是靜默的。現在：指定了就必須命中（找不到或重名都報錯），
+        /// 沒指定則用專案預設並把實際採用者與退路一併回報。
         /// </summary>
         private object CreateFloor(JObject parameters)
         {
             Document doc = _uiApp.ActiveUIDocument.Document;
-            
+
             var pointsArray = parameters["points"] as JArray;
             string levelName = parameters["levelName"]?.Value<string>() ?? "Level 1";
-            
+            string floorTypeName = parameters["floorType"]?.Value<string>();
+
             if (pointsArray == null || pointsArray.Count < 3)
             {
                 throw new Exception("需要至少 3 個點來建立樓板");
@@ -818,8 +1479,9 @@ namespace RevitMCP.Core
             {
                 trans.Start();
 
-                // 取得樓層
-                Level level = FindLevel(doc, levelName, true);
+                // 取得樓層（退路觸發時必須回報，不可讓打錯的樓層名稱看起來像成功）
+                bool levelFellBack;
+                Level level = FindLevel(doc, levelName, true, out levelFellBack);
 
                 // 建立邊界曲線
                 var points = pointsArray.Select(p => new XYZ(
@@ -828,15 +1490,37 @@ namespace RevitMCP.Core
                     0
                 )).ToList();
 
-                // 取得預設樓板類型
-                FloorType floorType = new FilteredElementCollector(doc)
-                    .OfClass(typeof(FloorType))
-                    .Cast<FloorType>()
-                    .FirstOrDefault();
+                // 取得樓板類型：指定了就必須命中，沒指定才用專案預設
+                FloorType floorType;
+                string floorTypeSource;
+                if (!string.IsNullOrEmpty(floorTypeName))
+                {
+                    var typeMatches = new FilteredElementCollector(doc)
+                        .OfClass(typeof(FloorType))
+                        .Cast<FloorType>()
+                        .Where(ft => ft.Name == floorTypeName || (ft.FamilyName + ": " + ft.Name) == floorTypeName)
+                        .ToList();
+
+                    if (typeMatches.Count == 0)
+                        throw new Exception($"找不到樓板類型: {floorTypeName}。請用 get_types_by_category 確認可用類型名稱。");
+                    if (typeMatches.Count > 1)
+                        throw new Exception(
+                            $"樓板類型名稱「{floorTypeName}」同時符合多個類型，無法判定：" +
+                            string.Join("、", typeMatches.Select(ft => ft.FamilyName + ": " + ft.Name).OrderBy(n => n)) +
+                            "。請改用「族群名: 類型名」完整名稱。");
+
+                    floorType = typeMatches[0];
+                    floorTypeSource = "floorType";
+                }
+                else
+                {
+                    floorType = doc.GetElement(doc.GetDefaultElementTypeId(ElementTypeGroup.FloorType)) as FloorType;
+                    floorTypeSource = "projectDefault";
+                }
 
                 if (floorType == null)
                 {
-                    throw new Exception("找不到樓板類型");
+                    throw new Exception("專案沒有預設樓板類型；請用 floorType 明確指定。");
                 }
 
                 // 建立 CurveLoop (Revit 2022+ 使用)
@@ -857,7 +1541,15 @@ namespace RevitMCP.Core
                 {
                     ElementId = floor.Id.GetIdValue(),
                     Level = level.Name,
-                    Message = $"成功建立樓板，ID: {floor.Id.GetIdValue()}"
+                    LevelId = level.Id.GetIdValue(),
+                    LevelFellBackToLowest = levelFellBack,
+                    FloorType = floorType.Name,
+                    FloorTypeId = floorType.Id.GetIdValue(),
+                    FloorTypeSource = floorTypeSource,
+                    Warning = levelFellBack
+                        ? $"你指定的樓層「{levelName}」找不到，已改用最低樓層「{level.Name}」。"
+                        : null,
+                    Message = $"成功建立樓板，ID: {floor.Id.GetIdValue()}（樓層 {level.Name}／類型 {floorType.Name}）"
                 };
             }
         }
@@ -948,7 +1640,10 @@ namespace RevitMCP.Core
 
         /// <summary>
         /// 建立門。支援 doorType 篩選與 sourceElementId 來源複製（poisonsam fork 擴寫）
-        /// 4 級類型 fallback：doorType → sourceElement type → 任意第一個
+        /// 類型選取順序：doorType（指定了就必須命中，否則報錯）→ sourceElement type
+        ///   → 專案預設門類型 → 依名稱排序的第一個（並寫 WARN log）
+        /// 修正：舊版 doorType 命中失敗會靜默落到未排序的 FirstOrDefault()，
+        ///       使用者指定的類型被換掉卻回報成功；回傳值新增 DoorTypeSource 揭露實際來源。
         /// 來源 fork: poisonsam/main:MCP/Core/Commands/CommandExecutor.Architecture.cs:217-318
         /// </summary>
         private object CreateDoor(JObject parameters)
@@ -979,30 +1674,63 @@ namespace RevitMCP.Core
                     sourceElement = doc.GetElement(new ElementId(sourceElementId.Value));
                 }
 
-                // 2. 優先使用指定類型名稱
+                string doorTypeSource = null;
+
+                // 2. 優先使用指定類型名稱。指定了卻找不到／重名就報錯，不再靜默換成別的類型
                 if (!string.IsNullOrEmpty(doorType))
                 {
-                    doorSymbol = new FilteredElementCollector(doc)
+                    var typeMatches = new FilteredElementCollector(doc)
                         .OfClass(typeof(FamilySymbol))
                         .OfCategory(BuiltInCategory.OST_Doors)
                         .Cast<FamilySymbol>()
-                        .FirstOrDefault(fs => fs.Name == doorType || (fs.FamilyName + ": " + fs.Name) == doorType);
+                        .Where(fs => fs.Name == doorType || (fs.FamilyName + ": " + fs.Name) == doorType)
+                        .ToList();
+
+                    if (typeMatches.Count == 0)
+                        throw new Exception($"找不到門類型: {doorType}。請用 list_family_symbols 確認可用名稱（可用「族群名: 類型名」完整名稱）。");
+                    if (typeMatches.Count > 1)
+                        throw new Exception(
+                            $"門類型名稱「{doorType}」同時符合多個類型，無法判定：" +
+                            string.Join("、", typeMatches.Select(fs => fs.FamilyName + ": " + fs.Name).OrderBy(n => n)) +
+                            "。請改用「族群名: 類型名」完整名稱。");
+
+                    doorSymbol = typeMatches[0];
+                    doorTypeSource = "doorType";
                 }
 
-                // 3. 如果沒指定名稱或找不到，則使用來源元素的類型
+                // 3. 沒指定名稱時，沿用來源元素的類型
                 if (doorSymbol == null && sourceElement != null)
                 {
                     doorSymbol = doc.GetElement(sourceElement.GetTypeId()) as FamilySymbol;
+                    if (doorSymbol != null) doorTypeSource = "sourceElement";
                 }
 
-                // 4. 最後回退到預設（第一個）
+                // 4. 回退到專案預設門類型（不是未排序的任意第一個）
+                if (doorSymbol == null)
+                {
+                    try
+                    {
+                        doorSymbol = doc.GetElement(
+                            doc.GetDefaultFamilyTypeId(new ElementId((IdType)(int)BuiltInCategory.OST_Doors))) as FamilySymbol;
+                    }
+                    catch { doorSymbol = null; }
+                    if (doorSymbol != null) doorTypeSource = "projectDefault";
+                }
+
+                // 5. 連專案預設都沒有，才依名稱排序取第一個——至少是確定性的，而且會留下 WARN
                 if (doorSymbol == null)
                 {
                     doorSymbol = new FilteredElementCollector(doc)
                         .OfClass(typeof(FamilySymbol))
                         .OfCategory(BuiltInCategory.OST_Doors)
                         .Cast<FamilySymbol>()
+                        .OrderBy(fs => fs.FamilyName).ThenBy(fs => fs.Name)
                         .FirstOrDefault();
+                    if (doorSymbol != null)
+                    {
+                        doorTypeSource = "firstByName";
+                        Logger.Info($"[WARN] CreateDoor: 未指定 doorType 且專案無預設門類型，已依名稱排序採用「{doorSymbol.FamilyName}: {doorSymbol.Name}」。");
+                    }
                 }
 
                 if (doorSymbol == null)
@@ -1042,6 +1770,8 @@ namespace RevitMCP.Core
                 {
                     ElementId = door.Id.GetIdValue(),
                     DoorType = doorSymbol.Name,
+                    DoorFamilyName = doorSymbol.FamilyName,
+                    DoorTypeSource = doorTypeSource,
                     WallId = wallId,
                     SourceElementId = sourceElement?.Id.GetIdValue(),
                     Message = $"成功建立門，ID: {door.Id.GetIdValue()}"
@@ -1051,7 +1781,10 @@ namespace RevitMCP.Core
 
         /// <summary>
         /// 建立窗。支援 windowType 篩選與 sourceElementId 來源複製（poisonsam fork 擴寫）
-        /// 4 級類型 fallback：windowType → sourceElement type → 任意第一個
+        /// 類型選取順序：windowType（指定了就必須命中，否則報錯）→ sourceElement type
+        ///   → 專案預設窗類型 → 依名稱排序的第一個（並寫 WARN log）
+        /// 修正：舊版 windowType 命中失敗會靜默落到未排序的 FirstOrDefault()，
+        ///       使用者指定的類型被換掉卻回報成功；回傳值新增 WindowTypeSource 揭露實際來源。
         /// 來源 fork: poisonsam/main:MCP/Core/Commands/CommandExecutor.Architecture.cs:320-420
         /// </summary>
         private object CreateWindow(JObject parameters)
@@ -1082,30 +1815,63 @@ namespace RevitMCP.Core
                     sourceElement = doc.GetElement(new ElementId(sourceElementId.Value));
                 }
 
-                // 2. 優先使用指定類型名稱
+                string windowTypeSource = null;
+
+                // 2. 優先使用指定類型名稱。指定了卻找不到／重名就報錯，不再靜默換成別的類型
                 if (!string.IsNullOrEmpty(windowType))
                 {
-                    windowSymbol = new FilteredElementCollector(doc)
+                    var typeMatches = new FilteredElementCollector(doc)
                         .OfClass(typeof(FamilySymbol))
                         .OfCategory(BuiltInCategory.OST_Windows)
                         .Cast<FamilySymbol>()
-                        .FirstOrDefault(fs => fs.Name == windowType || (fs.FamilyName + ": " + fs.Name) == windowType);
+                        .Where(fs => fs.Name == windowType || (fs.FamilyName + ": " + fs.Name) == windowType)
+                        .ToList();
+
+                    if (typeMatches.Count == 0)
+                        throw new Exception($"找不到窗類型: {windowType}。請用 list_family_symbols 確認可用名稱（可用「族群名: 類型名」完整名稱）。");
+                    if (typeMatches.Count > 1)
+                        throw new Exception(
+                            $"窗類型名稱「{windowType}」同時符合多個類型，無法判定：" +
+                            string.Join("、", typeMatches.Select(fs => fs.FamilyName + ": " + fs.Name).OrderBy(n => n)) +
+                            "。請改用「族群名: 類型名」完整名稱。");
+
+                    windowSymbol = typeMatches[0];
+                    windowTypeSource = "windowType";
                 }
 
-                // 3. 如果沒指定名稱或找不到，則使用來源元素的類型
+                // 3. 沒指定名稱時，沿用來源元素的類型
                 if (windowSymbol == null && sourceElement != null)
                 {
                     windowSymbol = doc.GetElement(sourceElement.GetTypeId()) as FamilySymbol;
+                    if (windowSymbol != null) windowTypeSource = "sourceElement";
                 }
 
-                // 4. 最後回退到預設（第一個）
+                // 4. 回退到專案預設窗類型（不是未排序的任意第一個）
+                if (windowSymbol == null)
+                {
+                    try
+                    {
+                        windowSymbol = doc.GetElement(
+                            doc.GetDefaultFamilyTypeId(new ElementId((IdType)(int)BuiltInCategory.OST_Windows))) as FamilySymbol;
+                    }
+                    catch { windowSymbol = null; }
+                    if (windowSymbol != null) windowTypeSource = "projectDefault";
+                }
+
+                // 5. 連專案預設都沒有，才依名稱排序取第一個——至少是確定性的，而且會留下 WARN
                 if (windowSymbol == null)
                 {
                     windowSymbol = new FilteredElementCollector(doc)
                         .OfClass(typeof(FamilySymbol))
                         .OfCategory(BuiltInCategory.OST_Windows)
                         .Cast<FamilySymbol>()
+                        .OrderBy(fs => fs.FamilyName).ThenBy(fs => fs.Name)
                         .FirstOrDefault();
+                    if (windowSymbol != null)
+                    {
+                        windowTypeSource = "firstByName";
+                        Logger.Info($"[WARN] CreateWindow: 未指定 windowType 且專案無預設窗類型，已依名稱排序採用「{windowSymbol.FamilyName}: {windowSymbol.Name}」。");
+                    }
                 }
 
                 if (windowSymbol == null)
@@ -1145,6 +1911,8 @@ namespace RevitMCP.Core
                 {
                     ElementId = window.Id.GetIdValue(),
                     WindowType = windowSymbol.Name,
+                    WindowFamilyName = windowSymbol.FamilyName,
+                    WindowTypeSource = windowTypeSource,
                     WallId = wallId,
                     SourceElementId = sourceElement?.Id.GetIdValue(),
                     Message = $"成功建立窗，ID: {window.Id.GetIdValue()}"
@@ -1274,8 +2042,9 @@ namespace RevitMCP.Core
             {
                 trans.Start();
 
-                // 取得底部樓層
-                Level bottomLevel = FindLevel(doc, bottomLevelName, true);
+                // 取得底部樓層（退路觸發時必須回報，不可讓打錯的樓層名稱看起來像成功）
+                bool bottomLevelFellBack;
+                Level bottomLevel = FindLevel(doc, bottomLevelName, true, out bottomLevelFellBack);
 
                 // 取得柱類型（FamilySymbol）
                 FamilySymbol columnSymbol = new FilteredElementCollector(doc)
@@ -1310,22 +2079,30 @@ namespace RevitMCP.Core
                     Autodesk.Revit.DB.Structure.StructuralType.Column
                 );
 
-                // 設定頂部樓層（如果有指定）
+                // 設定頂部樓層（如果有指定）。
+                // 修正：舊版名稱完全比對沒命中、或參數唯讀時都直接跳過，回報「成功建立柱子」，
+                // 但柱高其實沒有跟著 topLevel 走。指定了就必須生效，否則報錯並讓交易回滾。
+                Level appliedTopLevel = null;
                 if (!string.IsNullOrEmpty(topLevelName))
                 {
-                    Level topLevel = new FilteredElementCollector(doc)
+                    var topMatches = new FilteredElementCollector(doc)
                         .OfClass(typeof(Level))
                         .Cast<Level>()
-                        .FirstOrDefault(l => l.Name == topLevelName);
+                        .Where(l => l.Name == topLevelName)
+                        .ToList();
 
-                    if (topLevel != null)
-                    {
-                        Parameter topLevelParam = column.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_PARAM);
-                        if (topLevelParam != null && !topLevelParam.IsReadOnly)
-                        {
-                            topLevelParam.Set(topLevel.Id);
-                        }
-                    }
+                    if (topMatches.Count == 0)
+                        throw new Exception($"找不到頂部樓層: {topLevelName}。請用 get_all_levels 確認樓層名稱（需完全相符）。");
+                    if (topMatches.Count > 1)
+                        throw new Exception($"頂部樓層名稱「{topLevelName}」同時符合多個樓層，無法判定。");
+
+                    appliedTopLevel = topMatches[0];
+
+                    Parameter topLevelParam = column.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_PARAM);
+                    if (topLevelParam == null || topLevelParam.IsReadOnly)
+                        throw new Exception($"柱類型「{columnSymbol.FamilyName}: {columnSymbol.Name}」沒有可寫入的頂部樓層參數，無法套用 topLevel: {topLevelName}。");
+
+                    topLevelParam.Set(appliedTopLevel.Id);
                 }
 
                 trans.Commit();
@@ -1336,6 +2113,12 @@ namespace RevitMCP.Core
                     ColumnType = columnSymbol.Name,
                     FamilyName = columnSymbol.FamilyName,
                     Level = bottomLevel.Name,
+                    LevelId = bottomLevel.Id.GetIdValue(),
+                    LevelFellBackToLowest = bottomLevelFellBack,
+                    TopLevel = appliedTopLevel?.Name,
+                    Warning = bottomLevelFellBack
+                        ? $"你指定的樓層「{bottomLevelName}」找不到，已改用最低樓層「{bottomLevel.Name}」。"
+                        : null,
                     LocationX = x,
                     LocationY = y,
                     Message = $"成功建立柱子，ID: {column.Id.GetIdValue()}"
@@ -1396,8 +2179,9 @@ namespace RevitMCP.Core
             {
                 trans.Start();
 
-                // 取得樓層
-                Level level = FindLevel(doc, levelName, true);
+                // 取得樓層（退路觸發時必須回報，不可讓打錯的樓層名稱看起來像成功）
+                bool levelFellBack;
+                Level level = FindLevel(doc, levelName, true, out levelFellBack);
 
                 // 取得家具類型
                 FamilySymbol furnitureSymbol = new FilteredElementCollector(doc)
@@ -1442,6 +2226,11 @@ namespace RevitMCP.Core
                     FurnitureType = furnitureSymbol.Name,
                     FamilyName = furnitureSymbol.FamilyName,
                     Level = level.Name,
+                    LevelId = level.Id.GetIdValue(),
+                    LevelFellBackToLowest = levelFellBack,
+                    Warning = levelFellBack
+                        ? $"你指定的樓層「{levelName}」找不到，已改用最低樓層「{level.Name}」。"
+                        : null,
                     LocationX = x,
                     LocationY = y,
                     Rotation = rotation,
@@ -1640,7 +2429,8 @@ namespace RevitMCP.Core
 
             var roomData = new List<object>();
             SpatialElementBoundaryOptions options = new SpatialElementBoundaryOptions();
-            var globalProcessedIds = new HashSet<IdType>();
+            // 記錄「開口 → 已歸屬房間」，同一開口只歸一個主房間（ToRoom 優先），避免先到先搶
+            var openingRoomMap = new Dictionary<IdType, IdType>();
 
             foreach (Room room in rooms)
             {
@@ -1659,7 +2449,8 @@ namespace RevitMCP.Core
                                 IList<ElementId> insertIds = wall.FindInserts(true, true, false, false);
                                 foreach (ElementId insertId in insertIds)
                                 {
-                                    if (globalProcessedIds.Contains(insertId.GetIdValue())) continue;
+                                    // 同一開口只歸一個主房間，已歸屬則跳過
+                                    if (openingRoomMap.ContainsKey(insertId.GetIdValue())) continue;
 
                                     Element insert = doc.GetElement(insertId);
                                     if (insert is FamilyInstance fi &&
@@ -1668,9 +2459,25 @@ namespace RevitMCP.Core
                                     {
                                         bool belongsToRoom = false;
 
-                                        // Geometric check: is the window within this boundary segment's range?
-                                        if (wall.Location is LocationCurve wallLocCurve && insert.Location is LocationPoint insertLoc)
+                                        // 對應邏輯：優先用 FamilyInstance 的 Room API 判定主房間（ToRoom 優先，其次 FromRoom），
+                                        // 只有當前房間 == 主房間才歸屬，避免走廊先迭代時用幾何投影把鄰房開口搶走。
+                                        // ToRoom/FromRoom 使用無參數版（預設 phase），與 get_room_window_counts 行為一致。
+                                        Room toRoom = TryGetToRoom(fi);
+                                        Room fromRoom = TryGetFromRoom(fi);
+
+                                        if (toRoom != null)
                                         {
+                                            // 主房間 = ToRoom
+                                            belongsToRoom = (toRoom.Id == room.Id);
+                                        }
+                                        else if (fromRoom != null)
+                                        {
+                                            // ToRoom 為 null → 主房間 = FromRoom
+                                            belongsToRoom = (fromRoom.Id == room.Id);
+                                        }
+                                        else if (wall.Location is LocationCurve wallLocCurve && insert.Location is LocationPoint insertLoc)
+                                        {
+                                            // ToRoom / FromRoom 皆 null → 退回既有幾何投影 fallback
                                             Curve wallCurve = wallLocCurve.Curve;
                                             Curve segmentCurve = segment.GetCurve();
 
@@ -1694,24 +2501,30 @@ namespace RevitMCP.Core
                                                     }
                                                 }
                                             }
-                                            else
-                                            {
-                                                // Fallback: projection failed, use Room API
-                                                if (fi.FromRoom != null && fi.FromRoom.Id == room.Id) belongsToRoom = true;
-                                                else if (fi.ToRoom != null && fi.ToRoom.Id == room.Id) belongsToRoom = true;
-                                            }
-                                        }
-                                        else
-                                        {
-                                            // Non-curve wall fallback
-                                            if (fi.FromRoom != null && fi.FromRoom.Id == room.Id) belongsToRoom = true;
-                                            else if (fi.ToRoom != null && fi.ToRoom.Id == room.Id) belongsToRoom = true;
                                         }
 
                                         if (!belongsToRoom) continue;
-                                        globalProcessedIds.Add(insertId.GetIdValue());
+                                        openingRoomMap[insertId.GetIdValue()] = room.Id.GetIdValue();
 
-                                        bool isExterior = wall.WallType.Function == WallFunction.Exterior;
+                                        // IsExterior 判定：WallType 為 Exterior，或開口另一側無房間（FromRoom/ToRoom 恰好一側為 null）
+                                        // 視為臨外氣；IsExteriorSource 記錄判定依據供審計端使用。
+                                        bool isExterior;
+                                        string isExteriorSource;
+                                        if (wall.WallType.Function == WallFunction.Exterior)
+                                        {
+                                            isExterior = true;
+                                            isExteriorSource = "WallFunction";
+                                        }
+                                        else if ((toRoom == null) != (fromRoom == null))
+                                        {
+                                            isExterior = true;
+                                            isExteriorSource = "NoRoomOtherSide";
+                                        }
+                                        else
+                                        {
+                                            isExterior = false;
+                                            isExteriorSource = "None";
+                                        }
 
                                         const double FEET_TO_MM = 304.8;
                                         Element symbol = fi.Symbol;
@@ -1761,6 +2574,7 @@ namespace RevitMCP.Core
                                             SillHeight = Math.Round(sillHeight, 2),
                                             HeadHeight = Math.Round(headHeight, 2),
                                             IsExterior = isExterior,
+                                            IsExteriorSource = isExteriorSource,
                                             HostWallId = wall.Id.GetIdValue()
                                         });
                                     }
@@ -1844,6 +2658,25 @@ namespace RevitMCP.Core
             }
             
             return null;
+        }
+
+        /// <summary>
+        /// 安全讀取 FamilyInstance.ToRoom（無參數版 / 預設 phase）。
+        /// FromRoom/ToRoom 於某些相位或未放置時會擲例外，以 try/catch 保護。
+        /// </summary>
+        private static Room TryGetToRoom(FamilyInstance fi)
+        {
+            try { return fi.ToRoom; }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// 安全讀取 FamilyInstance.FromRoom（無參數版 / 預設 phase）。
+        /// </summary>
+        private static Room TryGetFromRoom(FamilyInstance fi)
+        {
+            try { return fi.FromRoom; }
+            catch { return null; }
         }
 
         /// <summary>
@@ -2571,7 +3404,14 @@ namespace RevitMCP.Core
 
                 if (level != null)
                 {
-                    wallCollector = wallCollector.Where(w => w.LevelId == level.Id);
+                    // 牆的 LevelId 在部分情況為 Invalid，改用 WALL_BASE_CONSTRAINT 為主、LevelId 為輔
+                    wallCollector = wallCollector.Where(w =>
+                    {
+                        ElementId baseLevelId = w.get_Parameter(BuiltInParameter.WALL_BASE_CONSTRAINT)?.AsElementId();
+                        if (baseLevelId != null && baseLevelId != ElementId.InvalidElementId)
+                            return baseLevelId == level.Id;
+                        return w.LevelId == level.Id;
+                    });
                 }
             }
 
@@ -2585,21 +3425,27 @@ namespace RevitMCP.Core
                 Curve curve = locCurve.Curve;
                 XYZ startPoint = curve.GetEndPoint(0);
                 XYZ endPoint = curve.GetEndPoint(1);
-                
-                // 計算點到線段的最近距離
-                XYZ wallDir = (endPoint - startPoint).Normalize();
-                XYZ toCenter = center - startPoint;
+
+                // 距離計算全部壓平 XY：牆位置線端點 z = 樓層標高，若不歸零，
+                // center.DistanceTo(closestPoint) 會變成 3D 距離，樓上/樓下的牆永遠超出半徑
+                // （搜尋中心 center 的 z 已為 0）
+                XYZ startFlat = new XYZ(startPoint.X, startPoint.Y, 0);
+                XYZ endFlat = new XYZ(endPoint.X, endPoint.Y, 0);
+
+                // 計算點到線段的最近距離（壓平後的點與投影參數）
+                XYZ wallDir = (endFlat - startFlat).Normalize();
+                XYZ toCenter = center - startFlat;
                 double proj = toCenter.DotProduct(wallDir);
-                double wallLength = curve.Length;
-                
+                double wallLength = startFlat.DistanceTo(endFlat);
+
                 XYZ closestPoint;
                 if (proj < 0)
-                    closestPoint = startPoint;
+                    closestPoint = startFlat;
                 else if (proj > wallLength)
-                    closestPoint = endPoint;
+                    closestPoint = endFlat;
                 else
-                    closestPoint = startPoint + wallDir * proj;
-                
+                    closestPoint = startFlat + wallDir * proj;
+
                 double distToWall = center.DistanceTo(closestPoint) * 304.8;
 
                 if (distToWall <= searchRadius)
@@ -2767,9 +3613,7 @@ namespace RevitMCP.Core
                     // 簡易版 level 過濾
                     if (match && !string.IsNullOrEmpty(levelFilter))
                     {
-                        string elemLevel = elem.get_Parameter(BuiltInParameter.LEVEL_NAME)?.AsValueString() 
-                                        ?? elem.get_Parameter(BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM)?.AsValueString()
-                                        ?? "";
+                        string elemLevel = ResolveElementLevelName(doc, elem);
                         if (!elemLevel.Contains(levelFilter))
                             match = false;
                     }
@@ -2815,6 +3659,44 @@ namespace RevitMCP.Core
             {
                 throw new Exception($"QueryElements 錯誤: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// 解析元素所屬樓層名稱。舊版僅讀 LEVEL_NAME / INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM，
+        /// 這兩者對牆/多數元素為 null 導致全滅。改為：
+        /// (a) elem.LevelId 有效 → doc.GetElement(LevelId).Name；
+        /// (b) fallback 依序試常見樓層參數的 AsElementId() 轉 Level 名；
+        /// (c) 都沒有才回空字串。
+        /// </summary>
+        private string ResolveElementLevelName(Document doc, Element elem)
+        {
+            // (a) 直接的 LevelId
+            if (elem.LevelId != null && elem.LevelId != ElementId.InvalidElementId)
+            {
+                Element lvl = doc.GetElement(elem.LevelId);
+                if (lvl is Level) return lvl.Name;
+            }
+
+            // (b) 依序 fallback 常見的樓層參數
+            BuiltInParameter[] levelBips = new BuiltInParameter[]
+            {
+                BuiltInParameter.WALL_BASE_CONSTRAINT,
+                BuiltInParameter.FAMILY_LEVEL_PARAM,
+                BuiltInParameter.SCHEDULE_LEVEL_PARAM,
+                BuiltInParameter.INSTANCE_REFERENCE_LEVEL_PARAM
+            };
+            foreach (BuiltInParameter bip in levelBips)
+            {
+                Parameter p = elem.get_Parameter(bip);
+                if (p == null) continue;
+                ElementId lvlId = p.AsElementId();
+                if (lvlId == null || lvlId == ElementId.InvalidElementId) continue;
+                Element lvl = doc.GetElement(lvlId);
+                if (lvl is Level) return lvl.Name;
+            }
+
+            // (c) 找不到
+            return "";
         }
 
         private Parameter FindParameter(Element elem, string name)
@@ -3277,99 +4159,6 @@ namespace RevitMCP.Core
 
         // 靜態變數：儲存取消接合的元素對
         private static List<Tuple<ElementId, ElementId>> _unjoinedPairs = new List<Tuple<ElementId, ElementId>>();
-
-        /// <summary>
-        /// 取消牆體與其他元素（柱子等）的接合關係
-        /// </summary>
-        private object UnjoinWallJoins(JObject parameters)
-        {
-            Document doc = _uiApp.ActiveUIDocument.Document;
-            
-            // 取得牆體 ID 列表
-            var wallIdsArray = parameters["wallIds"] as JArray;
-            IdType? viewId = parameters["viewId"]?.Value<IdType>();
-            
-            List<IdType> wallIds = new List<IdType>();
-            if (wallIdsArray != null)
-            {
-                wallIds.AddRange(wallIdsArray.Select(id => id.Value<IdType>()));
-            }
-            
-            // 如果沒有提供 wallIds，則查詢視圖中所有牆體
-            if (wallIds.Count == 0 && viewId.HasValue)
-            {
-                var collector = new FilteredElementCollector(doc, new ElementId(viewId.Value));
-                var walls = collector.OfClass(typeof(Wall)).ToElements();
-                wallIds = walls.Select(w => w.Id.GetIdValue()).ToList();
-            }
-            
-            if (wallIds.Count == 0)
-            {
-                throw new Exception("請提供 wallIds 或 viewId 參數");
-            }
-
-            int unjoinedCount = 0;
-            _unjoinedPairs.Clear();
-
-            using (Transaction trans = new Transaction(doc, "Unjoin Wall Geometry"))
-            {
-                trans.Start();
-
-                foreach (int wallId in wallIds)
-                {
-                    Wall wall = doc.GetElement(new ElementId(wallId)) as Wall;
-                    if (wall == null) continue;
-
-                    // 取得牆體的 BoundingBox 來找附近的柱子
-                    BoundingBoxXYZ bbox = wall.get_BoundingBox(null);
-                    if (bbox == null) continue;
-
-                    // 擴大搜尋範圍
-                    XYZ min = bbox.Min - new XYZ(1, 1, 1);
-                    XYZ max = bbox.Max + new XYZ(1, 1, 1);
-                    Outline outline = new Outline(min, max);
-
-                    // 查詢附近的柱子
-                    var columnCollector = new FilteredElementCollector(doc)
-                        .OfCategory(BuiltInCategory.OST_Columns)
-                        .WherePasses(new BoundingBoxIntersectsFilter(outline));
-                    
-                    var structColumnCollector = new FilteredElementCollector(doc)
-                        .OfCategory(BuiltInCategory.OST_StructuralColumns)
-                        .WherePasses(new BoundingBoxIntersectsFilter(outline));
-
-                    var columns = columnCollector.ToElements().Concat(structColumnCollector.ToElements());
-
-                    foreach (Element column in columns)
-                    {
-                        try
-                        {
-                            if (JoinGeometryUtils.AreElementsJoined(doc, wall, column))
-                            {
-                                JoinGeometryUtils.UnjoinGeometry(doc, wall, column);
-                                _unjoinedPairs.Add(new Tuple<ElementId, ElementId>(wall.Id, column.Id));
-                                unjoinedCount++;
-                            }
-                        }
-                        catch
-                        {
-                            // 忽略無法取消接合的元素
-                        }
-                    }
-                }
-
-                trans.Commit();
-            }
-
-            return new
-            {
-                Success = true,
-                UnjoinedCount = unjoinedCount,
-                WallCount = wallIds.Count,
-                StoredPairs = _unjoinedPairs.Count,
-                Message = $"已取消 {unjoinedCount} 個接合關係"
-            };
-        }
 
         /// <summary>
         /// 恢復之前取消的接合關係
@@ -4177,6 +4966,12 @@ namespace RevitMCP.Core
         {
             var linkHelper = new LinkedModelHelper(_uiApp);
             return new ClashDetector(_uiApp, linkHelper).DetectClashes(parameters);
+        }
+
+        private object ScanOpeningCandidates(JObject parameters)
+        {
+            var linkHelper = new LinkedModelHelper(_uiApp);
+            return new OpeningCandidateScanner(_uiApp, linkHelper).Scan(parameters);
         }
 
         private object ColorizeClashes(JObject parameters)

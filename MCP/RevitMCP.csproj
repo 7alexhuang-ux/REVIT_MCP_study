@@ -28,4 +28,9 @@
     <EmbeddedResource Include="Resources\icons\*_32.png" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Resource Include="Resources\icon-32-on.png" />
+    <Resource Include="Resources\icon-32-off.png" />
+  </ItemGroup>
+
 </Project>

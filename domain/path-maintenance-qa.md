@@ -64,7 +64,7 @@ grep -r "cd.*MCP.*MCP" --include="*.md"
 
 ### 1. 專案結構樹狀圖
 
-**位置**：README.md、README.en.md 的「專案結構」章節
+**位置**：README.md（英文主入口）、README.zh-TW.md（繁體中文版）的「專案結構」章節
 
 **錯誤範例**：
 ```
@@ -129,8 +129,8 @@ foreach ($pattern in $patterns) {
 ### 步驟 2：手動檢視結構性內容
 
 **必須肉眼檢視的內容**：
-1. README.md 專案結構樹狀圖
-2. README.en.md 專案結構樹狀圖
+1. README.md（英文主入口）專案結構樹狀圖
+2. README.zh-TW.md（繁體中文版）專案結構樹狀圖
 3. 任何包含 ASCII 樹狀圖的文件
 
 ### 步驟 3：區分需修正與應保留
@@ -155,7 +155,7 @@ foreach ($pattern in $patterns) {
 
 ```powershell
 # 重新執行搜尋確認
-$git = "C:\Users\01102088\AppData\Local\Programs\Git\cmd\git.exe"
+$git = "C:\Users\<YOUR_USERNAME>\AppData\Local\Programs\Git\cmd\git.exe"
 
 # 檢查 git diff
 & $git diff --stat

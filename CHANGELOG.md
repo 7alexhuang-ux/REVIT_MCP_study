@@ -8,6 +8,19 @@
 
 ## [Unreleased]
 
+### 🔀 合併 — 同步 upstream/main（93365e7，2026-10-31）
+
+- 在分支 `merge/upstream-2026-10-30` 把 `upstream/main`（原作者 shuotao，領先 327 個 commit）合併進 `grading-workflow-v2`（領先 110 個 commit），解 42 個衝突檔；整地（Toposolid／坵塊法／限建核對）、ViewSync 前身、socket 強化、3D 網頁匯出（設計選項／命名視圖／視圖位置）功能全數保留。
+- **整地**：`MCP/Core/Grading/*`、`CommandExecutor.ToposolidGrading.cs`、`grading-tools.ts` 全取我方（upstream 版是 07-03 初版 `0db7c6f`，我方為其後續演進的超集；upstream 僅有的 R26 `AddSplitLine` 修正我方已有等效 `#if` 護欄）。
+- **文件／連結生命週期**：`open_document`／`list_open_documents`／`close_document`／`reload_links` 同名工具兩邊各有實作，保留我方 `CommandExecutor.DocumentLifecycle.cs`（`path`／`detach`／`discard` 參數、中央檔保護、`list_links`）；upstream 獨有的 `save_document` 保留在 `CommandExecutor.DocumentOps.cs`（該檔其餘方法已刪）。**upstream 版 `open_document` 的參數名 `filePath`／`detachFromCentral`、`close_document` 的 `documentTitle`／`discardChanges`、`reload_links` 的 `linkTypeIds`／`linkNames` 不再支援。**
+- **通訊層**：`SocketService` 以 upstream 的獨占鎖（`ExclusiveLock`，預設 true：已有連線時新連線回 409）、Origin 防護（403）、`SwitchConnection`、`_sendLock` 序列化送出為底，疊上我方的 `ConnectionId`（重連後舊連線的回應不送到新連線）、`StartAsync(showDialogs, repairPortConflicts)`；`ExternalEventManager` 取 upstream 的 `ConcurrentQueue` 版。**行為變更：預設改為獨占連線，不再是「新連線接手舊連線」；需要舊行為時把設定 `ExclusiveLock` 關閉。** `socket.ts` 以 upstream 的單例重連、`?client=` 為底，疊上我方的逾時分級（預設 5 分鐘、長任務 10 分鐘）、`responseRejecters`（斷線立即讓 pending 失敗）。
+- `tools/index.ts` 採 upstream 結構（`DIAGNOSTIC_TOOLS` 讓 `documentTools` 進每個 profile、`gradingTools` 進 full／architect／structural），再加我方 `walkthroughTools`、`webCompareTools`；`revit-tools.ts` 的 `registerRevitTools` 改為單純轉呼叫（不再自行追加 `gradingTools`，避免重複註冊）。
+- `install-addon.ps1` 採 upstream 重寫版（`-All`／`-NonInteractive`／`Install-ToVersion`），補回我方走動展示 viewer 與深度圖腳本的部署；`verify-qaqc.ps1` 取 upstream，補回對 `.worktrees`／`.claude/worktrees` 的掃描排除。
+- `README.en.md` 已被 upstream 改名（英文 `README.md`、繁中 `README.zh-TW.md`），我方 `README.en.md` 的內容（僅計數）隨之放棄。upstream 刪除的 `MCP/bin/**`、`MCP/obj/**` 建置產物跟著刪除。
+- 計數重算（`registerRevitTools()` full profile／`domain/*.md` 加 `references`／`.claude/skills/*/SKILL.md`）：**276／100／62**，已寫回 CLAUDE.md、README、README.zh-TW、DOCUMENT_AUDIENCE_INVENTORY 與 docs/BIM_MCP 各頁；`tools-index.html`、`skills-index.html` 由 `gen-tools-index.py`／`gen-skills-index.py` 重生（補 `skills-index-map.json` 的 `hillside-site-review`、`gen-tools-index.py` 的 `walkthrough-tools`／`web-compare-tools` 分類）。
+- 兩支腳本內寫死的個人暫存路徑（`render-depth.mjs`、`make-sample-package.mjs`）改為環境變數或 `TEMP`，以通過 upstream 新增的「無硬編碼帳號名」檢查。
+- 驗證：MCP-Server `npm run build`、`npm test`（38＋10）；`dotnet build -c Release.R24` 0 錯誤；`dotnet test` 334 通過；`verify-qaqc.ps1 -SkipBuild -SkipDeploy` 見 commit 訊息。未連 Revit、未部署，獨占鎖與合併後的命令分派待實機驗證。
+
 ### 新增 — 設計選項實體幾何、命名視圖與無人操作工具（2026-10-23）
 
 - 新增 list_design_options／export_design_options／export_named_views；export_web_compare 以 designOptions:true 選用新流程，預設保留原匯出。穩定 UniqueId、逐元素 designOption extras、design_options.json 及共用原點相機資料。
@@ -95,6 +108,47 @@
 ---
 
 ## [1.6.0] - 2026-07-31
+
+### 🆕 新增 — MCP 2026-07-28 升級（Path-A dual-era + WP-F Apps）
+
+- **工具標註**：全 167 工具補上 `title` + `readOnlyHint`/`destructiveHint`（`MCP-Server/src/tools/annotations.ts` 於 `registerRevitTools()` 中央注入）；77 唯讀 / 90 寫入 / 2 破壞性（`delete_element`、`dedup_detail_elements_in_view`）。純 metadata，舊客戶端會忽略。
+- **`tools/list` 決定性排序**：依工具名稱 codepoint 排序（locale-independent），每次啟動/呼叫順序一致。
+- **MCP Apps 互動式 UI（extension `io.modelcontextprotocol/ui`）**：第一個互動工具 —— `detect_clashes` 的 clash viewer（碰撞摘要 + 清單、「在 Revit 上色」→ `colorize_clashes`、逐列「定位」→ `zoom_to_element`）。以低階 `Server` 手動接線（`resources` capability + `ListResources`/`ReadResource`，MIME `text/html;profile=mcp-app`）；UI 為單一自我包含 HTML（esbuild）。需宿主支援該 extension 才會 render，否則忽略 `_meta.ui`、工具照常回傳文字。
+- **SDK 升級**：`@modelcontextprotocol/sdk` 1.22 → 1.30（協定 2025-11-25，仍保留 2025-06-18 → dual-era 相容）；新增相依 `@modelcontextprotocol/ext-apps`、`zod`，devDep `esbuild`。
+
+### 🔧 CI / QAQC
+
+- **`.github/workflows/check-pr.yml`**：knowledge-only 限制改為僅套用外部 fork PR（`head.repo.fork == true`）；維護者同倉庫 PR 可修改程式碼與設定。
+- **`scripts/verify-qaqc.ps1`**：新增 **Phase 9**（9-1 工具 annotation 覆蓋 + destructive 白名單；9-2 Apps `ui://` 資源解析 / MIME / 自我包含），與既有 8 phase 併存。
+
+### ⏳ 延後（等官方 SDK 釋出 2026-07-28 協定）
+
+- Stateless 連線、`server/discover`、`resultType`、Tasks core、HTTP / OAuth 傳輸與授權 —— 由每日雲端 watcher 追蹤上游 SDK，條件成立即接手（需本機 build + live-Revit red→green）。
+
+### 📌 版號說明
+
+- 本版將 npm 套件版號對齊專案版號線：CHANGELOG 前一版為 1.5.2，npm 套件先前停在 1.0.2，本次一併追上至 **1.6.0**（`package.json` / `server.json` / npm 三處同步）。
+
+### 🙏 遷移
+
+- 詳見 `docs/MIGRATION_GUIDE.md`「MCP 2026-07-28 雙時代相容升級」章節。
+
+---
+
+## [1.5.2] - 2026-07-16
+
+### 🐛 Bug 修正（PowerShell 部署腳本）
+
+- **`scripts/setup.ps1`**：修正 PowerShell 5.1 下 `$ErrorActionPreference = "Stop"` 搭配 native 指令（dotnet/npm/winget/net）`2>&1` 重導向時，會把 stderr 上的一般進度/警告行升級成終止例外的問題，導致 `dotnet build` 實際 0 錯誤卻誤報「編譯例外」。新增 `Invoke-ExternalCommand` helper，在 8 處 native 呼叫點暫時將 EAP 切回 Continue，`$LASTEXITCODE` 判斷邏輯不變。由 @ray92chiu-png 於 issue #89 精準定位並提供修法（commit `1b5a71e`，保留原作者署名）。
+- **`scripts/release-port.ps1`**：橫向掃描發現 `net stop`/`net start http` 同樣踩到這顆地雷，套用同款修法（commit `33f1a44`）。
+
+### 🙏 致謝
+
+- 感謝首次貢獻者 @ray92chiu-png（邱仁）回報 issue #89 並附完整重現步驟與 diff，詳見 `docs/BIM_MCP/reference/contributors.html`。
+
+---
+
+## [fork-1.6.0] - 2026-07-31（fork 自有版本線；與 upstream 同號 1.6.0 為不同內容）
 
 > 涵蓋 2026-04 ~ 2026-07 的社群協作、工具擴充與整地工作流三階段。此版本已打 tag（`v1.6.0`，commit `fcb61a5`）但先前未寫入本檔，於 2026-09-21 補記。
 

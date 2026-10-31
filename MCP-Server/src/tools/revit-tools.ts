@@ -10,23 +10,14 @@
 
 import { RevitSocketClient } from "../socket.js";
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { gradingTools } from "./grading-tools.js";
 import { registerRevitTools as registerProfileTools } from "./index.js";
 import { runBatchedFrames, WalkthroughFrameBatchResponse } from "./walkthrough-batch.js";
 
 /**
- * 依 Profile 註冊工具，並將 Toposolid 整地限制於建築與結構相關 Profile。
+ * 依 Profile 註冊工具（實際 Profile 篩選邏輯在 index.ts）
  */
 export function registerRevitTools(): Tool[] {
-    const tools = registerProfileTools();
-    const requestedProfile = process.env.MCP_PROFILE || "full";
-    const profile = ["full", "architect", "mep", "structural", "fire-safety"].includes(requestedProfile)
-        ? requestedProfile
-        : "full";
-
-    return ["full", "architect", "structural"].includes(profile)
-        ? [...tools, ...gradingTools]
-        : tools;
+    return registerProfileTools();
 }
 
 /**
@@ -52,8 +43,25 @@ export async function executeRevitTool(
         }, args as { packageDir: string; exportAll?: boolean; [key: string]: unknown });
     }
 
+    // 跨文件命令需要較長 timeout（開啟 .rvt/.rfa 檔案較費時）
+    const CROSS_DOC_COMMANDS = new Set(["read_source_file_sheets", "copy_sheets_from_file", "sync_sheet_parameters_from_source", "inject_green_material_into_family"]);
+
+    // 開檔、存檔、重載連結、匯出影像都可能遠超過 30 秒（大模型存檔、地形連結重載尤其明顯）。
+    // 逾時斷在中途會讓使用者以為失敗，實際上 Revit 還在跑 —— 所以一律給長 timeout。
+    const SLOW_COMMANDS = new Set(["open_document", "save_document", "reload_links", "capture_view_image", "run_camera_keyplan", "list_cameras", "run_camera_overview", "create_camera_sheet"]);
+
+    // 全模型檢討（含連結模型逐點射線 / 逐段實體過濾）與影像輸出在大型專案可能超過 120 秒；
+    // 逾時後 Revit 仍會繼續跑，重跑會重複放標記，所以給 300 秒。
+    const LONG_RUNNING_COMMANDS = new Set(["check_beam_clear_height", "check_mep_spacing", "export_view_image", "batch_modify_elements"]);
+
+    // 只有 upstream 列名的命令才明確帶 timeout；其餘交給 socket.ts 的 getCommandTimeout（預設 5 分鐘，長任務 10 分鐘）。
+    // sendCommand 會取「明確值」與「命令分級值」較大者，所以不會把整地／匯出等長任務縮短。
+    const timeoutMs = LONG_RUNNING_COMMANDS.has(commandName)
+        ? 300000
+        : CROSS_DOC_COMMANDS.has(commandName) || SLOW_COMMANDS.has(commandName) ? 120000 : undefined;
+
     // 發送命令到 Revit
-    const response = await client.sendCommand(commandName, args);
+    const response = await client.sendCommand(commandName, args, timeoutMs);
 
     if (!response.success) {
         throw new Error(response.error || "命令執行失敗");

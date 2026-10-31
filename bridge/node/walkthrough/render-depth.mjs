@@ -42,7 +42,8 @@ const DEFAULT_CHROME_CANDIDATES = [
   'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
 ];
 const DEFAULT_PUPPETEER_DIR =
-  'C:\\Users\\womic\\AppData\\Local\\Temp\\claude\\c--Project-REVIT-MCP-study\\dcb377f3-5b7e-4780-bd27-7e31cee54fb9\\scratchpad\\viewer-work\\puppeteer-run';
+  process.env.REVIT_MCP_PUPPETEER_DIR ||
+  path.join(process.env.TEMP || process.env.TMPDIR || '.', 'revit-mcp-viewer-work', 'puppeteer-run');
 
 const STATS_W = 96; // low-res stats-pass grid width (percentile + spot verification)
 const NEAR_METERS_DEFAULT = 0.1;

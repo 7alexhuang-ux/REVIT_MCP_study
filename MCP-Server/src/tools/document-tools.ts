@@ -50,4 +50,17 @@ export const documentTools: Tool[] = [
             },
         },
     },
+    {
+        name: "save_document",
+        description: "儲存作用中的 Revit 文件，或依文件標題儲存已開啟的指定文件。此工具不支援另存新檔，唯讀文件無法儲存。（upstream 收編；與 close_document 的 discard 保護互補：關閉前如需保留變更，先用此工具存檔。）",
+        inputSchema: {
+            type: "object",
+            properties: {
+                documentTitle: {
+                    type: "string",
+                    description: "已開啟文件的標題；省略時儲存作用文件。",
+                },
+            },
+        },
+    },
 ];

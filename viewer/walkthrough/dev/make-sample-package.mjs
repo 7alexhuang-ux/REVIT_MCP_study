@@ -34,7 +34,8 @@ const VIEWER_DIR = path.resolve(__dirname, '..');
 const PM = require(path.join(VIEWER_DIR, 'pathmath.js'));
 
 const SCRATCH_DEFAULT =
-  'C:\\Users\\womic\\AppData\\Local\\Temp\\claude\\c--Project-REVIT-MCP-study\\dcb377f3-5b7e-4780-bd27-7e31cee54fb9\\scratchpad\\viewer-work\\sample-package';
+  process.env.REVIT_MCP_SAMPLE_DIR ||
+  path.join(process.env.TEMP || process.env.TMPDIR || '.', 'revit-mcp-viewer-work', 'sample-package');
 
 // Defaults used only by --render-frames; both point at machine-local, non-repo
 // installs (a local browser binary, and a scratchpad npm install of puppeteer-core).
@@ -45,7 +46,8 @@ const DEFAULT_CHROME_CANDIDATES = [
   'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
 ];
 const DEFAULT_PUPPETEER_DIR =
-  'C:\\Users\\womic\\AppData\\Local\\Temp\\claude\\c--Project-REVIT-MCP-study\\dcb377f3-5b7e-4780-bd27-7e31cee54fb9\\scratchpad\\viewer-work\\puppeteer-run';
+  process.env.REVIT_MCP_PUPPETEER_DIR ||
+  path.join(process.env.TEMP || process.env.TMPDIR || '.', 'revit-mcp-viewer-work', 'puppeteer-run');
 
 function parseArgs(argv) {
   const out = { outDir: null, renderFrames: false, chrome: null, puppeteerDir: null };

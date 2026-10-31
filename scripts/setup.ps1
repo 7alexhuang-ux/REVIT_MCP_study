@@ -90,6 +90,22 @@ function Add-Result {
     }
 }
 
+function Invoke-ExternalCommand {
+    # Runs a native-command scriptblock (that redirects stderr with 2>&1) without
+    # letting $ErrorActionPreference = "Stop" turn ordinary stderr output (npm/dotnet
+    # progress or warning lines) into a terminating exception under PowerShell 5.1.
+    # $LASTEXITCODE from the native call remains readable by the caller afterwards.
+    param([Parameter(Mandatory)][scriptblock]$Command)
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command
+    }
+    finally {
+        $ErrorActionPreference = $prevEAP
+    }
+}
+
 function Test-SafePath {
     param([string]$Path, [string]$Description = "Path")
     if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
@@ -257,7 +273,7 @@ else {
         if ($hasWinget) {
             Write-Info "正在透過 winget 更新 Node.js..."
             try {
-                $wingetOutput = & winget install OpenJS.NodeJS.LTS --scope user --accept-source-agreements --accept-package-agreements 2>&1
+                $wingetOutput = Invoke-ExternalCommand { & winget install OpenJS.NodeJS.LTS --scope user --accept-source-agreements --accept-package-agreements 2>&1 }
                 Refresh-PathEnv
                 $newMajor = Get-NodeMajorVersion
                 if ($newMajor -ge 20) {
@@ -289,7 +305,7 @@ else {
         if ($hasWinget) {
             Write-Info "正在透過 winget 安裝 Node.js LTS..."
             try {
-                $wingetOutput = & winget install OpenJS.NodeJS.LTS --scope user --accept-source-agreements --accept-package-agreements 2>&1
+                $wingetOutput = Invoke-ExternalCommand { & winget install OpenJS.NodeJS.LTS --scope user --accept-source-agreements --accept-package-agreements 2>&1 }
                 Refresh-PathEnv
                 $newMajor = Get-NodeMajorVersion
                 if ($newMajor -ge 20) {
@@ -364,7 +380,7 @@ else {
         if ($hasWinget) {
             Write-Info "正在透過 winget 安裝 .NET 8 SDK..."
             try {
-                $wingetOutput = & winget install Microsoft.DotNet.SDK.8 --scope user --accept-source-agreements --accept-package-agreements 2>&1
+                $wingetOutput = Invoke-ExternalCommand { & winget install Microsoft.DotNet.SDK.8 --scope user --accept-source-agreements --accept-package-agreements 2>&1 }
                 Refresh-PathEnv
                 if (Test-CommandAvailable "dotnet") {
                     Write-OK ".NET 8 SDK 安裝完成"
@@ -595,7 +611,7 @@ else {
         if (-not (Test-Path $nodeModulesPath)) {
             Write-Info "正在安裝 Node.js 相依套件（npm install）..."
             Write-Info "這可能需要 1-3 分鐘，請耐心等待..."
-            $npmInstallResult = & npm install 2>&1
+            $npmInstallResult = Invoke-ExternalCommand { & npm install 2>&1 }
             $npmInstallExit = $LASTEXITCODE
             if ($npmInstallExit -ne 0) {
                 Write-Fail "npm install 失敗"
@@ -614,7 +630,7 @@ else {
         # npm run build
         if ($mcpServerOk) {
             Write-Info "正在編譯 MCP Server（npm run build）..."
-            $npmBuildResult = & npm run build 2>&1
+            $npmBuildResult = Invoke-ExternalCommand { & npm run build 2>&1 }
             $npmBuildExit = $LASTEXITCODE
             if ($npmBuildExit -ne 0) {
                 Write-Fail "npm run build 失敗"
@@ -689,7 +705,7 @@ else {
                 Write-Info "正在編譯 Revit $ver（dotnet build -c $config）..."
                 Push-Location $mcpDir
                 try {
-                    $buildOutput = & dotnet build -c $config RevitMCP.csproj 2>&1
+                    $buildOutput = Invoke-ExternalCommand { & dotnet build -c $config RevitMCP.csproj 2>&1 }
                     $buildExit = $LASTEXITCODE
                     if ($buildExit -ne 0) {
                         Write-Fail "Revit $ver 編譯失敗"
@@ -798,24 +814,56 @@ else {
     }
 
     # --- Claude Desktop ---
-    $claudeConfigDir = Join-Path $env:APPDATA "Claude"
-    $claudeConfigFile = Join-Path $claudeConfigDir "claude_desktop_config.json"
+    # Claude Desktop 有兩種安裝形式，設定檔位置不同：
+    #   1. 一般安裝程式           -> %APPDATA%\Claude
+    #   2. Microsoft Store (MSIX) -> %LOCALAPPDATA%\Packages\Claude_<hash>\LocalCache\Roaming\Claude
+    $claudeConfigDirs = @()
 
-    if (Test-Path $claudeConfigDir) {
+    $claudeClassicDir = Join-Path $env:APPDATA "Claude"
+    if (Test-Path $claudeClassicDir) {
+        $claudeConfigDirs += $claudeClassicDir
+    }
+
+    if ($env:LOCALAPPDATA) {
+        $packagesRoot = Join-Path $env:LOCALAPPDATA "Packages"
+        if (Test-Path $packagesRoot) {
+            $storePackages = @(Get-ChildItem -Path $packagesRoot -Filter "Claude_*" -Directory -ErrorAction SilentlyContinue)
+            foreach ($storePkg in $storePackages) {
+                $storeDir = Join-Path (Join-Path (Join-Path $storePkg.FullName "LocalCache") "Roaming") "Claude"
+                if ((Test-Path $storeDir) -and ($claudeConfigDirs -notcontains $storeDir)) {
+                    $claudeConfigDirs += $storeDir
+                }
+            }
+        }
+    }
+
+    if ($claudeConfigDirs.Count -eq 0) {
+        Write-Skip "Claude Desktop 未安裝（已檢查 $claudeClassicDir 與 Microsoft Store 套件目錄）"
+        Add-Result "Claude Desktop" "SKIP" "Not installed"
+    }
+
+    foreach ($claudeConfigDir in $claudeConfigDirs) {
+        $claudeConfigFile = Join-Path $claudeConfigDir "claude_desktop_config.json"
         try {
             $claudeConfig = $null
             if (Test-Path $claudeConfigFile) {
-                $existingContent = Get-Content $claudeConfigFile -Raw -ErrorAction SilentlyContinue
+                # 明確以 UTF-8 讀取（Windows PowerShell 5.1 的預設是 ANSI，會毀損非 ASCII 內容）
+                $existingContent = [System.IO.File]::ReadAllText($claudeConfigFile, (New-Object System.Text.UTF8Encoding($false)))
                 if (-not [string]::IsNullOrWhiteSpace($existingContent)) {
                     try {
                         $claudeConfig = $existingContent | ConvertFrom-Json
                     }
                     catch {
-                        # 備份損壞的設定檔
-                        $backupPath = "$claudeConfigFile.bak"
-                        Copy-Item $claudeConfigFile $backupPath -Force
-                        Write-Info "Claude Desktop 設定檔格式異常，已備份為 .bak"
+                        # 既有設定檔無法解析：絕不覆寫，直接跳過此目錄
+                        Write-Fail "Claude Desktop 設定檔 JSON 格式異常，未修改：$claudeConfigFile"
+                        Write-Info "解析錯誤：$($_.Exception.Message)"
+                        Write-Info "請修正該檔後重跑，或手動將以下內容加入 mcpServers ："
+                        Write-Host "    `"revit-mcp`": { `"command`": `"node`", `"args`": [`"$indexJsPath`"] }" -ForegroundColor Gray
+                        Add-Result "Claude Desktop" "FAIL" "Malformed JSON, not modified: $claudeConfigFile"
+                        continue
                     }
+                    # 解析成功：寫入前先留一份帶時間戳的備份（不覆寫舊備份）
+                    Copy-Item $claudeConfigFile "$claudeConfigFile.$(Get-Date -Format yyyyMMddHHmmss).bak"
                 }
             }
 
@@ -845,7 +893,9 @@ else {
             }
 
             $claudeConfigJson = $claudeConfig | ConvertTo-Json -Depth 10
-            [System.IO.File]::WriteAllText($claudeConfigFile, $claudeConfigJson, [System.Text.Encoding]::UTF8)
+            # JSON 不可帶 BOM（RFC 8259）；[System.Text.Encoding]::UTF8 會寫入 BOM，Node 的 JSON.parse 會拒絕
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($claudeConfigFile, $claudeConfigJson, $utf8NoBom)
             Write-OK "Claude Desktop 設定已寫入"
             Add-Result "Claude Desktop" "OK" $claudeConfigFile
         }
@@ -855,10 +905,6 @@ else {
             Write-Host "    `"revit-mcp`": { `"command`": `"node`", `"args`": [`"$indexJsPath`"] }" -ForegroundColor Gray
             Add-Result "Claude Desktop" "FAIL" $_.Exception.Message
         }
-    }
-    else {
-        Write-Skip "Claude Desktop 未安裝（$claudeConfigDir 不存在）"
-        Add-Result "Claude Desktop" "SKIP" "Not installed"
     }
 
     # --- Gemini CLI ---
@@ -909,7 +955,9 @@ else {
         }
 
         $geminiConfigJson = $geminiConfig | ConvertTo-Json -Depth 10
-        [System.IO.File]::WriteAllText($geminiConfigFile, $geminiConfigJson, [System.Text.Encoding]::UTF8)
+        # 同 Claude Desktop：JSON 不帶 BOM
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($geminiConfigFile, $geminiConfigJson, $utf8NoBom)
         Write-OK "Gemini CLI 設定已寫入"
         Add-Result "Gemini CLI" "OK" $geminiConfigFile
     }
@@ -992,9 +1040,9 @@ else {
         if ($isAdmin) {
             Write-Host "    正在重啟 HTTP 服務以釋放 Port..." -ForegroundColor Yellow
             try {
-                $null = net stop http /y 2>&1
+                $null = Invoke-ExternalCommand { net stop http /y 2>&1 }
                 Start-Sleep -Seconds 1
-                $null = net start http 2>&1
+                $null = Invoke-ExternalCommand { net start http 2>&1 }
                 Start-Sleep -Milliseconds 500
                 $listeners3 = [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
                 $released = ($listeners3 | Where-Object { $_.Port -eq 8964 }).Count -eq 0
