@@ -269,11 +269,11 @@ namespace RevitMCP.Tests.IssueManager
         {
             ProjectSnapshot snap;
             var vm = LoggedInVm(out snap);
-            Assert.AreEqual("將上傳 0 張圖紙、0 個視圖、1 個模型", vm.SummaryText);
+            StringAssert.StartsWith("將上傳 0 張圖紙、0 個視圖", vm.SummaryText); StringAssert.Contains("1 個模型", vm.SummaryText);
             CollectionAssert.AreEqual(new[] { "這個版本將缺圖（沒有勾選任何圖紙）" }, vm.MissingWarnings.ToArray());
             vm.SelectAllSheets(true);
             vm.IncludeModel = false;
-            Assert.AreEqual("將上傳 3 張圖紙、4 個視圖、0 個模型", vm.SummaryText);
+            StringAssert.StartsWith("將上傳 3 張圖紙、4 個視圖", vm.SummaryText); StringAssert.Contains("0 個模型", vm.SummaryText);
             CollectionAssert.AreEqual(new[] { "這個版本將缺模型（沒有勾選 3D 模型）" }, vm.MissingWarnings.ToArray());
             Assert.IsFalse(vm.DesignOptionsEnabled);
         }

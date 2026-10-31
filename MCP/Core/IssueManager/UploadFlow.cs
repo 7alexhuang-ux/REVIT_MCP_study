@@ -29,6 +29,8 @@ namespace RevitMCP.Core.IssueManager
         public string BundleId { get; set; }
         public string SetId { get; set; }
         public string Url { get; set; }
+        /// <summary>伺服器指派的版本號（D-801）；舊網站為 null。</summary>
+        public string Version { get; set; }
         public List<string> Warnings { get; set; } = new List<string>();
     }
 
@@ -110,6 +112,17 @@ namespace RevitMCP.Core.IssueManager
 
                 flowProgress.Stage("向 Issue Manager 建立版本包");
                 var created = await CreateBundleAsync(request, 0, ct).ConfigureAwait(false);
+                // D-805：舊網站不核發 params 的上傳網址 → 略過參數匯出並提醒，其餘照常。
+                if (created.Find(BundleFile.ViewPositions) == null && request.PositionedViews.Any())
+                {
+                    request.SkipViewPositions = true;
+                    request.PreWarnings.Add(Strings.ServerWithoutViewPositions);
+                }
+                if (request.IncludeParams && created.Find(BundleFile.Params) == null)
+                {
+                    request.IncludeParams = false;
+                    request.PreWarnings.Add(Strings.ServerWithoutParams);
+                }
 
                 var directory = Path.Combine(_bundlesRoot, _now().ToLocalTime().ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 6));
                 ExportedBundle exported;
@@ -249,7 +262,7 @@ namespace RevitMCP.Core.IssueManager
                 TryDeleteDirectory(exported.Directory);
                 return new UploadFlowResult
                 {
-                    BundleId = bundle.BundleId, SetId = finalized.SetId, Url = finalized.Url, Warnings = finalized.Warnings
+                    BundleId = bundle.BundleId, SetId = finalized.SetId, Url = finalized.Url, Version = finalized.Version, Warnings = finalized.Warnings
                 };
             }
             catch (OperationCanceledException)

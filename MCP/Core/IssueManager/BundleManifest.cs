@@ -14,6 +14,7 @@ namespace RevitMCP.Core.IssueManager
         public const string Glb = "glb";
         public const string NamedViews = "namedViews";
         public const string ViewPositions = "viewPositions";
+        public const string Params = "params";
 
         public string Kind { get; set; }
         public string Name { get; set; }
@@ -136,8 +137,8 @@ namespace RevitMCP.Core.IssueManager
             }
 
             var fileObject = new JObject();
-            // viewPositions 屬 V5：網站端 4A 不核發也不收（manifest 帶了會被忽略並回 warning），所以這裡不輸出。
-            foreach (var kind in new[] { BundleFile.Pdf, BundleFile.Glb, BundleFile.NamedViews })
+            // viewPositions（D-705／D-803）與 params（D-802）：網站端 imrevitaddin 起都收；舊網站不核發對應上傳網址時由 UploadFlow 事先略過。
+            foreach (var kind in new[] { BundleFile.Pdf, BundleFile.Glb, BundleFile.NamedViews, BundleFile.ViewPositions, BundleFile.Params })
             {
                 var file = (files ?? Enumerable.Empty<BundleFile>()).FirstOrDefault(f => f.Kind == kind);
                 if (file == null) continue; // 沒勾或沒有該類內容：省略＝缺，版本照常建立

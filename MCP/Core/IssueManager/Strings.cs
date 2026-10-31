@@ -67,12 +67,26 @@ namespace RevitMCP.Core.IssueManager
             return "伺服器處理中：確認建立結果（已等待 " + seconds + " 秒）…";
         }
 
+        public const string IncludeParamsText = "匯出參數與面積表（params.json）";
+        public const string ServerWithoutViewPositions = "這個 Issue Manager 還不能收平面／立面／剖面的位置資料，本次略過；這些圖紙在網站上不能直接對照 3D。";
+        public const string ServerWithoutParams = "這個 Issue Manager 還不能收參數與面積表，本次略過；圖紙與模型照常上傳。";
+
+        public static string Uploaded(string version)
+        {
+            return string.IsNullOrEmpty(version) ? "完成：Issue Manager 已建立一個工作版本。" : "完成：已上傳為 " + version + "（圖說、模型、面積表同一個版本號）。";
+        }
+
         public const string OtherViewsHeader = "其他視圖（不在圖紙上）";
         public const string SheetsHeader = "圖紙";
 
         public static string Summary(int sheets, int views, int models)
         {
             return "將上傳 " + sheets + " 張圖紙、" + views + " 個視圖、" + models + " 個模型";
+        }
+
+        public static string Summary(int sheets, int views, int positioned, int models, bool includeParams)
+        {
+            return "將上傳 " + sheets + " 張圖紙、" + views + " 個視圖（其中 " + positioned + " 個有位置資料）、" + models + " 個模型、參數與面積表 " + (includeParams ? "○" : "✕");
         }
     }
 }

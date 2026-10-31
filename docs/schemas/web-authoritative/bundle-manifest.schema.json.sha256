@@ -1,4 +1,4 @@
-1c3c29d3093931f89abdc86cfc9689ccfbf67b0bbc185f8b90c96b2423bb3e8e  bundle-manifest.schema.json
-# 來源：Issue Manager 分支 imv4a（6b844d77）docs/spec/schemas/bundle-manifest.schema.json。
+70f23781a5762a5ee61db9ff68d55be20740c54b1d3b931e5d25cfee0b6c46a6  bundle-manifest.schema.json
+# 來源：Issue Manager 分支 imrevitaddin（D-802 新增 files.params）docs/spec/schemas/bundle-manifest.schema.json。
 # 雜湊以 LF 換行正規化後計算（避免 Windows autocrlf 讓不同機器算出不同值）。
 # 重新複製網站端 schema 時，必須在同一個 commit 一併更新第一行的雜湊，否則 tools/bundle-manifest.schema.test.mjs 會失敗。

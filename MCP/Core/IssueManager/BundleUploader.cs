@@ -169,6 +169,8 @@ namespace RevitMCP.Core.IssueManager
                 if (file.Kind == BundleFile.Pdf) { max = limits.PdfBytes; label = "圖紙 PDF"; }
                 else if (file.Kind == BundleFile.Glb) { max = limits.GlbBytes; label = "3D 模型 GLB"; }
                 else if (file.Kind == BundleFile.NamedViews) { max = limits.NamedViewsBytes; label = "3D 視角檔"; }
+                else if (file.Kind == BundleFile.ViewPositions) { max = limits.ViewPositionsBytes; label = "視圖位置檔"; }
+                else if (file.Kind == BundleFile.Params) { max = limits.ParamsBytes; label = "參數與面積表檔"; }
                 if (max > 0 && file.Bytes > max)
                     throw new InvalidOperationException(label + "（" + FormatMegabytes(file.Bytes) + "）超過 Issue Manager 的上限（" + FormatMegabytes(max)
                         + "）。請減少勾選的圖紙或改以較小的範圍匯出。");

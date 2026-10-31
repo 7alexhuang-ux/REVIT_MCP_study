@@ -62,6 +62,27 @@ namespace RevitMCP.Tests.IssueManager
             return new ModelExportResult { OriginOffsetMeters = Origin, Warnings = { "2 個材質的貼圖檔找不到，已退回材質顏色。" } };
         }
 
+        public IReadOnlyList<string> LastPositionIds;
+        public double[] LastPositionOrigin;
+        public double[] LastParamsOrigin;
+        public int PositionViewCountOverride = -1;
+
+        public ViewPositionsResult ExportViewPositions(IReadOnlyList<string> viewUniqueIds, double[] originOffsetMeters, string workDirectory, string outputPath)
+        {
+            Calls.Add("viewPositions"); LastPositionIds = viewUniqueIds; LastPositionOrigin = originOffsetMeters;
+            File.WriteAllText(outputPath, new JObject { ["schemaVersion"] = 1, ["originOffsetMeters"] = new JArray(originOffsetMeters), ["views"] = new JArray(), ["warnings"] = new JArray() }.ToString());
+            OnCall("viewPositions");
+            return new ViewPositionsResult { ViewCount = PositionViewCountOverride >= 0 ? PositionViewCountOverride : viewUniqueIds.Count };
+        }
+
+        public ParamsExportResult ExportParams(double[] originOffsetMeters, string outputPath)
+        {
+            Calls.Add("params"); LastParamsOrigin = originOffsetMeters;
+            File.WriteAllText(outputPath, new JObject { ["schema"] = "im-revit-params/1", ["isTestData"] = false, ["levels"] = new JArray(), ["elements"] = new JObject() }.ToString());
+            OnCall("params");
+            return new ParamsExportResult { Elements = 0, Levels = 0, Warnings = { "只包含目前開啟的專案（連結模型的構件未納入參數檔）。" } };
+        }
+
         public void ExportNamedViews(IReadOnlyList<string> viewUniqueIds, double[] originOffsetMeters, string workDirectory, string outputPath)
         {
             Calls.Add("namedViews"); LastNamedViewIds = viewUniqueIds; LastNamedViewOrigin = originOffsetMeters;
@@ -123,11 +144,11 @@ namespace RevitMCP.Tests.IssueManager
             var bundle = new BundleExporter(() => new DateTimeOffset(2026, 10, 25, 1, 2, 3, TimeSpan.Zero))
                 .Export(RequestFactory.Full(), steps, Path.Combine(_dir, "b"), progress, CancellationToken.None);
 
-            CollectionAssert.AreEqual(new[] { "doc", "pdf", "glb", "namedViews" }, steps.Calls);
+            CollectionAssert.AreEqual(new[] { "doc", "pdf", "glb", "namedViews", "viewPositions" }, steps.Calls);
             CollectionAssert.AreEqual(new[] { "A-2", "A-10" }, steps.LastPdfSheets.Select(s => s.Number).ToArray());
             CollectionAssert.AreEqual(new[] { "v-3d" }, steps.LastNamedViewIds.ToArray());
             CollectionAssert.AreEqual(steps.Origin, steps.LastNamedViewOrigin, "命名視圖必須用 GLB 的同一組原點");
-            CollectionAssert.AreEqual(new[] { "pdf", "glb", "namedViews" }, bundle.Files.Select(f => f.Kind).ToArray());
+            CollectionAssert.AreEqual(new[] { "pdf", "glb", "namedViews", "viewPositions" }, bundle.Files.Select(f => f.Kind).ToArray());
 
             foreach (var file in bundle.Files)
             {
@@ -140,8 +161,8 @@ namespace RevitMCP.Tests.IssueManager
             Assert.AreEqual(12.5, (double)manifest["originOffsetMeters"][0]);
             Assert.AreEqual(bundle.Files.First(f => f.Kind == "pdf").Sha256, (string)manifest["files"]["pdf"]["sha256"]);
             CollectionAssert.Contains(manifest["warnings"].Select(w => (string)w).ToList(), "2 個材質的貼圖檔找不到，已退回材質顏色。");
-            Assert.AreEqual(5, progress.Steps.Count);
-            StringAssert.StartsWith("1/5", progress.Steps[0]);
+            Assert.AreEqual(6, progress.Steps.Count);
+            StringAssert.StartsWith("1/6", progress.Steps[0]);
 
         }
 
@@ -179,7 +200,7 @@ namespace RevitMCP.Tests.IssueManager
             var request = RequestFactory.Full();
             request.Views.RemoveAll(v => v.Kind == ViewKinds.ThreeD);
             new BundleExporter().Export(request, steps, Path.Combine(_dir, "b"), null, CancellationToken.None);
-            CollectionAssert.AreEqual(new[] { "doc", "pdf", "glb" }, steps.Calls);
+            CollectionAssert.AreEqual(new[] { "doc", "pdf", "glb", "viewPositions" }, steps.Calls);
         }
 
         [Test]
@@ -580,7 +601,7 @@ namespace RevitMCP.Tests.IssueManager
             Assert.AreEqual(1, _server.FinalizeManifests.Count, "finalize 恰好一次");
             Assert.AreEqual("SD", (string)_server.CreateRequests[0]["stage"]);
             Assert.AreEqual(2, (int)_server.CreateRequests[0]["summary"]["sheets"]);
-            CollectionAssert.AreEqual(new[] { "pdf", "glb", "namedViews" }, ((JObject)_server.FinalizeManifests[0]["files"]).Properties().Select(p => p.Name).ToArray());
+            CollectionAssert.AreEqual(new[] { "pdf", "glb", "namedViews", "viewPositions" }, ((JObject)_server.FinalizeManifests[0]["files"]).Properties().Select(p => p.Name).ToArray());
             CollectionAssert.AreEqual(steps.GlbBytes, _server.StoredFile(result.BundleId, "glb"));
             Assert.IsEmpty(_server.Deleted);
             CollectionAssert.Contains(result.Warnings, "測試警告");

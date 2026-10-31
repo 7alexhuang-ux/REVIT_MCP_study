@@ -93,6 +93,7 @@ namespace RevitMCP.Core.IssueManager
         private bool _isLoggedIn;
         private bool _isBusy;
         private bool _includeModel = true;
+        private bool _includeParams = true;
         private bool _includeDesignOptions = true;
         private string _description = string.Empty;
         private AddinProject _selectedProject;
@@ -195,6 +196,13 @@ namespace RevitMCP.Core.IssueManager
             set { if (Set(ref _includeDesignOptions, value)) RaiseDerived(); }
         }
 
+        /// <summary>匯出參數與面積表（D-803）；預設勾選，不依賴 GLB（參數是 Revit 讀的）。</summary>
+        public bool IncludeParams
+        {
+            get { return _includeParams; }
+            set { if (Set(ref _includeParams, value)) RaiseDerived(); }
+        }
+
         public bool DesignOptionsEnabled { get { return _includeModel; } }
 
         public SheetSetOption SelectedSheetSet
@@ -284,8 +292,10 @@ namespace RevitMCP.Core.IssueManager
         public int CheckedSheetCount { get { return _sheets.Count(s => s.IsChecked); } }
         public int CheckedViewCount { get { return _viewByUniqueId.Values.Count(v => v.IsChecked); } }
         public int ModelCount { get { return _includeModel ? 1 : 0; } }
+        /// <summary>已勾選、且網站能轉成 3D 視角的平面／立面／剖面視圖數（D-803：位置資料跟著勾選自動匯出）。</summary>
+        public int CheckedPositionedViewCount { get { return _viewByUniqueId.Values.Count(v => v.IsChecked && ViewKinds.HasPosition(v.Item.Kind)); } }
 
-        public string SummaryText { get { return Strings.Summary(CheckedSheetCount, CheckedViewCount, ModelCount); } }
+        public string SummaryText { get { return Strings.Summary(CheckedSheetCount, CheckedViewCount, CheckedPositionedViewCount, ModelCount, _includeParams); } }
 
         /// <summary>沒勾圖紙或模型時的提示（允許送出，缺項留空，D-594）。</summary>
         public IList<string> MissingWarnings
@@ -328,6 +338,7 @@ namespace RevitMCP.Core.IssueManager
         {
             Raise("CheckedSheetCount");
             Raise("CheckedViewCount");
+            Raise("CheckedPositionedViewCount");
             Raise("ModelCount");
             Raise("SummaryText");
             Raise("MissingWarnings");
@@ -347,7 +358,8 @@ namespace RevitMCP.Core.IssueManager
                 Description = _description.Trim(),
                 SheetSetName = _selectedSheetSet.Set != null ? _selectedSheetSet.Set.Name : null,
                 IncludeModel = _includeModel,
-                IncludeDesignOptions = _includeModel && _includeDesignOptions
+                IncludeDesignOptions = _includeModel && _includeDesignOptions,
+                IncludeParams = _includeParams
             };
 
             foreach (var node in _sheets.Where(s => s.IsChecked))

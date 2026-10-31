@@ -103,13 +103,13 @@ namespace RevitMCP.Tests.IssueManager
         }
 
         [Test]
-        public async Task CreateBundleReadsLimitsAndOnlyTheThreeFileKinds()
+        public async Task CreateBundleReadsLimitsAndTheFiveFileKinds()
         {
             var api = await Harness.LoggedInApiAsync(_server);
             var created = await api.CreateBundleAsync("p1", "SD", "x", new BundleSummary(), CancellationToken.None);
 
-            CollectionAssert.AreEqual(new[] { "pdf", "glb", "namedViews" }, created.Files.Select(f => f.Kind).ToArray());
-            Assert.IsNull(created.Find("viewPositions"));
+            CollectionAssert.AreEqual(new[] { "pdf", "glb", "namedViews", "viewPositions", "params" }, created.Files.Select(f => f.Kind).ToArray());
+            Assert.IsNotNull(created.Find("viewPositions")); Assert.IsNotNull(created.Find("params")); Assert.AreEqual(8388608L, created.Limits.ParamsBytes);
             Assert.AreEqual(314572800L, created.Limits.PdfBytes);
             Assert.AreEqual(524288000L, created.Limits.GlbBytes);
             Assert.AreEqual(4194304L, created.Limits.NamedViewsBytes);
@@ -117,7 +117,7 @@ namespace RevitMCP.Tests.IssueManager
         }
 
         [Test]
-        public async Task ManifestNeverContainsViewPositionsEvenIfAFileOfThatKindIsPassed()
+        public async Task ManifestContainsViewPositionsWhenItsFileIsPassed()
         {
             var dir = Path.Combine(_dir, "vp");
             Directory.CreateDirectory(dir);
@@ -125,7 +125,7 @@ namespace RevitMCP.Tests.IssueManager
             File.WriteAllText(path, "{}");
             var files = new[] { BundleExporter.Describe(BundleFile.Pdf, "sheets.pdf", WritePdf(dir, 2)), BundleExporter.Describe(BundleFile.ViewPositions, "view_positions.json", path) };
             var manifest = ManifestBuilder.Build(RequestFactory.Full(), new RevitDocInfo { Title = "AR", VersionNumber = "2024" }, DateTimeOffset.UtcNow, new double[] { 0, 0, 0 }, files, null);
-            CollectionAssert.AreEqual(new[] { "pdf" }, ((JObject)manifest["files"]).Properties().Select(p => p.Name).ToArray());
+            CollectionAssert.AreEqual(new[] { "pdf", "viewPositions" }, ((JObject)manifest["files"]).Properties().Select(p => p.Name).ToArray());
             await Task.FromResult(0);
         }
 

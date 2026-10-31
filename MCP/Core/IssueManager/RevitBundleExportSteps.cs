@@ -167,6 +167,36 @@ namespace RevitMCP.Core.IssueManager
             File.Copy(produced, outputPath, true);
         }
 
+        public ViewPositionsResult ExportViewPositions(IReadOnlyList<string> viewUniqueIds, double[] originOffsetMeters, string workDirectory, string outputPath)
+        {
+            RequireSameDocument();
+            var dir = Path.Combine(workDirectory, "view_positions");
+            Directory.CreateDirectory(dir);
+            var report = Dispatch("export_view_positions", new JObject
+            {
+                ["outputDir"] = dir,
+                ["originOffsetMeters"] = new JArray(originOffsetMeters[0], originOffsetMeters[1], originOffsetMeters[2]),
+                ["uniqueIds"] = new JArray(viewUniqueIds.ToArray()),
+                ["onlyOnSheets"] = false
+            });
+            var produced = Path.Combine(dir, "view_positions.json");
+            if (!File.Exists(produced)) throw new InvalidOperationException("視圖位置匯出完成但找不到輸出檔。");
+            File.Copy(produced, outputPath, true);
+            var result = new ViewPositionsResult { ViewCount = report["viewCount"] != null ? (int)report["viewCount"] : 0 };
+            var skipped = report["skipped"] as JObject;
+            if (skipped != null && skipped.Count > 0)
+                result.Warnings.Add("部分視圖讀不到位置而略過：" + string.Join("、", skipped.Properties().Select(p => p.Name + " " + p.Value)) + "。");
+            return result;
+        }
+
+        public ParamsExportResult ExportParams(double[] originOffsetMeters, string outputPath)
+        {
+            var doc = RequireSameDocument();
+            var file = RevitParamsReader.Read(doc, originOffsetMeters, _uiApp.Application.VersionNumber);
+            var result = ParamsFileBuilder.Write(file, outputPath);
+            return result;
+        }
+
         /// <summary>尋找 node.exe 時不可信任的資料夾：開啟中專案所在的資料夾（裡面的 node.exe 不是使用者安裝的 Node.js）。</summary>
         private IEnumerable<string> UntrustedRoots()
         {

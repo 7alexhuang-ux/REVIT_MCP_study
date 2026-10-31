@@ -236,9 +236,9 @@ namespace RevitMCP.Tests.IssueManager
             var bundle = await new BundleExporter().ExportAsync(RequestFactory.Full(), steps, new LoggingRunner(events),
                 Path.Combine(_dir, "b"), new LoggingProgress(events), CancellationToken.None);
 
-            CollectionAssert.AreEqual(new[] { "doc", "pdf", "glb", "namedViews" }, steps.Calls);
-            CollectionAssert.AreEqual(new[] { "report", "run", "report", "run", "report", "run", "report", "run", "report" }, events,
-                "doc／pdf／glb／namedViews 各自一次 ExternalEvent，步驟之間回到呼叫端（Revit 訊息迴圈）；manifest 不佔用 Revit 執行緒");
+            CollectionAssert.AreEqual(new[] { "doc", "pdf", "glb", "namedViews", "viewPositions" }, steps.Calls);
+            CollectionAssert.AreEqual(new[] { "report", "run", "report", "run", "report", "run", "report", "run", "report", "run", "report" }, events,
+                "doc／pdf／glb／namedViews／viewPositions 各自一次 ExternalEvent，步驟之間回到呼叫端（Revit 訊息迴圈）；manifest 不佔用 Revit 執行緒");
             Assert.IsTrue(File.Exists(bundle.ManifestPath));
         }
 

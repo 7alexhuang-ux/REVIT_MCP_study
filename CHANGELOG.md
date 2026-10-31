@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+### ✨ 上傳到 Issue Manager：補上視圖位置、參數與面積表、版本號顯示（imrevitaddin，D-012，2026-11-01）
+
+- 勾選含平面／天花／剖面／立面時，自動多匯出 `view_positions.json`（既有 `export_view_positions`；原點與 GLB 相同）。沒有模型時略過並提醒。
+- 新增 `params.json`（`im-revit-params/1`）：樓層、構件參數（寬高長厚面積體積、樓層、材料、類型）與「房間面積表」；視窗多一個「匯出參數與面積表」勾選。讀不到的欄位不寫，不補 0。連結模型的構件未納入。超過 8 MiB 依房間→門窗→其他保留並提醒。
+- 完成畫面顯示網站指派的版本號（「已上傳為 v14」）；舊網站（沒有 `viewPositions`／`params` 上傳網址）自動略過並提醒。
+- 新增 opt-in 的實機自測鉤子 `ImSelfTest`（`%USERPROFILE%\.revit-mcp\im-selftest.json`）。不新增 MCP 工具，工具數不變。
+- manifest schema 與網站端新版同步（`files.params`）。測試：MCP.Tests 全部 632 項（2 略過）、假伺服器 16 項。**ribbon 按鈕與 WPF 視窗點擊、真實瀏覽器登入流程未實機操作。**
+
 ### 🔀 合併 — 同步 upstream/main（93365e7，2026-10-31）
 
 - 在分支 `merge/upstream-2026-10-30` 把 `upstream/main`（原作者 shuotao，領先 327 個 commit）合併進 `grading-workflow-v2`（領先 110 個 commit），解 42 個衝突檔；整地（Toposolid／坵塊法／限建核對）、ViewSync 前身、socket 強化、3D 網頁匯出（設計選項／命名視圖／視圖位置）功能全數保留。

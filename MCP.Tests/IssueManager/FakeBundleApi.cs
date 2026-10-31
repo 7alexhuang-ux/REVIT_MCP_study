@@ -36,7 +36,10 @@ namespace RevitMCP.Tests.IssueManager
             new Dictionary<string, Dictionary<string, SortedDictionary<int, byte[]>>>();
         public string RejectFinalizeWithCode;
         /// <summary>建立回應的 limits（網站端：PDF 300 MB、GLB 500 MB、命名視圖 4 MB、1,000 頁）。</summary>
-        public JObject Limits = new JObject { ["pdfBytes"] = 314572800L, ["glbBytes"] = 524288000L, ["namedViewsBytes"] = 4194304L, ["pdfPages"] = 1000 };
+        public JObject Limits = new JObject { ["pdfBytes"] = 314572800L, ["glbBytes"] = 524288000L, ["namedViewsBytes"] = 4194304L, ["viewPositionsBytes"] = 4194304L, ["paramsBytes"] = 8388608L, ["pdfPages"] = 1000 };
+        /// <summary>建立回應核發的檔案種類。預設是 imrevitaddin 起的網站（五種）；測試舊網站時改成 pdf／glb／namedViews。</summary>
+        public string[] Kinds = { "pdf", "glb", "namedViews", "viewPositions", "params" };
+        private string VersionOf(string bundleId) { return "v" + (CreatedBundleIds.IndexOf(bundleId) + 1); }
         public readonly List<string> CreatedBundleIds = new List<string>();
         public readonly List<string> FinalizeRequestBundleIds = new List<string>();
         /// <summary>bundle 狀態：open／finalizing／finalized／failed／deleted／expired。</summary>
@@ -114,7 +117,7 @@ namespace RevitMCP.Tests.IssueManager
                 var id = "bundle-" + Guid.NewGuid().ToString("N").Substring(0, 8);
                 lock (_gate) { _stored[id] = new Dictionary<string, SortedDictionary<int, byte[]>>(); BundleStatus[id] = "open"; CreatedBundleIds.Add(id); }
                 var files = new JArray();
-                foreach (var kind in new[] { "pdf", "glb", "namedViews" })
+                foreach (var kind in Kinds)
                 {
                     files.Add(new JObject
                     {
@@ -152,7 +155,7 @@ namespace RevitMCP.Tests.IssueManager
                         if (!BundleStatus.TryGetValue(id, out current)) return FakeHandler.Error(HttpStatusCode.NotFound, "not_found");
                         string existing;
                         if (current == "finalized" && _finalizedSetIds.TryGetValue(id, out existing))
-                            return FakeHandler.Json(HttpStatusCode.OK, new JObject { ["setId"] = existing, ["url"] = "https://im.example.test/sets/" + existing, ["warnings"] = new JArray() });
+                            return FakeHandler.Json(HttpStatusCode.OK, new JObject { ["setId"] = existing, ["url"] = "https://im.example.test/sets/" + existing, ["version"] = VersionOf(id), ["warnings"] = new JArray() });
                         if (current == "expired") return FakeHandler.Error((HttpStatusCode)410, "bundle_expired");
                         if (current == "failed") return FakeHandler.Error(HttpStatusCode.Conflict, "bundle_failed");
                         if (current == "finalizing") return FakeHandler.Error(HttpStatusCode.Conflict, "finalize_in_progress");
@@ -176,7 +179,7 @@ namespace RevitMCP.Tests.IssueManager
                         var setId = "set-" + id;
                         _finalizedSetIds[id] = setId;
                         BundleStatus[id] = "finalized";
-                        return FakeHandler.Json(HttpStatusCode.OK, new JObject { ["setId"] = setId, ["url"] = "https://im.example.test/sets/" + setId, ["warnings"] = new JArray("測試警告") });
+                        return FakeHandler.Json(HttpStatusCode.OK, new JObject { ["setId"] = setId, ["url"] = "https://im.example.test/sets/" + setId, ["version"] = VersionOf(id), ["warnings"] = new JArray("測試警告") });
                     }
                 }
             }

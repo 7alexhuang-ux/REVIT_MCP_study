@@ -10,7 +10,11 @@
 
 - 不經 MCP WebSocket：以 `IExternalCommand` 啟動、匯出經 `ExternalEventManager` 佇列在 Revit API 執行緒執行，**MCP 服務關閉時也能用**。匯出本身仍呼叫既有指令（`export_sheets_pdf`、`list_design_options`、`export_design_options`、`export_named_views`），經 `CommandExecutor.ExecuteCommand` 分派，沒有另寫匯出碼。
 - 不新增 MCP 工具（工具數維持 137）、不新增 domain、不新增 skill。
-- 視圖位置檔（`view_positions.json`）屬任務書 V5，**本案不匯出**，manifest 省略該欄位。
+- **2026-11-01（分支 `imrevitaddin`，D-012）**：勾選含平面／天花／剖面／立面時自動多匯出 `view_positions.json`（既有 `export_view_positions`）；視窗新增「匯出參數與面積表」勾選，多匯出 `params.json`（`RevitParamsReader` 讀 Revit、`ParamsFileBuilder` 組 JSON）；finalize 回的 `version` 顯示在完成畫面。舊網站沒有對應上傳網址時事先略過並提醒。實機自測見下方「實機自測鉤子」。
+
+## 1.5 實機自測鉤子（開發／驗收用，opt-in）
+
+建立 `%USERPROFILE%\.revit-mcp\im-selftest.json`（外掛不會自己建立；跑過一次即改名 `.done`）後啟動 Revit，第一次 Idling 會用標記裡的短效 refresh 權杖（記憶體內，不碰 DPAPI 的正式登入檔）跑一次與按鈕相同的 `UploadFlow`，結果寫到 `resultPath`。欄位：`baseUrl`、`refreshToken`、`userId`、`email`、`projectId`、`stage`、`description`、`openPath`（可省略，要開的 .rvt）、`maxSheets`（預設 6）、`includeModel`／`includeParams`（預設 true）、`evidenceDir`、`resultPath`。**標記內容含權杖，用完請刪 `.done`。**
 
 ## 2. 設定（第一次使用）
 

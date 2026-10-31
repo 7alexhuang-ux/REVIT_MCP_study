@@ -317,11 +317,11 @@ namespace RevitMCP.Tests.IssueManager
         }
 
         [Test]
-        public async Task TheRealServerAnswers201AndOnlyThreeFileKinds()
+        public async Task TheRealServerAnswers201AndTheFiveFileKinds()
         {
             var api = await LoggedInApiAsync();
             var created = await api.CreateBundleAsync("project-1", "SD", "x", new BundleSummary(), CancellationToken.None);
-            CollectionAssert.AreEqual(new[] { "pdf", "glb", "namedViews" }, created.Files.Select(f => f.Kind).ToArray());
+            CollectionAssert.AreEqual(new[] { "pdf", "glb", "namedViews", "viewPositions", "params" }, created.Files.Select(f => f.Kind).ToArray());
             Assert.AreEqual(1000, created.Limits.PdfPages);
             await api.DeleteBundleAsync(created.BundleId, CancellationToken.None);
         }

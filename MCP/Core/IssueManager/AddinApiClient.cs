@@ -92,7 +92,7 @@ namespace RevitMCP.Core.IssueManager
                 result.Limits = new BundleLimits
                 {
                     PdfBytes = ReadLong(limits["pdfBytes"]), GlbBytes = ReadLong(limits["glbBytes"]),
-                    NamedViewsBytes = ReadLong(limits["namedViewsBytes"]), PdfPages = (int)Math.Min(int.MaxValue, ReadLong(limits["pdfPages"]))
+                    NamedViewsBytes = ReadLong(limits["namedViewsBytes"]), ViewPositionsBytes = ReadLong(limits["viewPositionsBytes"]), ParamsBytes = ReadLong(limits["paramsBytes"]), PdfPages = (int)Math.Min(int.MaxValue, ReadLong(limits["pdfPages"]))
                 };
             }
             var files = json["files"] as JArray;
@@ -216,7 +216,7 @@ namespace RevitMCP.Core.IssueManager
         {
             var json = await SendJsonAsync(_finalizeHttp, HttpMethod.Post, "/api/addin/v1/bundles/" + Uri.EscapeDataString(bundleId) + "/finalize",
                 new JObject { ["manifest"] = manifest }, true, ct).ConfigureAwait(false);
-            var result = new FinalizeResult { SetId = (string)json["setId"], Url = (string)json["url"] };
+            var result = new FinalizeResult { SetId = (string)json["setId"], Url = (string)json["url"], Version = json["version"] != null && json["version"].Type == JTokenType.String ? (string)json["version"] : null };
             var warnings = json["warnings"] as JArray;
             if (warnings != null) foreach (var w in warnings) result.Warnings.Add((string)w);
             return result;

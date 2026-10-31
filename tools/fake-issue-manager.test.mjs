@@ -135,15 +135,15 @@ test('bundles：階段與說明必填、版本標頭不符回 426、無權杖回
     } finally { await fake.close(); }
 });
 
-test('bundles：建立回 201，files 只有 pdf／glb／namedViews，附 limits', async () => {
+test('bundles：建立回 201，files 有五種（含 viewPositions／params），附 limits', async () => {
     const fake = await startFakeServer({ partBytes: 8 * 1024 * 1024 });
     try {
         const { tokens } = await login(fake);
         const response = await createBundle(fake, tokens);
         assert.equal(response.status, 201);
         const created = await response.json();
-        assert.deepEqual(created.files.map(f => f.kind), ['pdf', 'glb', 'namedViews']);
-        assert.deepEqual(created.limits, { pdfBytes: 300 * 1024 * 1024, glbBytes: 500 * 1024 * 1024, namedViewsBytes: 4 * 1024 * 1024, pdfPages: 1000 });
+        assert.deepEqual(created.files.map(f => f.kind), ['pdf', 'glb', 'namedViews', 'viewPositions', 'params']);
+        assert.deepEqual(created.limits, { pdfBytes: 300 * 1024 * 1024, glbBytes: 500 * 1024 * 1024, namedViewsBytes: 4 * 1024 * 1024, viewPositionsBytes: 4 * 1024 * 1024, paramsBytes: 8 * 1024 * 1024, pdfPages: 1000 });
         assert.ok(created.files.every(f => f.partBytes === 8 * 1024 * 1024));
         assert.equal(created.files.find(f => f.kind === 'namedViews').urls.length, 1, '4 MiB ÷ 8 MiB＝1 段');
         assert.ok(created.files.find(f => f.kind === 'pdf').urls.length >= 38, '300 MiB ÷ 8 MiB 至少 38 段（假伺服器上限 256）');
@@ -167,7 +167,7 @@ test('bundles：分段上傳、finalize 檢查雜湊與標頭、冪等、DELETE'
         assert.equal(ticket.partBytes, 8);
         for (let i = 0; i * 8 < pdf.length; i++) assert.equal((await put('pdf', i, pdf.subarray(i * 8, (i + 1) * 8))).status, 200);
         assert.equal((await put('pdf', 0, Buffer.alloc(9))).status, 413, '分段超過 partBytes');
-        assert.equal((await put('viewPositions', 0, Buffer.from('x'))).status, 404, 'viewPositions 不核發');
+        assert.equal((await put('bogusKind', 0, Buffer.from('x'))).status, 404, '未知種類不核發');
         const withHash = (hash, data) => fetch(`${fake.url}/upload/${created.bundleId}/pdf/0`, { method: 'PUT', headers: { Authorization: `Bearer ${tokens.access_token}`, 'X-Part-Sha256': hash }, body: data });
         assert.equal((await withHash('0'.repeat(64), Buffer.from('abc'))).status, 400, 'X-Part-Sha256 不符 → 400 checksum_mismatch');
         assert.equal((await withHash(sha256Hex(Buffer.from('%PDF-1.7')), Buffer.from('%PDF-1.7'))).status, 200);

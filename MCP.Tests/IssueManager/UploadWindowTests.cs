@@ -92,7 +92,7 @@ namespace RevitMCP.Tests.IssueManager
             {
                 var vm = new ExportSelectionViewModel(Samples.Snapshot());
                 var window = NewWindow(vm);
-                Assert.AreEqual("將上傳 0 張圖紙、0 個視圖、1 個模型", window.SummaryText.Text);
+                StringAssert.StartsWith("將上傳 0 張圖紙、0 個視圖", window.SummaryText.Text); StringAssert.Contains("1 個模型", window.SummaryText.Text);
                 StringAssert.Contains("缺圖", window.WarningText.Text);
 
                 var sheetsRoot = (TreeViewItem)window.Tree.Items[0];
@@ -102,7 +102,7 @@ namespace RevitMCP.Tests.IssueManager
                 HeaderOf(a2).IsChecked = true;
                 Assert.IsTrue(vm.Sheets[1].IsChecked);
                 Assert.IsTrue(vm.Sheets[1].Viewports.All(v => v.IsChecked), "勾圖紙連視口視圖一起勾");
-                Assert.AreEqual("將上傳 1 張圖紙、2 個視圖、1 個模型", window.SummaryText.Text);
+                StringAssert.StartsWith("將上傳 1 張圖紙、2 個視圖", window.SummaryText.Text); StringAssert.Contains("1 個模型", window.SummaryText.Text);
                 Assert.AreEqual(string.Empty, window.WarningText.Text);
 
                 window.ModelBox.IsChecked = false;

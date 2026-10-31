@@ -4,7 +4,7 @@
 //   /api/addin/me、/api/addin/projects、版本包 bundles（建立、分段 PUT、finalize、DELETE）。
 // 不含任何真實權杖或網址；資料只存在記憶體；只綁 127.0.0.1。
 // 版本包合約依 Issue Manager 網站端 imv4a 實作（revit-addin-export.md §5.2）：建立回 201、階段錯誤碼 invalid_input、
-//   files 只有 pdf／glb／namedViews、finalize 驗證失敗即作廢（之後 409 bundle_failed）、finalize 進行中 409 finalize_in_progress、
+//   files 有 pdf／glb／namedViews／viewPositions／params（imrevitaddin，D-801／D-802）、finalize 回 version（v1、v2…）、finalize 驗證失敗即作廢（之後 409 bundle_failed）、finalize 進行中 409 finalize_in_progress、
 //   DELETE 已 finalize 的 bundle 回 409 already_finalized、過期 410 bundle_expired、只有 namedViews（沒有 PDF 也沒有 GLB）回 400 invalid_manifest。
 // 用法：node tools/fake-issue-manager/server.mjs [--port 8799] [--auto-approve] [--part-bytes 4194304]
 import http from 'node:http';
@@ -15,9 +15,9 @@ import path from 'node:path';
 const b64url = buffer => buffer.toString('base64url');
 const sha256Hex = buffer => crypto.createHash('sha256').update(buffer).digest('hex');
 const randomToken = prefix => prefix + b64url(crypto.randomBytes(32));
-const KINDS = ['pdf', 'glb', 'namedViews'];
-const LIMITS = { pdfBytes: 300 * 1024 * 1024, glbBytes: 500 * 1024 * 1024, namedViewsBytes: 4 * 1024 * 1024, pdfPages: 1000 };
-const LIMIT_OF_KIND = { pdf: 'pdfBytes', glb: 'glbBytes', namedViews: 'namedViewsBytes' };
+const KINDS = ['pdf', 'glb', 'namedViews', 'viewPositions', 'params'];
+const LIMITS = { pdfBytes: 300 * 1024 * 1024, glbBytes: 500 * 1024 * 1024, namedViewsBytes: 4 * 1024 * 1024, viewPositionsBytes: 4 * 1024 * 1024, paramsBytes: 8 * 1024 * 1024, pdfPages: 1000 };
+const LIMIT_OF_KIND = { pdf: 'pdfBytes', glb: 'glbBytes', namedViews: 'namedViewsBytes', viewPositions: 'viewPositionsBytes', params: 'paramsBytes' };
 // 假伺服器為了輕量，每個 kind 最多核發 256 個網址（真實伺服器依「大小上限 ÷ partBytes」給足）；options.urlsPerFile 可覆寫。
 const MAX_FAKE_URLS = 256;
 
@@ -180,7 +180,7 @@ export async function startFakeServer(options = {}) {
             expiresAt: new Date(bundle.expiresAt).toISOString(),
             limits: LIMITS,
             files: KINDS.map(kind => ({
-                kind, name: { pdf: 'sheets.pdf', glb: 'model.glb', namedViews: 'named_views.json' }[kind], partBytes: config.partBytes,
+                kind, name: { pdf: 'sheets.pdf', glb: 'model.glb', namedViews: 'named_views.json', viewPositions: 'view_positions.json', params: 'params.json' }[kind], partBytes: config.partBytes,
                 urls: Array.from({ length: urlCount(kind) }, (_, i) => `${uploadOrigin}/upload/${id}/${kind}/${i}`)
             }))
         };
@@ -250,7 +250,7 @@ export async function startFakeServer(options = {}) {
             return sendJson(res, 200, { deleted: true }); // deleted／expired 重送也回 200（冪等）
         }
         if (req.method === 'POST' && parts[5] === 'finalize') {
-            if (bundle.status === 'finalized') return sendJson(res, 200, { setId: bundle.setId, url: `${origin}/projects/${bundle.projectId}/sets/${bundle.setId}`, warnings: bundle.warnings ?? [] });
+            if (bundle.status === 'finalized') return sendJson(res, 200, { setId: bundle.setId, url: `${origin}/projects/${bundle.projectId}/sets/${bundle.setId}`, version: bundle.version, warnings: bundle.warnings ?? [] });
             if (bundle.status === 'expired') return error(res, 410, 'bundle_expired');
             if (bundle.status === 'failed') return error(res, 409, 'bundle_failed');
             if (bundle.status === 'finalizing') return error(res, 409, 'finalize_in_progress');
@@ -261,7 +261,6 @@ export async function startFakeServer(options = {}) {
             const rejected = validateManifest(manifest);
             if (rejected) { failBundle(bundle); return error(res, rejected.status, rejected.code); }
             for (const [kind, file] of Object.entries(manifest.files)) {
-                if (kind === 'viewPositions') continue; // V5：4A 不收，忽略並回 warning
                 const stored = bundle.parts.get(kind);
                 if (!stored) { failBundle(bundle); return error(res, 400, 'invalid_file'); }
                 const joined = Buffer.concat([...stored.entries()].sort((a, b) => a[0] - b[0]).map(entry => entry[1]));
@@ -279,9 +278,10 @@ export async function startFakeServer(options = {}) {
             bundle.status = 'finalized';
             bundle.setId = crypto.randomUUID();
             bundle.manifest = manifest;
-            bundle.warnings = manifest.files.viewPositions ? ['view_positions_not_supported'] : [];
+            bundle.warnings = [];
             state.finalizeCount++;
-            return sendJson(res, 200, { setId: bundle.setId, url: `${origin}/projects/${bundle.projectId}/sets/${bundle.setId}`, warnings: bundle.warnings });
+            bundle.version = `v${state.finalizeCount}`; // D-801：伺服器指派的版本號
+            return sendJson(res, 200, { setId: bundle.setId, url: `${origin}/projects/${bundle.projectId}/sets/${bundle.setId}`, version: bundle.version, warnings: bundle.warnings });
         }
         return error(res, 404, 'not_found');
     }

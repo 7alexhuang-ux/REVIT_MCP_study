@@ -143,7 +143,7 @@ namespace RevitMCP.Tests.IssueManager
 
                 PumpUntil(() => !rig.Window.IsBusy);
 
-                CollectionAssert.AreEqual(new[] { "doc", "pdf", "glb" }, rig.Steps.Calls, "送審圖集只勾 A-2 與立面：沒有 3D 視圖 → 不匯出視角");
+                CollectionAssert.AreEqual(new[] { "doc", "pdf", "glb", "viewPositions", "params" }, rig.Steps.Calls, "送審圖集只勾 A-2 與立面：沒有 3D 視圖 → 不匯出視角；立面有位置 → 匯出位置；視窗預設勾參數與面積表");
                 Assert.AreEqual(1, rig.Server.FinalizeManifests.Count);
                 Assert.AreEqual("SD", (string)rig.Server.CreateRequests[0]["stage"]);
                 StringAssert.Contains("完成", rig.Window.StatusText.Text);

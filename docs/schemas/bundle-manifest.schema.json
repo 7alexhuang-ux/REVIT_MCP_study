@@ -81,7 +81,8 @@
         "pdf": { "$ref": "#/definitions/pdfFile" },
         "glb": { "$ref": "#/definitions/glbFile" },
         "namedViews": { "$ref": "#/definitions/jsonFile" },
-        "viewPositions": { "$ref": "#/definitions/jsonFile" }
+        "viewPositions": { "$ref": "#/definitions/jsonFile" },
+        "params": { "$ref": "#/definitions/paramsFile" }
       }
     },
     "options": {
@@ -112,6 +113,16 @@
       "properties": {
         "name": { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^\\\\/\\u0000-\\u001f\\u007f]+\\.[Gg][Ll][Bb]$" },
         "bytes": { "type": "integer", "minimum": 20, "maximum": 524288000 },
+        "sha256": { "$ref": "#/definitions/sha256" }
+      }
+    },
+    "paramsFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "bytes", "sha256"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^\\\\/\\u0000-\\u001f\\u007f]+\\.[Jj][Ss][Oo][Nn]$" },
+        "bytes": { "type": "integer", "minimum": 2, "maximum": 8388608 },
         "sha256": { "$ref": "#/definitions/sha256" }
       }
     },

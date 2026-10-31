@@ -39,6 +39,24 @@ namespace RevitMCP.Core.IssueManager
         ModelExportResult ExportModel(bool includeDesignOptions, string workDirectory, string outputGlbPath);
         /// <summary>匯出 named_views.json 到 outputPath，原點必須與 GLB 相同。</summary>
         void ExportNamedViews(IReadOnlyList<string> viewUniqueIds, double[] originOffsetMeters, string workDirectory, string outputPath);
+        /// <summary>匯出 view_positions.json（平面／天花／剖面／立面的樓層高度、視圖範圍、裁剪框、剖面框；D-597），原點必須與 GLB 相同。</summary>
+        ViewPositionsResult ExportViewPositions(IReadOnlyList<string> viewUniqueIds, double[] originOffsetMeters, string workDirectory, string outputPath);
+        /// <summary>匯出 params.json（im-revit-params/1：樓層、構件參數、房間面積表；D-802）。讀不到的欄位給 null，不猜。</summary>
+        ParamsExportResult ExportParams(double[] originOffsetMeters, string outputPath);
+    }
+
+    public sealed class ViewPositionsResult
+    {
+        public int ViewCount { get; set; }
+        public List<string> Warnings { get; set; } = new List<string>();
+    }
+
+    public sealed class ParamsExportResult
+    {
+        public int Elements { get; set; }
+        public int Levels { get; set; }
+        public int Schedules { get; set; }
+        public List<string> Warnings { get; set; } = new List<string>();
     }
 
     /// <summary>
@@ -76,6 +94,8 @@ namespace RevitMCP.Core.IssueManager
         public const string PdfName = "sheets.pdf";
         public const string GlbName = "model.glb";
         public const string NamedViewsName = "named_views.json";
+        public const string ViewPositionsName = "view_positions.json";
+        public const string ParamsName = "params.json";
         public const string ManifestName = "manifest.json";
 
         /// <summary>量測視口外框時每一批的視口數（每批一次 ExternalEvent，批次之間回到訊息迴圈、更新進度、檢查取消）。</summary>
@@ -110,11 +130,15 @@ namespace RevitMCP.Core.IssueManager
             var doExportModel = request.IncludeModel;
             var threeD = request.ThreeDViews.Select(v => v.UniqueId).ToList();
             var doExportNamedViews = doExportModel && threeD.Count > 0;
+            var positioned = request.PositionedViews.Select(v => v.UniqueId).ToList();
+            // 位置資料需要模型才有意義（網站端沒有 GLB 就不匯入，D-705）；沒模型時略過並在下面說明。
+            var doExportPositions = doExportModel && positioned.Count > 0 && !request.SkipViewPositions;
+            var doExportParams = request.IncludeParams;
             var toMeasure = ViewportsNeedingMeasure(request);
             var doMeasure = toMeasure.Count > 0;
-            var total = 1 + (doMeasure ? 1 : 0) + (doExportPdf ? 1 : 0) + (doExportModel ? 1 : 0) + (doExportNamedViews ? 1 : 0) + 1;
+            var total = 1 + (doMeasure ? 1 : 0) + (doExportPdf ? 1 : 0) + (doExportModel ? 1 : 0) + (doExportNamedViews ? 1 : 0) + (doExportPositions ? 1 : 0) + (doExportParams ? 1 : 0) + 1;
             var step = 0;
-            var warnings = new List<string>();
+            var warnings = new List<string>(request.PreWarnings ?? new List<string>());
             var files = new List<BundleFile>();
             var origin = new double[] { 0, 0, 0 };
 
@@ -187,6 +211,8 @@ namespace RevitMCP.Core.IssueManager
             {
                 warnings.Add("沒有匯出 3D 模型，所以略過 3D 視角資料（視圖仍列在清單中）。");
             }
+            if (!doExportModel && positioned.Count > 0 && !request.SkipViewPositions)
+                warnings.Add("沒有匯出 3D 模型，所以略過平面／立面／剖面的位置資料（視圖仍列在清單中）。");
 
             if (doExportNamedViews)
             {
@@ -197,6 +223,32 @@ namespace RevitMCP.Core.IssueManager
                 await runner.RunAsync(() => { steps.ExportNamedViews(threeD, capturedOrigin, workDirectory, namedPath); return 0; }, ct).ConfigureAwait(false);
                 RequireJsonObject(namedPath, "3D 視角匯出沒有產生有效的 JSON 檔。");
                 files.Add(Describe(BundleFile.NamedViews, NamedViewsName, namedPath));
+            }
+
+            if (doExportPositions)
+            {
+                ct.ThrowIfCancellationRequested();
+                progress.Report("匯出平面／立面／剖面位置（" + positioned.Count + " 個視圖）", ++step, total);
+                var positionsPath = Path.Combine(bundleDirectory, ViewPositionsName);
+                var positionsOrigin = origin;
+                var positions = await runner.RunAsync(() => steps.ExportViewPositions(positioned, positionsOrigin, workDirectory, positionsPath), ct).ConfigureAwait(false);
+                RequireJsonObject(positionsPath, "視圖位置匯出沒有產生有效的 JSON 檔。");
+                warnings.AddRange(positions != null ? positions.Warnings : new List<string>());
+                if (positions != null && positions.ViewCount < positioned.Count)
+                    warnings.Add("勾選的 " + positioned.Count + " 個平面／立面／剖面視圖中，只有 " + positions.ViewCount + " 個讀得到位置，其餘在 3D 對照時會顯示「尚無 3D 對應」。");
+                files.Add(Describe(BundleFile.ViewPositions, ViewPositionsName, positionsPath));
+            }
+
+            if (doExportParams)
+            {
+                ct.ThrowIfCancellationRequested();
+                progress.Report("匯出參數與面積表", ++step, total);
+                var paramsPath = Path.Combine(bundleDirectory, ParamsName);
+                var paramsOrigin = origin;
+                var exportedParams = await runner.RunAsync(() => steps.ExportParams(paramsOrigin, paramsPath), ct).ConfigureAwait(false);
+                RequireJsonObject(paramsPath, "參數匯出沒有產生有效的 JSON 檔。");
+                warnings.AddRange(exportedParams != null ? exportedParams.Warnings : new List<string>());
+                files.Add(Describe(BundleFile.Params, ParamsName, paramsPath));
             }
 
             ct.ThrowIfCancellationRequested();

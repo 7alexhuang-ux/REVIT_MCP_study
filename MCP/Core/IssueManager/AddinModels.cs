@@ -54,6 +54,8 @@ namespace RevitMCP.Core.IssueManager
         public long PdfBytes { get; set; }
         public long GlbBytes { get; set; }
         public long NamedViewsBytes { get; set; }
+        public long ViewPositionsBytes { get; set; }
+        public long ParamsBytes { get; set; }
         public int PdfPages { get; set; }
     }
 
@@ -78,6 +80,8 @@ namespace RevitMCP.Core.IssueManager
     {
         public string SetId { get; set; }
         public string Url { get; set; }
+        /// <summary>伺服器指派的版本號（D-801，例如 v14）；舊網站不回傳時為 null。</summary>
+        public string Version { get; set; }
         public List<string> Warnings { get; set; } = new List<string>();
     }
 

@@ -20,6 +20,9 @@ namespace RevitMCP.Core.IssueManager
 
         public static bool IsKnown(string kind) { return Array.IndexOf(Ordered, kind) >= 0; }
 
+        /// <summary>網站端能把這種視圖轉成 3D 視角（view_positions.json，D-597／D-705）。</summary>
+        public static bool HasPosition(string kind) { return kind == Plan || kind == Ceiling || kind == Section || kind == Elevation; }
+
         public static string Label(string kind)
         {
             switch (kind)
@@ -173,8 +176,16 @@ namespace RevitMCP.Core.IssueManager
         public List<ViewItem> Views { get; set; } = new List<ViewItem>();
         public bool IncludeModel { get; set; }
         public bool IncludeDesignOptions { get; set; }
+        /// <summary>匯出參數與房間面積表（params.json，D-802／D-803）。</summary>
+        public bool IncludeParams { get; set; }
+        /// <summary>伺服器（較舊版本）不核發視圖位置的上傳網址：不匯出位置檔（D-805）。</summary>
+        public bool SkipViewPositions { get; set; }
+        /// <summary>匯出前就已知、要放進 manifest warnings 的提醒（例如伺服器還不收 params）。</summary>
+        public List<string> PreWarnings { get; set; } = new List<string>();
 
         public int ViewCount { get { return Views.Count; } }
         public IEnumerable<ViewItem> ThreeDViews { get { return Views.Where(v => v.Kind == ViewKinds.ThreeD); } }
+        /// <summary>有位置資料可匯出的視圖（平面／天花／剖面／立面；詳圖沒有位置，D-705）。</summary>
+        public IEnumerable<ViewItem> PositionedViews { get { return Views.Where(v => ViewKinds.HasPosition(v.Kind)); } }
     }
 }

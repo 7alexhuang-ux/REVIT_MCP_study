@@ -45,7 +45,7 @@
     <Compile Include="..\MCP\Core\Walkthrough\DesignOptionNoGeometryPolicy.cs" Link="Core\Walkthrough\DesignOptionNoGeometryPolicy.cs" />
     <!-- 上傳到 Issue Manager（V4 4B）：純邏輯與視窗；三個依賴 Revit API 的檔案不納入。 -->
     <Compile Include="..\MCP\Core\IssueManager\*.cs"
-             Exclude="..\MCP\Core\IssueManager\RevitSelectionCollector.cs;..\MCP\Core\IssueManager\RevitBundleExportSteps.cs;..\MCP\Core\IssueManager\IssueManagerSession.cs"
+             Exclude="..\MCP\Core\IssueManager\RevitSelectionCollector.cs;..\MCP\Core\IssueManager\RevitBundleExportSteps.cs;..\MCP\Core\IssueManager\IssueManagerSession.cs;..\MCP\Core\IssueManager\RevitParamsReader.cs;..\MCP\Core\IssueManager\ImSelfTest.cs"
              LinkBase="Core\IssueManager" />
   </ItemGroup>
 </Project>
