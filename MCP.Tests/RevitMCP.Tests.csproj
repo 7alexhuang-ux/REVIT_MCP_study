@@ -3,12 +3,15 @@
     <TargetFramework>net48</TargetFramework>
     <LangVersion>latest</LangVersion>
     <IsPackable>false</IsPackable>
+    <!-- IssueManager 勾選視窗（UploadWindow）是 WPF；視窗不引用 Revit API，所以能在這裡建構並檢查控制項狀態。 -->
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="NUnit" Version="3.14.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <Reference Include="System.Net.Http" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\MCP\Core\Grading\GradingModels.cs" Link="Core\Grading\GradingModels.cs" />
@@ -40,5 +43,9 @@
     <Compile Include="..\MCP\Core\Walkthrough\WebCompareMath.cs" Link="Core\Walkthrough\WebCompareMath.cs" />
     <Compile Include="..\MCP\Core\Walkthrough\ViewPositionsMath.cs" Link="Core\Walkthrough\ViewPositionsMath.cs" />
     <Compile Include="..\MCP\Core\Walkthrough\DesignOptionNoGeometryPolicy.cs" Link="Core\Walkthrough\DesignOptionNoGeometryPolicy.cs" />
+    <!-- 上傳到 Issue Manager（V4 4B）：純邏輯與視窗；三個依賴 Revit API 的檔案不納入。 -->
+    <Compile Include="..\MCP\Core\IssueManager\*.cs"
+             Exclude="..\MCP\Core\IssueManager\RevitSelectionCollector.cs;..\MCP\Core\IssueManager\RevitBundleExportSteps.cs;..\MCP\Core\IssueManager\IssueManagerSession.cs"
+             LinkBase="Core\IssueManager" />
   </ItemGroup>
 </Project>

@@ -171,6 +171,20 @@
 
 ---
 
+## R-08 ⏳ 上傳到 Issue Manager：實機驗證與網站端對齊（2026-10-25 建置完成，未實機）
+
+外掛端（任務書 V4 的 4B）已建置並通過離線測試（見 [CHANGELOG.md](CHANGELOG.md)、[docs/ISSUE_MANAGER_UPLOAD.md](docs/ISSUE_MANAGER_UPLOAD.md)、[docs/adr/D-011-issue-manager-upload-addin.md](docs/adr/D-011-issue-manager-upload-addin.md)）。接下來卡在：
+
+| # | 事項 | 卡在誰 | 備註 |
+|---|---|---|---|
+| U-1 | 在 Revit 實機走完交班單 [docs/commit_handoff_v4b_2026-10-25.md](docs/commit_handoff_v4b_2026-10-25.md) 的測試清單（按鈕、勾選視窗、PDF 頁序、設計選項完整性、匯出期間的取消／畫面、MCP 服務關閉時可用） | Alex（Revit 環境） | X08～X10 都需要實機；先對假伺服器跑，再對真的 |
+| U-2 | 網站端 4A 完成後，把 `docs/schemas/bundle-manifest.schema.json` 與網站端正式 schema 逐欄對齊，兩邊測試改載入同一份 fixture | Issue Manager repo | 列舉（`3d`／`plan`／`ceiling`／`section`／`elevation`／`detail`）與 `additionalProperties` 要確認 |
+| U-3 | 合約缺口：建立 bundle 時尚不知各檔大小，簽名網址數量如何決定 | Issue Manager 規格 | 現行客戶端以回應的 `partBytes`／`urls` 為準，網址不足會明確失敗 |
+| U-4 | 「含設計選項」未勾的解讀（只匯出主模型＋各集合主要選項）是否符合預期 | Alex | ADR D-011 決策 4 |
+| U-5 | 視圖位置檔（`view_positions.json`）屬任務書 V5，manifest 目前省略該欄位 | V5 | |
+
+---
+
 ## 已完成
 
 - ✅ 走動展示 7 個 MCP 工具與離線四視窗 viewer（2026-09）

@@ -147,3 +147,41 @@
 - **發現**：前一輪建置通過編譯與測試，但逐條對照需求仍有偏離：中央檔搭配 `detach=false` 沒有拒絕、`list_design_options` 缺主模型元件數、`list_links` 缺參考類型與實例數、`reload_links` 空陣列語意相反、報告沒有「貼圖找不到」清單、缺一鍵驗收腳本。
 - **解法**：以 `BasicFileInfo.IsCentral` 擋中央檔；補欄位；`names` 省略／空陣列＝全部且只重載未載入者；`textureProblems` 提到報告頂層；新增 `tools/verify-design-options.mjs`（驗證函式離線測試）。
 - **避免方式**：「編譯過、測試綠」不等於符合規格；交付前把需求逐條列成清單，各自指到程式行或測試。
+
+## L-18 純邏輯連結進測試專案時，主專案的全域 using 會讓同名型別在主專案才報錯（2026-10-25）
+
+- **症狀**：`UploadWindow.cs` 在 `MCP.Tests`（無全域 using）編譯正常，連結進主專案（Nice3point SDK 全域 using `Autodesk.Revit.DB`）後出現 `Grid`、`Binding`、`Visibility.Collapsed`（被解析成視窗自己的 `Visibility` 屬性）的歧義錯誤。
+- **解法**：檔案頂部用別名明確指向 WPF（`using Grid = System.Windows.Controls.Grid; using Binding = System.Windows.Data.Binding; using WpfVisibility = System.Windows.Visibility;`）。
+- **避免方式**：會同時被兩個專案編譯的檔案，兩邊都要建置才算過；新增 WPF 程式碼先預期 `Grid`／`Binding`／`Visibility`／`Line` 這幾個與 Revit DB 同名的型別。
+
+## L-19 Newtonsoft 預設把 ISO 8601 字串解析成 DateTime，golden／schema 比對會莫名失敗（2026-10-25）
+
+- **症狀**：manifest 的 `exportedAt`（字串）經 `JObject.Parse` 讀回變成 `JTokenType.Date`，`(string)` 轉出來是區域格式（19 字元），與 golden fixture、JSON schema 的 `type:string` 全部不符。
+- **解法**：測試與任何「讀回再比對／驗證」的路徑用 `JsonTextReader { DateParseHandling = DateParseHandling.None }`（見 `MCP.Tests/IssueManager/TestSupport.cs` 的 `Jsons.Parse`）。正式路徑送 finalize 的是記憶體內組好的 manifest，不重新解析。
+- **避免方式**：凡是含時間字串、又要原樣比對或交給 schema 驗證的 JSON，解析時關掉日期推斷。
+
+## L-20 WPF 視窗的 async 處理常式：await 之後不一定回到 UI 執行緒，排隊的進度會蓋掉最後狀態（2026-10-25）
+
+- **症狀**：用真的視窗＋假伺服器跑整段「上傳」流程時，流程已完成但狀態文字停在「完成版本（…）」、沒有結果連結；取消後停在「正在取消…」。
+- **真正原因**：①進度用 `Dispatcher.BeginInvoke` 排隊，流程結束後才到達的舊進度蓋掉 `ShowSuccess` 的文字；②處理常式若不是從 Dispatcher 的訊息迴圈叫起，`SynchronizationContext.Current` 可能是 null，`await` 之後的程式在執行緒池上跑，直接碰控制項會跨執行緒（Revit 內實際是哪一種只能實機確認）。
+- **解法**：進度回呼帶「第幾次執行」代號，只接受目前這次且仍在忙碌的；每個 `await` 之後碰控制項一律經 `Ui(Action)`（`CheckAccess` 否則 `Dispatcher.Invoke`）。測試用 STA 執行緒＋`DispatcherRunner` 模擬「API 執行緒＝UI 執行緒」，把整段流程真的跑過一遍（`UploadWindowFlowTests`）。
+- **避免方式**：非同步流程的 UI 測試不要只測 ViewModel；至少用真的視窗跑一次「按下去 → 完成／取消／失敗 → 重試」。
+
+
+## L-21 登出不能拿過期的 access 當 Bearer，而且「撤銷失敗」不能被吞掉（2026-10-25）
+
+- **症狀**：獨立審查用 accessTtl=1 秒、2.5 秒後登出的探針，伺服器端 `revokedTokens` 是 0：舊版登出只要記憶體裡有 access 就拿去當 Bearer，過期後被 401，回應卻被丟棄；本機資料照刪，使用者以為已登出，其實那一族授權在伺服器仍有效。
+- **解法**：access 過期或 401 時改用 `refresh_token` 走同一個撤銷端點；`LogoutAsync` 回傳結果，撤銷失敗要在視窗上說出來並指引到網站手動撤銷（本機資料仍刪）。
+- **避免方式**：任何「通知伺服器」的清理動作都要檢查回應並回報結果；測試要覆蓋「權杖已過期」「被拒絕」「沒有 access（重開後還原）」三種進入狀態，不能只測剛登入的快樂路徑。
+
+## L-22 等 ExternalEvent 的 Task 必須可取消、可逾時、檢查 Raise() 的回傳值（2026-10-25）
+
+- **症狀**：舊的執行器把工作塞進佇列後無條件等 `TaskCompletionSource`；Revit 停在對話框（外部事件一直沒被處理）時流程永遠卡住，靜態 `_running` 停在 1，要重開 Revit 才能再上傳。
+- **解法**：`QueuedApiThreadRunner`——用「排隊／已開始／已放棄」三態旗標，取消或逾時時只對「還沒開始」的工作生效，並讓放棄的工作之後不被執行；`Raise()` 被拒立刻失敗；已開始的長呼叫（GLB 匯出）不受開始前逾時限制。把這些邏輯抽成不引用 Revit API 的類別，才能用假的 post 單元測試。
+- **避免方式**：任何「跨執行緒等 Revit」的等待都要同時有取消、逾時、失敗三條出口，且出口後要把全域旗標放掉（`finally`）。
+
+## L-23 用 `UseShellExecute=false` 啟動外部程式時不要用裸名（2026-10-25）
+
+- **症狀**：`Process.Start("node")` 會先在目前工作目錄找 `node.exe`，專案資料夾放一個同名檔就會被 Revit 外掛執行。
+- **解法**：只執行絕對路徑且存在的檔案（標準安裝位置、PATH 內的絕對目錄），排除工作目錄與專案資料夾之下的；測試用一個會留下標記檔的陷阱 `node.exe` 驗證不被執行。注意有些機器設了 `NoDefaultCurrentDirectoryInExePath=1`，會讓「裸名」的對照組失效，測試要暫時移除它才能證明陷阱有效。
+- **避免方式**：搜尋腳本也不要往上層目錄找（開發用路徑要有明確旗標）。同型寫法仍在 `CommandExecutor.Walkthrough.cs` 的 `FindNodeExecutable`（不屬於本案，尚未修）。

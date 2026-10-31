@@ -42,6 +42,7 @@ flowchart LR
 | 🗂️ 圖面管理 | 批次建圖紙、自動修圖號、從屬視圖網格裁剪、批次匯 PDF |
 | ⛰️ 整地土方 | 依樓板整地形、三種放坡模式、挖填方計算書、方案比較出圖（見第二段詳解） |
 | 🎥 走動展示 | 在 Revit 排相機站點，一鍵匯出逐格影格、平面／剖面（像素對位）與 glTF，打包成離線四視窗連動網頁 |
+| ☁️ 上傳到 Issue Manager | 功能區按鈕＋勾選視窗（圖紙集預設勾選），一次匯出 PDF／3D 模型／視角，經瀏覽器授權登入後上傳成網站上的一個工作版（不經 MCP；2026-10-25 僅離線測試，待實機與網站端 4A 接上） |
 
 規模快照（2026-10-23）：**137 個 MCP 工具**、**52 份 BIM 工作方法（domain SOP）**、**24 個 Claude skills**，支援 Revit 2022–2026。
 
@@ -111,6 +112,7 @@ sequenceDiagram
 | 知識層 | `domain/*.md` | BIM 方法正本（中文/雙語），AI 與人共用 |
 | 編排層 | `.claude/skills/*/SKILL.md` | AI 工作流程與工具序列指引 |
 | 憲法 | `CLAUDE.md` | AI 行為規則、資料誠實條款、計數正本 |
+| 上傳到 Issue Manager | `MCP/Core/IssueManager/*.cs`、`MCP/Commands/UploadToIssueManagerCommand.cs` | 功能區按鈕／勾選視窗／版本包匯出與上傳／授權碼＋PKCE 登入；非 MCP 工具，純邏輯與視窗不依賴 Revit API（見 `docs/ISSUE_MANAGER_UPLOAD.md`） |
 
 ### 2.3 三層知識架構（為什麼 AI 不會亂做）
 
@@ -192,5 +194,6 @@ flowchart TD
 | 日期 | 摘要 |
 |---|---|
 | 2026-07-08 | 初版：整體架構＋整地模組深入案例（V3 逐邊坡率、不覆蓋樓板、範圍線差異場重寫） |
+| 2026-10-25 | 新增「上傳到 Issue Manager」按鈕與版本包流程（工具數不變，仍為 137） |
 
 > 維護約定：功能、工具數、架構有變動時同步更新本文（正本計數見 `CLAUDE.md`）。

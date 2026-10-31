@@ -117,6 +117,28 @@ namespace RevitMCP
                 settingsButtonData.ToolTip = "開啟 MCP 設定視窗";
                 panel.AddItem(settingsButtonData);
 
+                // 4. 上傳到 Issue Manager：獨立面板，緊鄰 MCP Tools。以 IExternalCommand＋ExternalEvent 執行，
+                //    不經 MCP WebSocket，所以 MCP 服務關閉時也能使用。
+                //    面板建立失敗（例如面板名稱衝突）不能拖垮其餘面板與整個外掛的啟動，所以單獨包起來。
+                try
+                {
+                    RibbonPanel issueManagerPanel = application.CreateRibbonPanel(Core.IssueManager.Strings.PanelName);
+                    PushButtonData uploadButtonData = new PushButtonData(
+                        "UploadToIssueManager",
+                        Core.IssueManager.Strings.ButtonText,
+                        assemblyPath,
+                        "RevitMCP.Commands.UploadToIssueManagerCommand");
+                    uploadButtonData.ToolTip = Core.IssueManager.Strings.ButtonTooltip;
+                    issueManagerPanel.AddItem(uploadButtonData);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("[IssueManager] 建立功能區面板失敗：" + ex.GetType().Name + "：" + ex.Message);
+                }
+
+                // 清掉超過 N 天的舊上傳暫存（取消、失敗、直接關掉視窗、Revit 當掉留下的 PDF／GLB），背景執行、失敗不影響啟動。
+                Core.IssueManager.IssueManagerSession.CleanupOldBundlesInBackground();
+
 #if REVIT2024_OR_GREATER
                 // 整地圖說面板（Revit 2024+），掛在自訂頁籤「黃道資訊」：
                 // 核心入口（新整地方案／方案總覽）優先，樓板準備備板工具其後。
