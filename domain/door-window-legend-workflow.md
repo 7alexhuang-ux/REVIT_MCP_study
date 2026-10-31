@@ -2,11 +2,12 @@
 name: door-window-legend-workflow
 description: 門窗圖例表 seed-based Legend Component 建立流程，主入口為 door-window-legend-tools，缺少 seed 時透過 list_seeds 取得候選並等待使用者選擇。
 metadata:
-  version: "2.1"
-  updated: "2026-08-29"
+  version: "2.2"
+  updated: "2026-10-23"
   created: "2026-05-20"
   references:
     - "Issue #74（@yunchen-kt）：門窗圖例 Key 的承載位置 A/B 架構對照與 Revit API 設計約束 — https://github.com/shuotao/REVIT_MCP_study/issues/74"
+    - "penny116889 fork penny/main 的 door-window-legend-template-workflow 文件 — 樣板格位填表參考設計（尚未實作）"
   related:
     - element-query-workflow.md
     - tool-capability-boundary.md
@@ -29,6 +30,7 @@ metadata:
 - `mode=list`：列出專案中已放置實例使用到的 door/window type。
 - `mode=create`：使用指定的 seed Legend 視圖建立門表或窗表。
 - `mode=update`：更新既有門表或窗表，補新增 type、刪除已不使用 type，並同步 Type Mark。
+- `mode=scaffold_template`：從使用者選定的 seed Legend 複製出一張空白門窗圖例樣板視圖（格線、FFL 線、佔位文字、佔位圖例），不讀明細表、不填資料（資料填表功能尚未實作）。
 - 若 create 缺少 seed，tool 必須回 workflow state，對話層再呼叫 `list_seeds` 並等待使用者選擇。
 - 若 create 缺少 `layoutDirection` 或 `maxPerLine`，tool 必須回 workflow state，要求對話層詢問使用者。
 - 若 create/update 缺少 `dimensionTypeId` 且無法由既有視圖推斷，tool 必須要求對話層呼叫 `list_dimension_types`。
@@ -153,12 +155,17 @@ update 額外回傳：
 輸入：
 
 - `targetType`: `door` 或 `window`
-- `mode`: `list`、`create`、`update` 或 `migrate`
+- `mode`: `list`、`create`、`update`、`migrate` 或 `scaffold_template`
 - `layoutDirection`: `horizontal` 或 `vertical`，create/update 必填
 - `maxPerLine`: 大於等於 1，create/update 必填
-- `seedLegendViewId`: create 使用的 seed Legend 視圖 ID
+- `seedLegendViewId`: create 使用的 seed Legend 視圖 ID；`scaffold_template` 亦必填
 - `legendViewId`: update 使用的既有 Legend 視圖 ID
 - `dimensionTypeId`: create/update 使用的 Revit `DimensionType` ID
+- `columns`: 僅 `scaffold_template`，1..20，預設 7
+- `rows`: 僅 `scaffold_template`，1..20，預設 3
+- `templateName`: 僅 `scaffold_template`，預設 `01_門窗圖例表樣板`
+- `flLineStyleName`: 僅 `scaffold_template`，FFL 線的細部線型名稱，預設 `中級線0.3`
+- `targetType`（`scaffold_template`）：只決定標頭文字前綴（`door` 為 D、其餘為 W），預設 `window`
 
 create 若缺少 `seedLegendViewId`，回傳：
 
@@ -173,6 +180,8 @@ create 若缺少 `seedLegendViewId`，回傳：
 - `PromptToUser = "請先從 list_seeds 的結果中選擇一個 ViewName 作為 seed。"`
 
 此狀態不是錯誤，也不是 fallback 訊號。對話層只能呼叫 `list_seeds` 後停下來問使用者。
+
+`scaffold_template` 缺少 `seedLegendViewId` 時（同名樣板不存在時），同樣回傳 `awaiting_seed_selection` 狀態，欄位為 `Success = false`、`WorkflowState`、`NextAction`、`SeedTypeRequired`、`RequiresUserInput`、`DoNotAutoSelectSeed`、`DoNotRetryWithOtherSeeds`、`PromptToUser`、`Message`（不含 `TargetType`、`DisplayName`）。
 
 create 若 seed 已有，但缺少 `layoutDirection` 或 `maxPerLine`，回傳：
 
@@ -462,6 +471,27 @@ window list/create 額外輸出重點：
 - `AttemptDebug.WindowSillDimensionReferenceCurveIds`
 - `AttemptDebug.WindowSillDimensionFailureReason`
 - `AttemptDebug.WindowTypeMarkOffsetCm = 400`
+
+## 搭建空白樣板（mode=scaffold_template）
+
+`scaffold_template` 在同名檢查通過、`seedLegendViewId` 有效（必須是 Legend 視圖）後，於單一 Transaction 內依下列順序建立：
+
+1. `Duplicate` seed Legend 視圖，並命名為 `templateName`。
+2. 清空新視圖內 `OwnerViewId` 為新視圖的元素（刪除失敗時靜默略過，seed 內容可能殘留）。
+3. 畫 `rows`+1 條橫線、`columns`+1 條直線（每條格線只畫一次）。
+4. 每列的標頭區與參數區分隔線（橫跨整列寬度）。
+5. 每格一條 FFL 線；找到 `flLineStyleName` 才套用該線型，找不到則用預設線型並在 `Message` 提示。
+6. 每格標頭文字：W01、W02…（`targetType` 為 `door` 時為 D01、D02…）。
+7. 每格佔位參數文字。
+8. 若專案中有 Legend Component（優先取 seed 視圖內的），複製一個到每格。
+
+同名樣板已存在時，不寫入，回傳 `Success = true`、`Message`、`ViewId`、`ViewName`、`AlreadyExisted = true`。
+
+成功時輸出欄位：`Success`、`Message`、`ViewId`、`ViewName`、`Columns`、`Rows`、`TotalSlots`、`FlLineStyleName`、`FlLineStyleFound`、`HasPlaceholderComponents`、`FailedLines`、`FailedTexts`、`FailedComponents`、`AlreadyExisted`（為 false）。
+
+子步驟（線、文字、圖例）失敗只累計到 `FailedLines`／`FailedTexts`／`FailedComponents` 並寫入 `Message`，不回滾整張樣板；Transaction 本身未提交時會丟出例外。
+
+邊界：以明細表資料填入樣板、自動尺寸標註、同編號合併等功能尚未實作；參考設計見 frontmatter references 所列 penny116889 fork 的文件。
 
 ## Update 既有門窗圖例表
 

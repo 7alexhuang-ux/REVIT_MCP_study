@@ -3,6 +3,7 @@ using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using RevitMCP.Core;
+using RevitMCP.Configuration;
 
 namespace RevitMCP.Commands
 {
@@ -40,6 +41,8 @@ namespace RevitMCP.Commands
                         "正在 localhost:8964 監聽，等待 AI 客戶端連入。\n" +
                         "（連上後可在「MCP 設定」查看目前佔用連線的客戶端）");
                 }
+
+                Application.RequestToggleButtonIconRefresh();
 
                 return Result.Succeeded;
             }

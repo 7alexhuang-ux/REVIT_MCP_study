@@ -223,8 +223,14 @@ export class RevitSocketClient {
         console.error(`[Socket] Sending command: ${commandName}`, parameters);
 
         return new Promise((resolve, reject) => {
+            // Timeout handle, captured so the response path can disarm it. Settling is already
+            // guaranteed once by the responseHandlers.has() guard below; clearing the timer only
+            // stops every completed command from leaving a timer armed for its full timeoutMs.
+            let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+
             // Register response handler
             this.responseHandlers.set(requestId, (response: RevitResponse) => {
+                if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
                 if (response.success) {
                     resolve(response);
                 } else {
@@ -236,7 +242,7 @@ export class RevitSocketClient {
             this.ws?.send(JSON.stringify(command));
 
             // Request Timeout
-            setTimeout(() => {
+            timeoutTimer = setTimeout(() => {
                 if (this.responseHandlers.has(requestId)) {
                     this.responseHandlers.delete(requestId);
                     reject(new Error('Command timed out'));

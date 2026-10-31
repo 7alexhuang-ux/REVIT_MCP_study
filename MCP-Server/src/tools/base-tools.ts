@@ -68,6 +68,19 @@ export const baseTools: Tool[] = [
         },
     },
     {
+        name: "get_door_window_coordinates",
+        description: "一次撈全部門窗的座標清單：插入點 (LocationPoint) 與 boundingbox（含中心點），座標為 mm。可依門/窗/全部與樓層篩選，並可選擇一併掃描連結模型（自動套用 Transform 轉專案座標）。回傳每筆含 ElementId、族群、類型、標記、樓層、宿主牆ID、朝向。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                category: { type: "string", description: "門 / 窗 / 全部（預設全部）。也接受 Doors / Windows。" },
+                level: { type: "string", description: "只回傳指定樓層名稱的門窗（選填）" },
+                includeLinks: { type: "boolean", description: "是否一併掃描連結模型的門窗（預設 false）" },
+                maxCount: { type: "number", description: "最大回傳數量（預設 1000）" },
+            },
+        },
+    },
+    {
         name: "delete_element",
         description: "依 Element ID 刪除 Revit 元素。",
         inputSchema: {
@@ -324,7 +337,7 @@ export const baseTools: Tool[] = [
     },
     {
         name: "analyze_floor_slopes",
-        description: "分析樓板頂面排水坡度：以 Solid→PlanarFace 法向量與 Z 軸夾角計算每片朝上頂面的坡度百分比，回傳每片樓板的 Min/Max 坡度，並可回寫至指定參數（預設 Comments）。未指定 elementIds 時自動收集 Function=Exterior 的樓板。",
+        description: "分析樓板頂面排水坡度：以 Solid→PlanarFace 法向量與 Z 軸夾角計算每片朝上頂面的坡度百分比，回傳每片樓板的 Min/Max 坡度。預設只分析、不寫入模型（不開 Transaction）；只有明確指定 paramName 時才會回寫該參數。未指定 elementIds 時自動收集 Function=Exterior 的樓板。",
         inputSchema: {
             type: "object",
             properties: {
@@ -335,7 +348,7 @@ export const baseTools: Tool[] = [
                 },
                 paramName: {
                     type: "string",
-                    description: "坡度回寫的目標參數名稱，預設 Comments"
+                    description: "選填。坡度回寫的目標參數名稱；**省略即完全不寫入模型**，分析結果仍會回傳。指定後會覆寫該參數既有內容：填 \"Comments\" 會寫入內建註解參數（BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS，不受 Revit 介面語言影響），其他名稱則以 LookupParameter 解析自訂／共用參數或本地化顯示名（例如「註解」）"
                 }
             }
         }

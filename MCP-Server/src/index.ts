@@ -89,6 +89,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     console.error(`[MCP Server] Tool executed successfully`);
 
+    // 影像結果（capture_view_image）改用 image content block 回傳。
+    // 若照一般路徑塞進 JSON 字串，AI client 拿到的只是一長串 base64 文字，看不到圖 —— 工具等於白做。
+    // base64 抽離後，其餘欄位仍以 text block 附上，讓視圖名稱、尺寸、Warnings 不會遺失。
+    if (result && typeof result === "object" && typeof (result as any).ImageBase64 === "string") {
+      const { ImageBase64, ...meta } = result as Record<string, any>;
+      console.error(
+        `[MCP Server] Returning image content (${ImageBase64.length} base64 chars, ${meta.MimeType || "image/png"})`
+      );
+      return {
+        content: [
+          {
+            type: "image",
+            data: ImageBase64,
+            mimeType: typeof meta.MimeType === "string" ? meta.MimeType : "image/png",
+          },
+          {
+            type: "text",
+            text: JSON.stringify(meta, null, 2),
+          },
+        ],
+      };
+    }
+
     return {
       content: [
         {

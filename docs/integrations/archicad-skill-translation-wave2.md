@@ -202,7 +202,7 @@ warnings: <explicit list>
 | `query_elements_with_filter` | 依欄位與 operator 篩選元素 | ElementId、Category、Revit filter semantics |
 | `override_element_graphics` | 在指定 View 套用 fill、line、transparency | ViewId、cut／surface pattern、ElementId |
 | `clear_element_override` | 清除指定 View 的元素覆寫 | ViewId、ElementId |
-| `unjoin_wall_joins` | 暫時取消牆接合 | Revit wall join graph |
+| `unjoin_element_joins` | 暫時取消牆接合 | Revit wall join graph |
 | `rejoin_wall_joins` | 恢復牆接合 | Revit wall join graph |
 
 ### 4.3 預計保留的 Domain 方法
@@ -252,7 +252,7 @@ nonHighlightedColor: optional RGBA
 |---|---|
 | View-specific Graphic Override | 改稱暫時 Highlight，不宣稱保存於特定 View |
 | Cut／Surface Pattern | 不轉譯 |
-| `unjoin_wall_joins`／`rejoin_wall_joins` | 不執行，列入 unsupported steps |
+| `unjoin_element_joins`／`rejoin_wall_joins` | 不執行，列入 unsupported steps |
 | Revit Room hosting-wall proxy | 重新發現 Zone 關係能力，不重用 Room ElementId 邏輯 |
 | Revit parameter display name | 轉為 discovery 得到的 Property ID／name |
 
