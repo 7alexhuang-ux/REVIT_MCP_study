@@ -50,9 +50,9 @@ namespace RevitMCP.Configuration
 
         /// <summary>
         /// 是否啟用連線獨佔鎖：已鎖定時拒絕新連線 (409)，避免多個 client 互相搶走連線。
-        /// 逃生旗標，關閉後回退成舊行為 (新連線直接覆蓋)。
+        /// fork 預設 false：新連線接手舊連線（舊連線被 Abort）；設 true 改回 upstream 的獨占拒絕。
         /// </summary>
-        public bool ExclusiveLock { get; set; } = true;
+        public bool ExclusiveLock { get; set; } = false;
 
         /// <summary>
         /// 相機管理停靠面板的本機設定（人視高預設值等）。只存本機，不隨 .rvt 走。

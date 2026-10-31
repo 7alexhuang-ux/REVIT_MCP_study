@@ -1075,7 +1075,7 @@ namespace RevitMCP
                 {
                     ConfigVersion = settings.ConfigVersion, Host = settings.Host, Port = settings.Port,
                     IsEnabled = settings.IsEnabled, ReconnectInterval = settings.ReconnectInterval,
-                    CommandTimeout = settings.CommandTimeout
+                    CommandTimeout = settings.CommandTimeout, ExclusiveLock = settings.ExclusiveLock
                 };
                 var portOverride = Environment.GetEnvironmentVariable("REVIT_MCP_PORT");
                 if (!string.IsNullOrWhiteSpace(portOverride))
