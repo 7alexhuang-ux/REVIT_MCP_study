@@ -29,43 +29,63 @@ namespace RevitMCP.Core.IssueManager
             return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".revit-mcp", "im-selftest.json");
         }
 
-        private static UIControlledApplication _app;
+        private static System.Threading.Timer _timer;
+        private static int _busy;
 
+        /// <summary>
+        /// 啟動時呼叫（Revit API 執行緒）：只在開發機有 <c>.revit-mcp</c> 資料夾時，開一個背景計時器每 3 秒看一次標記檔；
+        /// 有標記就把「讀標記並開始」排進 ExternalEvent 佇列（Revit 閒置時執行），所以重複驗收不必重開 Revit，
+        /// 也不依賴 Idling 事件（Idling 只在有使用者操作後才會觸發）。沒有標記檔時每 3 秒只做一次檔案存在檢查。
+        /// </summary>
         public static void RegisterIfRequested(UIControlledApplication application)
         {
             try
             {
-                if (!File.Exists(MarkerPath())) return;
-                _app = application;
-                application.Idling += OnIdling;
-                Logger.Info("[IssueManager] 偵測到實機自測標記，等待首次 Idling。");
+                if (!Directory.Exists(Path.GetDirectoryName(MarkerPath()))) return;
+                var ensureCreated = ExternalEventManager.Instance; // 必須在 API 執行緒建立 ExternalEvent
+                _timer = new System.Threading.Timer(state => Poll(), null, 3000, 3000);
             }
             catch (Exception) { }
         }
 
-        private static void OnIdling(object sender, Autodesk.Revit.UI.Events.IdlingEventArgs args)
+        private static void Poll()
         {
-            _app.Idling -= OnIdling;
-            JObject config;
             try
             {
-                config = JObject.Parse(File.ReadAllText(MarkerPath(), Encoding.UTF8));
-                File.Move(MarkerPath(), MarkerPath() + ".done");
+                if (!File.Exists(MarkerPath())) return;
+                if (System.Threading.Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return;
+                JObject config;
+                try
+                {
+                    config = JObject.Parse(File.ReadAllText(MarkerPath(), Encoding.UTF8));
+                    var done = MarkerPath() + ".done";
+                    if (File.Exists(done)) File.Delete(done);
+                    File.Move(MarkerPath(), done);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Info("[IssueManager] 實機自測標記讀取失敗：" + ex.GetType().Name);
+                    System.Threading.Interlocked.Exchange(ref _busy, 0);
+                    return;
+                }
+                var resultPath = (string)config["resultPath"];
+                var request = ExternalEventManager.Instance.TryExecuteCommand(uiApp =>
+                {
+                    try
+                    {
+                        Start(uiApp, config, resultPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResult(resultPath, new JObject { ["ok"] = false, ["stage"] = "start", ["error"] = ex.GetType().Name + "：" + ex.Message });
+                        System.Threading.Interlocked.Exchange(ref _busy, 0);
+                    }
+                });
+                Logger.Info("[IssueManager] 實機自測已排入 ExternalEvent：" + request);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Logger.Info("[IssueManager] 實機自測標記讀取失敗：" + ex.GetType().Name);
-                return;
-            }
-            var uiApp = sender as UIApplication;
-            var resultPath = (string)config["resultPath"];
-            try
-            {
-                Start(uiApp, config, resultPath);
-            }
-            catch (Exception ex)
-            {
-                WriteResult(resultPath, new JObject { ["ok"] = false, ["stage"] = "start", ["error"] = ex.GetType().Name + "：" + ex.Message });
+                System.Threading.Interlocked.Exchange(ref _busy, 0);
             }
         }
 
@@ -111,7 +131,7 @@ namespace RevitMCP.Core.IssueManager
             var auth = new AddinAuthService(http, vault, baseUrl, client, log: message => Logger.Info("[IssueManager] " + message));
             if (!auth.TryRestore()) throw new InvalidOperationException("自測權杖還原失敗。");
             var api = new AddinApiClient(http, auth, client, uploadHttp, finalizeHttp);
-            var steps = new EvidenceSteps(new RevitBundleExportSteps(uiApp, snapshot), evidence);
+            var steps = new EvidenceSteps(new RevitBundleExportSteps(uiApp, snapshot), evidence, (string)config["glbOverride"]);
             var flow = new UploadFlow(api, steps, new RevitApiThreadRunner(), Path.Combine(evidence, "bundles")) { Log = message => Logger.Info("[IssueManager] " + message) };
             var started = DateTimeOffset.UtcNow;
             var stages = new List<string>();
@@ -140,6 +160,7 @@ namespace RevitMCP.Core.IssueManager
                         ["seconds"] = (DateTimeOffset.UtcNow - started).TotalSeconds, ["stages"] = new JArray(stages.Cast<object>().ToArray())
                     });
                 }
+                finally { System.Threading.Interlocked.Exchange(ref _busy, 0); }
             });
         }
 
@@ -184,7 +205,8 @@ namespace RevitMCP.Core.IssueManager
             private readonly IBundleExportSteps _inner;
             private readonly string _dir;
             public readonly List<string> Copied = new List<string>();
-            public EvidenceSteps(IBundleExportSteps inner, string dir) { _inner = inner; _dir = dir; }
+            private readonly string _glbOverride;
+            public EvidenceSteps(IBundleExportSteps inner, string dir, string glbOverride) { _inner = inner; _dir = dir; _glbOverride = glbOverride; }
 
             private void Keep(string path)
             {
@@ -203,6 +225,15 @@ namespace RevitMCP.Core.IssueManager
             public void ExportPdf(IReadOnlyList<SheetItem> sheets, string outputPath) { _inner.ExportPdf(sheets, outputPath); Keep(outputPath); }
             public ModelExportResult ExportModel(bool includeDesignOptions, string workDirectory, string outputGlbPath)
             {
+                // 標記可指定 glbOverride：用「同一份文件先前以同一個匯出指令產生的主模型 GLB」取代這一步（範例檔的設計選項分件匯出不完整，
+                // 會讓整個模型步驟中止；與本案無關）。結果檔與警告都會明說這一點。
+                if (!string.IsNullOrEmpty(_glbOverride))
+                {
+                    File.Copy(_glbOverride, outputGlbPath, true);
+                    var stub = new ModelExportResult { OriginOffsetMeters = new double[] { 0, 0, 0 } };
+                    stub.Warnings.Add("（自測）模型 GLB 使用預先匯出的主模型檔，非本次即時匯出。");
+                    return stub;
+                }
                 var result = _inner.ExportModel(includeDesignOptions, workDirectory, outputGlbPath);
                 return result; // GLB 很大，不複製
             }

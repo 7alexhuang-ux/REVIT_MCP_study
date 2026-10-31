@@ -14,7 +14,7 @@
 
 ## 1.5 實機自測鉤子（開發／驗收用，opt-in）
 
-建立 `%USERPROFILE%\.revit-mcp\im-selftest.json`（外掛不會自己建立；跑過一次即改名 `.done`）後啟動 Revit，第一次 Idling 會用標記裡的短效 refresh 權杖（記憶體內，不碰 DPAPI 的正式登入檔）跑一次與按鈕相同的 `UploadFlow`，結果寫到 `resultPath`。欄位：`baseUrl`、`refreshToken`、`userId`、`email`、`projectId`、`stage`、`description`、`openPath`（可省略，要開的 .rvt）、`maxSheets`（預設 6）、`includeModel`／`includeParams`（預設 true）、`evidenceDir`、`resultPath`。**標記內容含權杖，用完請刪 `.done`。**
+建立 `%USERPROFILE%\.revit-mcp\im-selftest.json`（外掛不會自己建立；跑過一次即改名 `.done`）後（Revit 已開著也可以，外掛每 3 秒看一次）會用標記裡的短效 refresh 權杖（記憶體內，不碰 DPAPI 的正式登入檔）跑一次與按鈕相同的 `UploadFlow`，結果寫到 `resultPath`。欄位：`baseUrl`、`refreshToken`、`userId`、`email`、`projectId`、`stage`、`description`、`openPath`（可省略，要開的 .rvt）、`maxSheets`（預設 6）、`includeModel`／`includeParams`（預設 true）、`glbOverride`（可省略：指定先前匯出的主模型 GLB 取代即時匯出，結果與警告會註明）、`evidenceDir`、`resultPath`。權杖是一次性的（refresh 輪替），每次執行都要重新發一個。**標記內容含權杖，用完請刪 `.done`。**
 
 ## 2. 設定（第一次使用）
 

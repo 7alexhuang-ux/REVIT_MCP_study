@@ -69,7 +69,7 @@ namespace RevitMCP.Core.IssueManager
 
         private static ParamsElementData ReadElement(Document doc, Element e, Dictionary<long, string> levelNames)
         {
-            var item = new ParamsElementData { UniqueId = e.UniqueId, ElementId = IdOf(e.Id), Category = e.Category != null ? e.Category.Name : null, Name = e.Name };
+            var item = new ParamsElementData { UniqueId = e.UniqueId, ElementId = IdOf(e.Id), Category = CategoryKey(e.Category), Name = e.Name };
             var type = doc.GetElement(e.GetTypeId()) as ElementType;
             if (type != null)
             {
@@ -179,6 +179,22 @@ namespace RevitMCP.Core.IssueManager
             var unplaced = rooms.Count - placed.Count;
             if (unplaced > 0) warnings.Add(unplaced + " 間房間尚未放置，未列入面積表。");
             return schedule;
+        }
+
+        /// <summary>
+        /// 類別鍵用 Revit 內建類別的英文名（Walls、Doors、Rooms…），不用介面語言的顯示名稱（實機：繁中 Revit 會得到「牆」「門」），
+        /// 這樣網站端與 params 規格（revit-params.md §4 的 category）在任何語言的 Revit 上都對得上。
+        /// </summary>
+        private static string CategoryKey(Category category)
+        {
+            if (category == null) return null;
+            try
+            {
+                var name = ((BuiltInCategory)(int)IdOf(category.Id)).ToString();
+                if (name.StartsWith("OST_", StringComparison.Ordinal)) return name.Substring(4);
+            }
+            catch (Exception) { }
+            return category.Name;
         }
 
         private static string LevelName(Element e, Dictionary<long, string> levelNames)

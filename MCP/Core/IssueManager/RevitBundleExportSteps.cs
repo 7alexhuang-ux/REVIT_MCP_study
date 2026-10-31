@@ -101,6 +101,10 @@ namespace RevitMCP.Core.IssueManager
             Directory.CreateDirectory(exportDir);
 
             var parameters = new JObject { ["outputDir"] = exportDir, ["originOffsetMeters"] = new JArray(0, 0, 0) };
+            // 超大模型（預設三角面預算 3,000,000，超過會判定匯出不完整而中止）：使用者可用環境變數調高，不改預設。
+            int maxTriangles;
+            if (int.TryParse(Environment.GetEnvironmentVariable("REVITMCP_IM_MAX_TRIANGLES"), out maxTriangles) && maxTriangles >= 1000)
+                parameters["maxTriangles"] = maxTriangles;
             if (!includeDesignOptions)
             {
                 var listed = Dispatch("list_design_options", new JObject { ["includeViews"] = false });
