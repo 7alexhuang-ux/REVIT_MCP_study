@@ -194,6 +194,8 @@ namespace RevitMCP.Tests.IssueManager
             if (path == "/api/addin/me") return FakeHandler.Json(HttpStatusCode.OK, new JObject { ["user"] = new JObject { ["email"] = "fake.user@example.test", ["role"] = "admin" } });
             if (path == "/api/addin/projects")
                 return FakeHandler.Json(HttpStatusCode.OK, new JObject { ["projects"] = new JArray(new JObject { ["id"] = "p1", ["code"] = "CPC", ["name"] = "測試專案" }) });
+            if (path == "/api/addin/projects/p1/models" && AttachableModels != null)
+                return FakeHandler.Json(HttpStatusCode.OK, new JObject { ["models"] = new JArray(AttachableModels) });
             return FakeHandler.Error(HttpStatusCode.NotFound, "not_found");
         }
     }

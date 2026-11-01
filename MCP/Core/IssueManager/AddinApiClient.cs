@@ -66,6 +66,25 @@ namespace RevitMCP.Core.IssueManager
             return list;
         }
 
+        /// <summary>
+        /// 取得專案裡已上傳、可以接圖面的模型（D-870）。舊版網站沒有這個端點會回 404（NotFound），呼叫端據此隱藏「接到已上傳的模型」。
+        /// </summary>
+        public async Task<List<AttachableModel>> GetAttachableModelsAsync(string projectId, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(projectId)) throw new ArgumentException("projectId 不可為空。");
+            var json = await SendJsonAsync(_http, HttpMethod.Get, "/api/addin/projects/" + Uri.EscapeDataString(projectId) + "/models", null, false, ct).ConfigureAwait(false);
+            var list = new List<AttachableModel>();
+            var array = json["models"] as JArray;
+            if (array != null)
+            {
+                foreach (var item in array)
+                {
+                    if (item != null && item.Type == JTokenType.Object && !string.IsNullOrEmpty((string)item["id"])) list.Add(AttachableModel.FromJson(item));
+                }
+            }
+            return list;
+        }
+
         /// <summary>建立版本包。伺服器成功時回 201（舊的假伺服器回 200）；兩者都接受。</summary>
         public async Task<BundleCreateResult> CreateBundleAsync(string projectId, string stage, string description,
             BundleSummary summary, CancellationToken ct)

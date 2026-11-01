@@ -1,4 +1,6 @@
 #nullable disable
+using System;
+
 namespace RevitMCP.Core.IssueManager
 {
     /// <summary>
@@ -78,6 +80,36 @@ namespace RevitMCP.Core.IssueManager
 
         public const string OtherViewsHeader = "其他視圖（不在圖紙上）";
         public const string SheetsHeader = "圖紙";
+
+        // ── 只傳圖面、接到已上傳的模型（D-870）──
+        public const string AttachLabel = "接到已上傳的模型";
+        public const string AttachNone = "不接（只傳圖面，圖紙不連 3D）";
+        public const string AttachLoading = "讀取這個專案已上傳的模型…";
+        public const string AttachEmpty = "這個專案還沒有已上傳的模型；要連 3D 請勾選「匯出 3D 模型」。";
+        public const string AttachUnsupported = "這個 Issue Manager 還不能接到已上傳的模型（或這個帳號對這個專案沒有權限）；要連 3D 請勾選「匯出 3D 模型」。";
+        public const string AttachLoadFailed = "讀不到這個專案已上傳的模型清單，目前只能不接；請稍後重開視窗再試，或勾選「匯出 3D 模型」。";
+        public const string AttachNoOrigin = "選的模型沒有記錄座標原點，無法確認圖面對得上；請改選別的模型，或勾選「匯出 3D 模型」重傳";
+        public const string AttachNoOriginSuffix = "（沒有座標原點，不能選）";
+
+        public static string AttachOptionLabel(string fileName, DateTimeOffset? createdAt, string versionLabel, bool hasOrigin)
+        {
+            var parts = new System.Collections.Generic.List<string>();
+            if (createdAt.HasValue) parts.Add(createdAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
+            if (!string.IsNullOrWhiteSpace(versionLabel)) parts.Add(versionLabel);
+            return (string.IsNullOrWhiteSpace(fileName) ? "（未命名模型）" : fileName)
+                + (parts.Count > 0 ? "（" + string.Join("，", parts) + "）" : string.Empty)
+                + (hasOrigin ? string.Empty : AttachNoOriginSuffix);
+        }
+
+        public static string AttachedNote(string fileName)
+        {
+            return "這個版本不含模型：圖面會接到已上傳的模型「" + fileName + "」，不重傳模型。";
+        }
+
+        public static string SummaryAttached(string summary, string fileName)
+        {
+            return summary + "；接到已上傳的模型「" + fileName + "」";
+        }
 
         public static string Summary(int sheets, int views, int models)
         {

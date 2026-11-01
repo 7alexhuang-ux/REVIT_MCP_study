@@ -26,6 +26,8 @@ namespace RevitMCP.Tests.IssueManager
         public HttpStatusCode FailPutStatus = HttpStatusCode.ServiceUnavailable;
         public DateTimeOffset BundleExpiresAt = new DateTimeOffset(2026, 10, 26, 9, 0, 0, TimeSpan.Zero);
         public int UrlsPerFile = 50;
+        /// <summary>GET /api/addin/projects/p1/models 回的模型（D-870）；null＝模擬舊網站（沒有這個端點，回 404）。</summary>
+        public List<JObject> AttachableModels;
 
         public readonly List<JObject> CreateRequests = new List<JObject>();
         public readonly List<RecordedRequest> Puts = new List<RecordedRequest>();

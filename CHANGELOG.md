@@ -8,6 +8,13 @@
 
 ## [Unreleased]
 
+### ✨ 上傳到 Issue Manager：只傳圖面接到已上傳的模型、記下來源模型路徑（imsheetsonly，D-014，2026-11-01）
+
+- 勾選視窗不勾「匯出 3D 模型」時，多一個下拉「接到已上傳的模型」（來自新端點 `GET /api/addin/projects/:id/models`，預設最新一個能用的，也可選「不接」）。選了就不匯出 GLB，但 PDF、平面／立面／剖面位置、3D 視角（透視）照常匯出並接到那個模型；**座標原點沿用該模型的**，manifest 帶 `attachToModelId`。伺服器比對原點，對不上整包拒絕，外掛用白話顯示（`attach_origin_mismatch`／`attach_origin_unknown`／`attach_model_not_found`，後者伺服器用 404，已在通用 404 句之前特別處理）。
+- manifest `revitDoc` 多送選填的 `path`、`centralPath`（工作共享時）、`savedAt`（來源檔最後存檔時間）；路徑超過 500 字截斷。manifest schema 副本與網站端同步（含 `.sha256`）。
+- 修正（測試抓到）：模型清單的 `createdAt` 被 Newtonsoft 自動轉成日期型別，要同時接字串與日期兩種。
+- 測試：新增 `SheetsOnlyAttachTests` 19 項（匯出、manifest、視窗下拉規則、API 與錯誤白話、假伺服器全流程）；IssueManager 全部 321 通過（2 略過）；`tools/bundle-manifest.schema.test.mjs` 44／44（以 `IM_WEB_SCHEMA` 指向 imsheetsonly 的網站端 schema）；Release.R24 建置 0 錯誤。**Revit 實機（點下拉、真的上傳 CPC 中埔）未測。**
+
 ### 🔧 上傳到 Issue Manager：驗收退回修正（imrevitaddinr，D-013，2026-11-01）
 
 - 完成畫面的「伺服器提醒」不再貼警告碼（`params_invalid`、`named_views_skipped:3`…）：新增 `WarningText`，每個伺服器會產生的碼都轉成白話繁中，不認得的碼只顯示通用句、不顯示代碼（對應 Issue Manager D-813）。單元測試涵蓋每個碼與未知碼，並有完成畫面整合測試。

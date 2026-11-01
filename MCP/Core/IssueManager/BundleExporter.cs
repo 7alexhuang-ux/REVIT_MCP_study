@@ -128,11 +128,16 @@ namespace RevitMCP.Core.IssueManager
 
             var doExportPdf = request.Sheets.Count > 0;
             var doExportModel = request.IncludeModel;
+            // D-870：不匯出模型但接到已上傳的模型時，視角與位置照常匯出，原點沿用被接模型的原點（不重算，才對得上它的 GLB）。
+            var attached = doExportModel ? null : request.AttachedModel;
+            if (attached != null && !attached.HasOrigin)
+                throw new InvalidOperationException("選的模型沒有記錄座標原點，無法確認圖面對得上；請改勾「匯出 3D 模型」重傳一次。");
+            var hasModelTarget = doExportModel || attached != null;
             var threeD = request.ThreeDViews.Select(v => v.UniqueId).ToList();
-            var doExportNamedViews = doExportModel && threeD.Count > 0;
+            var doExportNamedViews = hasModelTarget && threeD.Count > 0;
             var positioned = request.PositionedViews.Select(v => v.UniqueId).ToList();
-            // 位置資料需要模型才有意義（網站端沒有 GLB 就不匯入，D-705）；沒模型時略過並在下面說明。
-            var doExportPositions = doExportModel && positioned.Count > 0 && !request.SkipViewPositions;
+            // 位置資料需要模型才有意義（網站端沒有 GLB、也沒接模型就不匯入，D-705）；沒模型時略過並在下面說明。
+            var doExportPositions = hasModelTarget && positioned.Count > 0 && !request.SkipViewPositions;
             var doExportParams = request.IncludeParams;
             var toMeasure = ViewportsNeedingMeasure(request);
             var doMeasure = toMeasure.Count > 0;
@@ -140,7 +145,7 @@ namespace RevitMCP.Core.IssueManager
             var step = 0;
             var warnings = new List<string>(request.PreWarnings ?? new List<string>());
             var files = new List<BundleFile>();
-            var origin = new double[] { 0, 0, 0 };
+            var origin = attached != null ? (double[])attached.OriginOffsetMeters.Clone() : new double[] { 0, 0, 0 };
 
             ct.ThrowIfCancellationRequested();
             progress.Report("讀取文件資訊", ++step, total);
@@ -207,11 +212,11 @@ namespace RevitMCP.Core.IssueManager
                 warnings.AddRange(model.Warnings ?? new List<string>());
                 files.Add(Describe(BundleFile.Glb, GlbName, glbPath));
             }
-            else if (request.ThreeDViews.Any())
+            else if (attached == null && request.ThreeDViews.Any())
             {
                 warnings.Add("沒有匯出 3D 模型，所以略過 3D 視角資料（視圖仍列在清單中）。");
             }
-            if (!doExportModel && positioned.Count > 0 && !request.SkipViewPositions)
+            if (!hasModelTarget && positioned.Count > 0 && !request.SkipViewPositions)
                 warnings.Add("沒有匯出 3D 模型，所以略過平面／立面／剖面的位置資料（視圖仍列在清單中）。");
 
             if (doExportNamedViews)

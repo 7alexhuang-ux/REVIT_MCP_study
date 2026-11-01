@@ -27,6 +27,12 @@ namespace RevitMCP.Core.IssueManager
     {
         public string Title { get; set; }
         public string VersionNumber { get; set; }
+        /// <summary>doc.PathName（D-871）；未存檔的新專案為空。</summary>
+        public string Path { get; set; }
+        /// <summary>工作共享時中央模型的使用者路徑（D-871）；沒有為 null。</summary>
+        public string CentralPath { get; set; }
+        /// <summary>來源檔最後存檔時間（UTC，D-871）；讀不到為 null。</summary>
+        public DateTime? SavedAtUtc { get; set; }
     }
 
     /// <summary>
@@ -50,6 +56,7 @@ namespace RevitMCP.Core.IssueManager
         public const int MaxViewNameChars = 300;
         public const int MaxDocTitleChars = 300;
         public const int MaxVersionNumberChars = 100;
+        public const int MaxSourcePathChars = 500;
         public const int MaxSheetSetNameChars = 300;
         public const double MaxOriginAbs = 1e9;
 
@@ -150,13 +157,29 @@ namespace RevitMCP.Core.IssueManager
                 };
             }
 
+            // D-870：接既有模型＝不帶 GLB、一定有圖紙，且原點必須是被接模型的原點（伺服器還會再比一次）。
+            // 這次有匯出 GLB 就以 GLB 為準，不再接（manifest 不帶 attachToModelId）。
+            var attached = files != null && files.Any(f => f.Kind == BundleFile.Glb) ? null : request.AttachedModel;
+            if (attached != null)
+            {
+                if (string.IsNullOrWhiteSpace(attached.Id)) throw new InvalidOperationException("要接的模型缺少識別碼。");
+                if (request.Sheets.Count == 0) throw new InvalidOperationException("只傳圖面接既有模型時，至少要勾選一張圖紙。");
+            }
+
+            var revitDoc = new JObject { ["title"] = Clip(doc.Title, MaxDocTitleChars), ["versionNumber"] = Clip(doc.VersionNumber, MaxVersionNumberChars) };
+            // D-871：來源檔路徑資訊（選填；空字串不送）。路徑超過 500 字就截斷，不讓整包被伺服器的長度上限拒絕。
+            if (!string.IsNullOrWhiteSpace(doc.Path)) revitDoc["path"] = Clip(doc.Path, MaxSourcePathChars);
+            if (!string.IsNullOrWhiteSpace(doc.CentralPath)) revitDoc["centralPath"] = Clip(doc.CentralPath, MaxSourcePathChars);
+            if (doc.SavedAtUtc.HasValue) revitDoc["savedAt"] = doc.SavedAtUtc.Value.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+
             var manifest = new JObject
             {
                 ["schemaVersion"] = SchemaVersion,
-                ["revitDoc"] = new JObject { ["title"] = Clip(doc.Title, MaxDocTitleChars), ["versionNumber"] = Clip(doc.VersionNumber, MaxVersionNumberChars) },
+                ["revitDoc"] = revitDoc,
                 ["exportedAt"] = exportedAt.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
                 ["originOffsetMeters"] = new JArray(originOffsetMeters[0], originOffsetMeters[1], originOffsetMeters[2])
             };
+            if (attached != null) manifest["attachToModelId"] = attached.Id;
             if (!string.IsNullOrWhiteSpace(request.SheetSetName)) manifest["sheetSet"] = new JObject { ["name"] = Clip(request.SheetSetName, MaxSheetSetNameChars) };
             manifest["sheets"] = sheets;
             manifest["views"] = views;

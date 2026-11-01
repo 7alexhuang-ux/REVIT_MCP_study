@@ -59,6 +59,11 @@ namespace RevitMCP.Core.IssueManager
         private readonly ComboBox _sheetSetBox = new ComboBox { MinWidth = 280 };
         private readonly TreeView _tree = new TreeView { MinHeight = 160 };
         private readonly CheckBox _modelBox = new CheckBox { Content = "匯出 3D 模型（GLB）", Margin = new Thickness(0, 4, 0, 0) };
+        // D-870：不匯出模型時，可選「接到已上傳的模型」（只傳圖面）。
+        private readonly ComboBox _attachBox = new ComboBox { MinWidth = 280, Margin = new Thickness(18, 2, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        private readonly TextBlock _attachNote = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(18, 2, 0, 0), Foreground = System.Windows.Media.Brushes.DimGray };
+        private readonly StackPanel _attachPanel = new StackPanel();
+        private int _attachGeneration;
         private readonly CheckBox _paramsBox = new CheckBox { Content = Strings.IncludeParamsText, Margin = new Thickness(0, 4, 0, 0), IsChecked = true };
         private readonly CheckBox _optionsBox = new CheckBox { Content = "含設計選項（未勾＝只含主模型與各選項集合的主要選項）", Margin = new Thickness(18, 2, 0, 0) };
         private readonly TextBlock _summaryText = new TextBlock { FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 6, 0, 0) };
@@ -166,6 +171,10 @@ namespace RevitMCP.Core.IssueManager
             var lower = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
             lower.Children.Add(_modelBox);
             lower.Children.Add(_optionsBox);
+            _attachPanel.Children.Add(new TextBlock { Text = Strings.AttachLabel, Margin = new Thickness(18, 4, 0, 0) });
+            _attachPanel.Children.Add(_attachBox);
+            _attachPanel.Children.Add(_attachNote);
+            lower.Children.Add(_attachPanel);
             lower.Children.Add(_paramsBox);
             lower.Children.Add(_summaryText);
             lower.Children.Add(_warningText);
@@ -187,6 +196,7 @@ namespace RevitMCP.Core.IssueManager
             _projectBox.DisplayMemberPath = "Label";
             _stageBox.DisplayMemberPath = "Label";
             _sheetSetBox.DisplayMemberPath = "Label";
+            _attachBox.DisplayMemberPath = "Label";
             _retryButton.Visibility = WpfVisibility.Collapsed;
             Bind(_projectBox, ItemsControl.ItemsSourceProperty, "Projects", BindingMode.OneWay);
             Bind(_projectBox, System.Windows.Controls.Primitives.Selector.SelectedItemProperty, "SelectedProject", BindingMode.TwoWay);
@@ -199,6 +209,10 @@ namespace RevitMCP.Core.IssueManager
             Bind(_optionsBox, System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty, "IncludeDesignOptions", BindingMode.TwoWay);
             Bind(_optionsBox, IsEnabledProperty, "DesignOptionsEnabled", BindingMode.OneWay);
             Bind(_paramsBox, System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty, "IncludeParams", BindingMode.TwoWay);
+            Bind(_attachBox, ItemsControl.ItemsSourceProperty, "AttachOptions", BindingMode.OneWay);
+            Bind(_attachBox, System.Windows.Controls.Primitives.Selector.SelectedItemProperty, "SelectedAttach", BindingMode.TwoWay);
+            Bind(_attachNote, TextBlock.TextProperty, "AttachNote", BindingMode.OneWay);
+            BindingOperations.SetBinding(_attachPanel, UIElement.VisibilityProperty, new Binding("AttachVisible") { Source = _vm, Mode = BindingMode.OneWay, Converter = new BooleanToVisibilityConverter() });
             Bind(_uploadButton, ToolTipProperty, "BlockReason", BindingMode.OneWay);
 
             BuildTree();
@@ -267,6 +281,10 @@ namespace RevitMCP.Core.IssueManager
         private void WireEvents()
         {
             _vm.PropertyChanged += (s, e) => RefreshSummary();
+            _vm.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == "SelectedProject") BeginLoadAttachableModels();
+            };
             _loginButton.Click += async (s, e) => await LoginAsync(false);
             _switchButton.Click += async (s, e) => await LoginAsync(true);
             _logoutButton.Click += async (s, e) => await LogoutAsync();
@@ -360,6 +378,43 @@ namespace RevitMCP.Core.IssueManager
                     RefreshAccount();
                 });
             }
+        }
+
+        /// <summary>
+        /// 選了專案就讀它已上傳的模型（D-870）。讀取期間使用者換了專案、或視窗已關閉，結果就丟掉（以 _attachGeneration 判斷）。
+        /// 舊網站沒有這個端點（404）、讀取失敗：只剩「不接」並說明，不擋其他上傳流程。
+        /// </summary>
+        private void BeginLoadAttachableModels()
+        {
+            var project = _vm.SelectedProject;
+            var generation = ++_attachGeneration;
+            if (project == null || _services.Api == null) return;
+            var task = LoadAttachableModelsAsync(project.Id, generation);
+            task.ContinueWith(t => { var ignored = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+        }
+
+        private async Task LoadAttachableModelsAsync(string projectId, int generation)
+        {
+            List<AttachableModel> models = null;
+            string failure = null;
+            try
+            {
+                models = await _services.Api.GetAttachableModelsAsync(projectId, CancellationToken.None);
+            }
+            catch (AddinApiException ex)
+            {
+                failure = ex.Kind == AddinErrorKind.NotFound ? Strings.AttachUnsupported : Strings.AttachLoadFailed;
+            }
+            catch (Exception)
+            {
+                failure = Strings.AttachLoadFailed;
+            }
+            Ui(() =>
+            {
+                if (generation != _attachGeneration) return; // 已換專案或重新讀取：舊結果作廢
+                if (failure != null) _vm.ClearAttachableModels(failure);
+                else _vm.SetAttachableModels(models);
+            });
         }
 
         private async Task LoginAsync(bool switchAccount)
@@ -586,6 +641,7 @@ namespace RevitMCP.Core.IssueManager
             _stageBox.IsEnabled = !busy;
             _descriptionBox.IsEnabled = !busy;
             _sheetSetBox.IsEnabled = !busy;
+            _attachBox.IsEnabled = !busy;
             _modelBox.IsEnabled = !busy;
             _paramsBox.IsEnabled = !busy;
             _loginButton.IsEnabled = !busy;

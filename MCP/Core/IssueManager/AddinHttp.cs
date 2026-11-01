@@ -56,6 +56,8 @@ namespace RevitMCP.Core.IssueManager
 
             var status = (int)response.StatusCode;
             if (status == 401) return new AddinApiException(AddinErrorKind.NeedLogin, "登入已失效，請重新登入。", status, code);
+            // D-870：只傳圖面時要接的模型不見了（伺服器用 404），不能套「找不到這個項目或沒有權限」的通用句。
+            if (status == 404 && code == "attach_model_not_found") return new AddinApiException(AddinErrorKind.Rejected, RejectedMessage(code), status, code);
             if (status == 403 || status == 404) return new AddinApiException(AddinErrorKind.NotFound, "找不到這個項目，或這個帳號沒有權限。", status, code);
             if (status == 426) return new AddinApiException(AddinErrorKind.UpgradeRequired, UpgradeMessage(code), status, code);
             if (status >= 500) return new AddinApiException(AddinErrorKind.Server, ServerMessage(code), status, code);
@@ -134,6 +136,12 @@ namespace RevitMCP.Core.IssueManager
                     return "您有太多未完成的上傳，暫時無法再建立新的版本包。未完成的上傳 24 小時內會自動清除，請稍後再試；若急需上傳，請通知管理員清除。";
                 case "invalid_request":
                     return "Issue Manager 無法解讀送出的請求內容。";
+                case "attach_model_not_found":
+                    return "找不到要接的模型（可能已被刪除，或不在這個專案的工作版）。請重新選擇模型，或勾選「匯出 3D 模型」重傳。";
+                case "attach_origin_unknown":
+                    return "選的模型沒有記錄座標原點，無法確認圖面對得上，這次沒有上傳。請改勾「匯出 3D 模型」重傳一次。";
+                case "attach_origin_mismatch":
+                    return "圖面的座標原點和選的模型對不上，連起來會跑位，所以整包沒有上傳。請確認選對模型；若專案基準點或共享座標改過，請勾選「匯出 3D 模型」重傳。";
                 default:
                     // 伺服器自己給的代碼原樣顯示前先過濾：只留英數底線點橫線、最多 120 字元；本文最長 8 KB，不能整串貼進視窗。
                     var safe = SanitizeCode(code);

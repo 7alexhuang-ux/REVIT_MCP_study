@@ -175,6 +175,11 @@ namespace RevitMCP.Core.IssueManager
         public List<SheetItem> Sheets { get; set; } = new List<SheetItem>();
         public List<ViewItem> Views { get; set; } = new List<ViewItem>();
         public bool IncludeModel { get; set; }
+        /// <summary>
+        /// 只傳圖面時要接的既有模型（D-870）；null＝不接。只有不匯出模型（IncludeModel＝false）時才會有值。
+        /// 匯出位置與 3D 視角時沿用這個模型的原點（<see cref="AttachedModel"/>.OriginOffsetMeters），不重算。
+        /// </summary>
+        public AttachableModel AttachedModel { get; set; }
         public bool IncludeDesignOptions { get; set; }
         /// <summary>匯出參數與房間面積表（params.json，D-802／D-803）。</summary>
         public bool IncludeParams { get; set; }

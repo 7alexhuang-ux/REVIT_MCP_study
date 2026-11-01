@@ -60,6 +60,15 @@ namespace RevitMCP.Core.IssueManager
         public string Label { get; set; }
     }
 
+    /// <summary>「接到已上傳的模型」下拉的一項（D-870）；Model 為 null＝「不接」。</summary>
+    public sealed class AttachOption
+    {
+        public AttachableModel Model { get; set; }
+        public string Label { get; set; }
+        /// <summary>伺服器讀得到這個模型的座標原點；沒有原點的模型不能接（要重傳模型）。</summary>
+        public bool Usable { get { return Model == null || Model.HasOrigin; } }
+    }
+
     public sealed class SheetSetOption
     {
         /// <summary>null＝（自訂）。</summary>
@@ -88,6 +97,10 @@ namespace RevitMCP.Core.IssueManager
         private readonly List<SheetNode> _sheets = new List<SheetNode>();
         private readonly List<ViewGroupNode> _viewGroups = new List<ViewGroupNode>();
         private readonly List<SheetSetOption> _sheetSetOptions = new List<SheetSetOption>();
+        // 每次換內容都建新的清單物件：WPF 的 ItemsSource 綁定只有在參考改變時才會重新整理（同 Projects 的做法）。
+        private List<AttachOption> _attachOptions = new List<AttachOption>();
+        private AttachOption _selectedAttach;
+        private string _attachNote = string.Empty;
 
         private bool _suspendCustomSwitch;
         private bool _isLoggedIn;
@@ -146,6 +159,7 @@ namespace RevitMCP.Core.IssueManager
                 _sheetSetOptions.Add(new SheetSetOption { Set = set, Label = set.Name });
             }
             _selectedSheetSet = _sheetSetOptions[0];
+            ClearAttachableModels(string.Empty);
         }
 
         public ProjectSnapshot Snapshot { get; private set; }
@@ -169,7 +183,56 @@ namespace RevitMCP.Core.IssueManager
         public AddinProject SelectedProject
         {
             get { return _selectedProject; }
-            set { if (Set(ref _selectedProject, value)) RaiseDerived(); }
+            set
+            {
+                if (!Set(ref _selectedProject, value)) return;
+                ClearAttachableModels(value == null ? string.Empty : Strings.AttachLoading); // 換專案：舊專案的模型清單不能留著（視窗隨後重讀）
+                RaiseDerived();
+            }
+        }
+
+        // ── 只傳圖面接既有模型（D-870）──────────────────────────────
+
+        public IList<AttachOption> AttachOptions { get { return _attachOptions; } }
+
+        /// <summary>目前選的項目；沒有任何模型可接時為「不接」。</summary>
+        public AttachOption SelectedAttach
+        {
+            get { return _selectedAttach; }
+            set { if (Set(ref _selectedAttach, value ?? _attachOptions[_attachOptions.Count - 1])) { Raise("AttachNote"); RaiseDerived(); } }
+        }
+
+        /// <summary>下拉旁的說明（讀取中、沒有模型、舊網站、讀取失敗）；平常為空。</summary>
+        public string AttachNote { get { return _attachNote; } }
+
+        /// <summary>下拉只在「不匯出模型」時出現；勾了模型就不需要接。</summary>
+        public bool AttachVisible { get { return !_includeModel; } }
+
+        /// <summary>實際要接的模型：不匯出模型、且選了一個模型時才有值。</summary>
+        public AttachableModel EffectiveAttach { get { return !_includeModel && _selectedAttach != null ? _selectedAttach.Model : null; } }
+
+        /// <summary>載入完成：依伺服器順序（新的在前）列出，預設選第一個能用的；最後一項固定是「不接」。</summary>
+        public void SetAttachableModels(IEnumerable<AttachableModel> models, string note = null)
+        {
+            var options = new List<AttachOption>();
+            foreach (var model in models ?? Enumerable.Empty<AttachableModel>())
+            {
+                options.Add(new AttachOption { Model = model, Label = Strings.AttachOptionLabel(model.FileName, model.CreatedAt, model.VersionLabel, model.HasOrigin) });
+            }
+            options.Add(new AttachOption { Model = null, Label = Strings.AttachNone });
+            _attachOptions = options;
+            _selectedAttach = _attachOptions.FirstOrDefault(o => o.Model != null && o.Model.HasOrigin) ?? _attachOptions[_attachOptions.Count - 1];
+            _attachNote = note ?? (_attachOptions.Count == 1 ? Strings.AttachEmpty : string.Empty);
+            Raise("AttachOptions"); Raise("SelectedAttach"); Raise("AttachNote"); RaiseDerived();
+        }
+
+        /// <summary>清空（換專案、登出、舊網站、讀取失敗）：只剩「不接」，並附說明。</summary>
+        public void ClearAttachableModels(string note)
+        {
+            _attachOptions = new List<AttachOption> { new AttachOption { Model = null, Label = Strings.AttachNone } };
+            _selectedAttach = _attachOptions[0];
+            _attachNote = note ?? string.Empty;
+            Raise("AttachOptions"); Raise("SelectedAttach"); Raise("AttachNote"); RaiseDerived();
         }
 
         public StageOption SelectedStage
@@ -187,7 +250,7 @@ namespace RevitMCP.Core.IssueManager
         public bool IncludeModel
         {
             get { return _includeModel; }
-            set { if (Set(ref _includeModel, value)) { Raise("DesignOptionsEnabled"); RaiseDerived(); } }
+            set { if (Set(ref _includeModel, value)) { Raise("DesignOptionsEnabled"); Raise("AttachVisible"); RaiseDerived(); } }
         }
 
         public bool IncludeDesignOptions
@@ -295,7 +358,15 @@ namespace RevitMCP.Core.IssueManager
         /// <summary>已勾選、且網站能轉成 3D 視角的平面／立面／剖面視圖數（D-803：位置資料跟著勾選自動匯出）。</summary>
         public int CheckedPositionedViewCount { get { return _viewByUniqueId.Values.Count(v => v.IsChecked && ViewKinds.HasPosition(v.Item.Kind)); } }
 
-        public string SummaryText { get { return Strings.Summary(CheckedSheetCount, CheckedViewCount, CheckedPositionedViewCount, ModelCount, _includeParams); } }
+        public string SummaryText
+        {
+            get
+            {
+                var summary = Strings.Summary(CheckedSheetCount, CheckedViewCount, CheckedPositionedViewCount, ModelCount, _includeParams);
+                var attach = EffectiveAttach;
+                return attach == null ? summary : Strings.SummaryAttached(summary, attach.FileName);
+            }
+        }
 
         /// <summary>沒勾圖紙或模型時的提示（允許送出，缺項留空，D-594）。</summary>
         public IList<string> MissingWarnings
@@ -304,7 +375,8 @@ namespace RevitMCP.Core.IssueManager
             {
                 var list = new List<string>();
                 if (CheckedSheetCount == 0) list.Add(Strings.MissingSheets);
-                if (!_includeModel) list.Add(Strings.MissingModel);
+                var attach = EffectiveAttach;
+                if (!_includeModel) list.Add(attach == null ? Strings.MissingModel : Strings.AttachedNote(attach.FileName));
                 return list;
             }
         }
@@ -326,6 +398,7 @@ namespace RevitMCP.Core.IssueManager
                 if (_selectedStage == null || _selectedStage.Code == null) return Strings.NoStageSelected;
                 if (string.IsNullOrWhiteSpace(_description)) return Strings.NoDescription;
                 if (!HasAnySelection) return Strings.NothingSelected;
+                if (!_includeModel && _selectedAttach != null && !_selectedAttach.Usable) return Strings.AttachNoOrigin;
                 if (CheckedSheetCount > ManifestBuilder.MaxSheets) return Strings.TooManySheets(ManifestBuilder.MaxSheets);
                 if (CheckedViewCount > ManifestBuilder.MaxViews) return Strings.TooManyViews(ManifestBuilder.MaxViews);
                 return null;
@@ -345,6 +418,7 @@ namespace RevitMCP.Core.IssueManager
             Raise("HasAnySelection");
             Raise("BlockReason");
             Raise("CanUpload");
+            Raise("EffectiveAttach");
         }
 
         /// <summary>組出匯出請求。圖紙依圖號自然排序；每張圖紙只留下被勾選的視口視圖。</summary>
@@ -358,6 +432,7 @@ namespace RevitMCP.Core.IssueManager
                 Description = _description.Trim(),
                 SheetSetName = _selectedSheetSet.Set != null ? _selectedSheetSet.Set.Name : null,
                 IncludeModel = _includeModel,
+                AttachedModel = EffectiveAttach,
                 IncludeDesignOptions = _includeModel && _includeDesignOptions,
                 IncludeParams = _includeParams
             };

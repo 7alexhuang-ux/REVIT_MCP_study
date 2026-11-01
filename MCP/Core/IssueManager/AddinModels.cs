@@ -1,6 +1,7 @@
 #nullable disable
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json.Linq;
 
@@ -37,6 +38,63 @@ namespace RevitMCP.Core.IssueManager
         public string Code { get; set; }
         public string Name { get; set; }
         public string Label { get { return string.IsNullOrWhiteSpace(Code) ? Name : Code + "　" + Name; } }
+    }
+
+    /// <summary>
+    /// GET /api/addin/projects/:id/models 的一筆（D-870）：該專案已上傳、可以「只傳圖面接上去」的工作版模型。
+    /// OriginOffsetMeters 是這個模型 GLB 匯出時的共用原點；伺服器讀不到時為 null（這個模型不能選，要重傳模型）。
+    /// </summary>
+    public sealed class AttachableModel
+    {
+        public string Id { get; set; }
+        public string FileName { get; set; }
+        public string Description { get; set; }
+        public DateTimeOffset? CreatedAt { get; set; }
+        /// <summary>登記這個模型的版本號（例如 v3）；沒有時為 null。</summary>
+        public string VersionLabel { get; set; }
+        public double[] OriginOffsetMeters { get; set; }
+
+        public bool HasOrigin { get { return OriginOffsetMeters != null && OriginOffsetMeters.Length == 3; } }
+
+        /// <summary>
+        /// 時間欄位：Newtonsoft 的 JObject.Parse 預設把 ISO 8601 字串直接轉成日期型別（JTokenType.Date），
+        /// 所以兩種型別都要接；讀不出來就是 null（只影響下拉的顯示文字）。
+        /// </summary>
+        private static DateTimeOffset? ParseTime(JToken token)
+        {
+            if (token == null) return null;
+            if (token.Type == JTokenType.Date)
+            {
+                var value = ((JValue)token).Value; // Value<object>() 會回 JValue 本身（它也是 object），要直接取內容
+                if (value is DateTimeOffset) return (DateTimeOffset)value;
+                if (value is DateTime)
+                {
+                    var time = (DateTime)value;
+                    return new DateTimeOffset(time.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(time, DateTimeKind.Utc) : time.ToUniversalTime());
+                }
+                return null;
+            }
+            if (token.Type != JTokenType.String) return null;
+            DateTimeOffset parsed;
+            return DateTimeOffset.TryParse((string)token, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out parsed) ? (DateTimeOffset?)parsed : null;
+        }
+
+        public static AttachableModel FromJson(JToken item)
+        {
+            double[] origin = null;
+            var array = item["originOffsetMeters"] as JArray;
+            if (array != null && array.Count == 3 && array.All(v => v.Type == JTokenType.Float || v.Type == JTokenType.Integer))
+                origin = new[] { (double)array[0], (double)array[1], (double)array[2] };
+            return new AttachableModel
+            {
+                Id = (string)item["id"],
+                FileName = (string)item["fileName"],
+                Description = (string)item["description"],
+                CreatedAt = ParseTime(item["createdAt"]),
+                VersionLabel = item["versionLabel"] != null && item["versionLabel"].Type == JTokenType.String ? (string)item["versionLabel"] : null,
+                OriginOffsetMeters = origin
+            };
+        }
     }
 
     /// <summary>建立版本包時伺服器給的單一檔案上傳憑證：分段大小與依序的簽名網址。</summary>

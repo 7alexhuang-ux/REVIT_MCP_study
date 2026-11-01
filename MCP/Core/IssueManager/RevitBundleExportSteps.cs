@@ -38,11 +38,42 @@ namespace RevitMCP.Core.IssueManager
         public RevitDocInfo GetDocInfo()
         {
             var doc = RequireSameDocument();
-            return new RevitDocInfo
+            var info = new RevitDocInfo
             {
                 Title = doc.Title,
-                VersionNumber = _uiApp.Application.VersionNumber + " (" + _uiApp.Application.VersionBuild + ")"
+                VersionNumber = _uiApp.Application.VersionNumber + " (" + _uiApp.Application.VersionBuild + ")",
+                Path = doc.PathName
             };
+            FillSourcePaths(doc, info);
+            return info;
+        }
+
+        /// <summary>
+        /// D-871：來源檔路徑、工作共享的中央模型路徑、最後存檔時間。任何一項讀不到就留空（不影響上傳）。
+        /// 存檔時間取自檔案系統（中央模型優先）；雲端模型或網路磁碟不可讀時留空。日誌不記路徑。
+        /// </summary>
+        private static void FillSourcePaths(Autodesk.Revit.DB.Document doc, RevitDocInfo info)
+        {
+            try
+            {
+                if (doc.IsWorkshared)
+                {
+                    var central = doc.GetWorksharingCentralModelPath();
+                    if (central != null) info.CentralPath = Autodesk.Revit.DB.ModelPathUtils.ConvertModelPathToUserVisiblePath(central);
+                }
+            }
+            catch (Exception) { /* 例如已分離的工作共享檔：沒有中央模型路徑 */ }
+            info.SavedAtUtc = ReadSavedAtUtc(info.CentralPath) ?? ReadSavedAtUtc(info.Path);
+        }
+
+        private static DateTime? ReadSavedAtUtc(string path)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
+                return File.GetLastWriteTimeUtc(path);
+            }
+            catch (Exception) { return null; }
         }
 
         /// <summary>
