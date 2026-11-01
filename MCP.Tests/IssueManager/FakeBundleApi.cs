@@ -179,7 +179,7 @@ namespace RevitMCP.Tests.IssueManager
                         var setId = "set-" + id;
                         _finalizedSetIds[id] = setId;
                         BundleStatus[id] = "finalized";
-                        return FakeHandler.Json(HttpStatusCode.OK, new JObject { ["setId"] = setId, ["url"] = "https://im.example.test/sets/" + setId, ["version"] = VersionOf(id), ["warnings"] = new JArray("測試警告") });
+                        return FakeHandler.Json(HttpStatusCode.OK, new JObject { ["setId"] = setId, ["url"] = "https://im.example.test/sets/" + setId, ["version"] = VersionOf(id), ["warnings"] = new JArray("測試警告", "named_views_skipped:3") });
                     }
                 }
             }

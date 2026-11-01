@@ -1,3 +1,5 @@
+#if DEBUG
+// N1（imrevitaddinr）：自測鉤子只存在於開發建置（Debug.R*）；Release 建置不含，避免隨產品 DLL 出貨。
 #nullable disable
 using System;
 using System.Collections.Generic;
@@ -253,3 +255,4 @@ namespace RevitMCP.Core.IssueManager
         }
     }
 }
+#endif

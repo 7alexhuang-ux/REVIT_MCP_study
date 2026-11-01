@@ -235,8 +235,10 @@ namespace RevitMCP
 
                 Logger.Info("RevitMCP Plugin 已成功載入");
 
+#if DEBUG
                 // 實機自測鉤子（開發／驗收用）：只有使用者預先建立 ~/.revit-mcp/im-selftest.json 才啟用，見 ImSelfTest。
                 RevitMCP.Core.IssueManager.ImSelfTest.RegisterIfRequested(application);
+#endif
 
                 // 自動啟動只由使用者預先建立的 opt-in 標記啟用；外掛不自行建立標記或改 Add-ins 部署。
                 if (automatic)

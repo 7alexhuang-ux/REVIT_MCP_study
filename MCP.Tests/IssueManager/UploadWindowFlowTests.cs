@@ -150,6 +150,12 @@ namespace RevitMCP.Tests.IssueManager
                 var link = rig.Window.ResultText.Inlines.OfType<Hyperlink>().FirstOrDefault();
                 Assert.IsNotNull(link, "完成後顯示版本連結；inlines=" + string.Join(",", rig.Window.ResultText.Inlines.Select(i => i.GetType().Name)) + " text=" + rig.Window.ResultText.Text + " status=" + rig.Window.StatusText.Text);
                 StringAssert.StartsWith("https://im.example.test/sets/set-", link.NavigateUri.AbsoluteUri);
+                // D-813：伺服器的警告碼一律轉白話，完成畫面不出現代碼；不認得的碼只顯示通用句。
+                var shown = new TextRange(rig.Window.ResultText.ContentStart, rig.Window.ResultText.ContentEnd).Text;
+                StringAssert.Contains("有 3 個具名視圖沒有匯出", shown);
+                StringAssert.Contains("不影響版本使用", shown);
+                StringAssert.DoesNotContain("named_views_skipped", shown);
+                StringAssert.DoesNotContain("測試警告", shown);
                 Assert.IsTrue(rig.Window.UploadButton.IsEnabled, "完成後可以再上傳");
                 Assert.AreEqual("關閉", rig.Window.CancelButton.Content);
             });

@@ -13,9 +13,12 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
-// ajv 是 @modelcontextprotocol/sdk 的傳遞相依（MCP-Server/package-lock.json 鎖 8.17.1），不另外新增相依。
+// ajv 是 @modelcontextprotocol/sdk 的傳遞相依，不另外新增相依。實際版本以「解析到哪一份 node_modules」為準：
+// 在 MCP-Server 做過 npm ci 時是 package-lock.json 鎖的 8.17.1；沒做時（例如乾淨的驗收工作樹借用其他專案的 node_modules）
+// 可能解析到別的主版本（2026-11-01 驗收借到 6.15.0，44/44 仍通過）。測試開頭會印出實際版本。
 const require = createRequire(path.join(root, 'MCP-Server', 'package.json'));
 const Ajv = require('ajv');
+console.log('ajv 版本：' + require('ajv/package.json').version);
 
 const schema = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'schemas', 'bundle-manifest.schema.json'), 'utf8'));
 const sample = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'schemas', 'fixtures', 'bundle-manifest.sample.json'), 'utf8'));

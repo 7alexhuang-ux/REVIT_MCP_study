@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+### 🔧 上傳到 Issue Manager：驗收退回修正（imrevitaddinr，D-013，2026-11-01）
+
+- 完成畫面的「伺服器提醒」不再貼警告碼（`params_invalid`、`named_views_skipped:3`…）：新增 `WarningText`，每個伺服器會產生的碼都轉成白話繁中，不認得的碼只顯示通用句、不顯示代碼（對應 Issue Manager D-813）。單元測試涵蓋每個碼與未知碼，並有完成畫面整合測試。
+- 實機自測鉤子 `ImSelfTest` 以 `#if DEBUG` 關在開發建置：Release 建置的 DLL 不含它（已用 Release.R24 與 Debug.R24 建置比對確認）。
+- `tools/bundle-manifest.schema.test.mjs` 的 ajv 註解改成實際版本說明，執行時印出實際 ajv 版本。
+
 ### ✨ 上傳到 Issue Manager：補上視圖位置、參數與面積表、版本號顯示（imrevitaddin，D-012，2026-11-01）
 
 - 勾選含平面／天花／剖面／立面時，自動多匯出 `view_positions.json`（既有 `export_view_positions`；原點與 GLB 相同）。沒有模型時略過並提醒。

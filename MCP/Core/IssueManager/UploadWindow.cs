@@ -632,7 +632,8 @@ namespace RevitMCP.Core.IssueManager
             }
             if (result.Warnings != null && result.Warnings.Count > 0)
             {
-                _resultText.Inlines.Add(new Run("\n伺服器提醒：\n" + string.Join("\n", result.Warnings)));
+                // 伺服器回的是警告碼；一律轉成白話（D-813），不顯示代碼。
+                _resultText.Inlines.Add(new Run("\n伺服器提醒：\n" + string.Join("\n", IssueManager.WarningText.DescribeAll(result.Warnings))));
             }
         }
 
