@@ -146,6 +146,7 @@ namespace RevitMCP.Core.Walkthrough
             var builder = new GltfBuilder
             {
                 OriginOffsetMeters = _originOffsetMeters,
+                RevitModel = _main.Builder.RevitModel,
                 PartKey = LinkPartsManifest.Slug(title, _partKeys),
                 PartLabel = title
             };

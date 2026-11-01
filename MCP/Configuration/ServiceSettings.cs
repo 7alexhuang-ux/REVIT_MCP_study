@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using Newtonsoft.Json;
+using RevitMCP.Core.ViewSync;
 
 namespace RevitMCP.Configuration
 {
@@ -53,6 +56,18 @@ namespace RevitMCP.Configuration
         /// fork 預設 false：新連線接手舊連線（舊連線被 Abort）；設 true 改回 upstream 的獨占拒絕。
         /// </summary>
         public bool ExclusiveLock { get; set; } = false;
+
+        /// <summary>
+        /// 允許連線的瀏覽器網域（Origin 白名單，網頁 3D 視角聯動 D-710）。可在 config.json 增刪；
+        /// 沒有 Origin 的本機連線（MCP Server、tools/revit-command.mjs）不受此清單影響。
+        /// Replace：反序列化時整份取代預設值，避免預設網域每次載入重複累加。
+        /// </summary>
+        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+        public List<string> AllowedOrigins { get; set; } = new List<string>(OriginPolicy.DefaultAllowedOrigins);
+
+        /// <summary>已配對的網頁裝置（只存 token 的 SHA-256 與配對時的 Origin；Revit 功能區「撤銷網頁配對」會清空）。</summary>
+        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+        public List<PairedWebClient> PairedWebClients { get; set; } = new List<PairedWebClient>();
 
         /// <summary>
         /// 相機管理停靠面板的本機設定（人視高預設值等）。只存本機，不隨 .rvt 走。

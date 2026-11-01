@@ -531,6 +531,11 @@ dotnet build -c Release.R26   # Revit 2026
 - 新增 `docs/schemas/bundle-manifest.schema.json`（客戶端副本，待與網站端 4A 對齊）與共用 fixture、假 Issue Manager（`tools/fake-issue-manager/server.mjs`）、`scripts/install-addon.ps1` 部署 GLB 合併腳本。詳 [docs/ISSUE_MANAGER_UPLOAD.md](docs/ISSUE_MANAGER_UPLOAD.md)、[docs/adr/D-011-issue-manager-upload-addin.md](docs/adr/D-011-issue-manager-upload-addin.md)。
 - 測試：`dotnet test MCP.Tests` 314 → 429（新增 115，含 Node 假伺服器整合測試、WPF 視窗綁定與整段流程測試）；`tools/*.test.mjs` 10 → 34。R24 建置 0 錯誤、警告數 1184 與基線相同。**僅離線驗證；未連 Revit、未安裝外掛、未連真實 Issue Manager。**
 - 文件：新增 [docs/ISSUE_MANAGER_UPLOAD.md](docs/ISSUE_MANAGER_UPLOAD.md)（設定、流程、登入、檔案地圖、假伺服器、與網站端 schema 的對齊）、[ADR D-011](docs/adr/D-011-issue-manager-upload-addin.md)、LESSONS L-18～L-20、ROADMAP R-08、交班單 [docs/commit_handoff_v4b_2026-10-25.md](docs/commit_handoff_v4b_2026-10-25.md)（含給 Alex 的實機測試清單 T1～T12）；SPEC、文件清單、PROJECT_INTRO 同步。
+### 🔧 修正 — viewsync 透視視野：IM 對位視圖畫面空白（2026-10-31）
+
+- Revit 2024 實測：透視裁剪框 X／Y 是對稱矩形，位於眼睛前方固定 0.1 ft 的焦距平面（與近裁剪、目標距離無關）。舊 TargetPlane 換算以目標距離 63 m 算出 X ±152.7、Y ±85.8 ft，Revit 解讀為約 180° 視角，畫面空白。
+- `ViewSyncMath`：新增 `FovCropModel.FocalPlane`（預設）與 `RevitPerspectiveFocalFeet`、`RescaleCropToFov`；TargetPlane／NearPlane 標為已證偽、只供 debug 對照。`ViewSyncSetPerspectiveCrop` 套用後 Regenerate、以裁剪形狀讀回實際視角，差超過 0.2° 依 tan 比例校正一次。`viewsync_debug_fov` 預設模型同步，讀回多 `revitFov` 與焦距平面隱含視角。
+- NUnit 464 通過（新增實測重現案例）；R24 建置 0 錯誤。未部署，待主線重部署後送 p_temp.json 驗證畫面。
 
 ### 新增 — 設計選項實體幾何、命名視圖與無人操作工具（2026-10-23）
 

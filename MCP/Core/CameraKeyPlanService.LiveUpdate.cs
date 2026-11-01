@@ -249,6 +249,15 @@ namespace RevitMCP.Core
         internal static string UpdateCamerasAfterChange(UIApplication uiApp, Document doc, ICollection<ElementId> cameraIds,
             IDictionary<ElementId, CameraPoseHint> hints, out int updated, out bool storeyOrRoomChanged)
         {
+            string summary = UpdateCamerasAfterChangeCore(uiApp, doc, cameraIds, hints, out updated, out storeyOrRoomChanged);
+            // 網頁版相機管理（D-712）：去抖更新完成後推送最新相機列給已配對的瀏覽器（沒連線不做事、失敗只寫 log）。
+            if (doc != null && cameraIds != null && cameraIds.Count > 0) CameraChangePush.Notify(doc, "camera_update");
+            return summary;
+        }
+
+        private static string UpdateCamerasAfterChangeCore(UIApplication uiApp, Document doc, ICollection<ElementId> cameraIds,
+            IDictionary<ElementId, CameraPoseHint> hints, out int updated, out bool storeyOrRoomChanged)
+        {
             updated = 0;
             storeyOrRoomChanged = false;
             if (doc == null || cameraIds == null || cameraIds.Count == 0) return "沒有相機需要更新。";

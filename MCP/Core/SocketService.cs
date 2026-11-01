@@ -10,7 +10,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autodesk.Revit.UI;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using RevitMCP.Configuration;
+using RevitMCP.Core.ViewSync;
 using RevitMCP.Models;
 
 namespace RevitMCP.Core
@@ -45,6 +47,26 @@ namespace RevitMCP.Core
         // 回應也可能交錯成壞掉的 frame。這個 semaphore 讓「序列化＋送出」一次只有一個在飛。
         // 只在 SendResponseAsync 內持有，持有期間不會再去取 _connectionLock（見該方法註解）。
         private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
+        // 瀏覽器連線（帶 Origin 標頭，網頁 3D 視角聯動 D-710）與上面的 MCP Server 單一連線完全分開管理：
+        // 瀏覽器連進來不會擠掉 MCP Server，反之亦然。
+        private sealed class BrowserConnection
+        {
+            public WebSocket Socket;
+            public string Origin;
+            public readonly SemaphoreSlim SendLock = new SemaphoreSlim(1, 1);
+            public int AuthFailures;
+            /// <summary>已通過配對 token 驗證（或剛配對成功）；只有這種連線會收到伺服器主動推送的事件（camera_changed）。</summary>
+            public volatile bool Paired;
+        }
+
+        private readonly object _browserLock = new object();
+        private readonly System.Collections.Generic.Dictionary<Guid, BrowserConnection> _browserConnections =
+            new System.Collections.Generic.Dictionary<Guid, BrowserConnection>();
+        private const int MaxBrowserConnections = 8;
+        private const int MaxBrowserMessageBytes = 1024 * 1024; // 1 MB
+        private int _browserConnectionCount; // 以 Interlocked 維護，名額在握手前先保留
+        private const int MaxBrowserAuthFailures = 20;
+
 
         public event EventHandler<RevitCommandRequest> CommandReceived;
         public bool IsRunning => _isRunning;
@@ -140,6 +162,8 @@ namespace RevitMCP.Core
                 _httpListener.Start();
 
                 Logger.Info($"WebSocket 伺服器已啟動 - 監聽: {_settings.Host}:{_settings.Port}");
+                ViewSyncAuthService.Instance.Revoked -= OnPairingsRevoked;
+                ViewSyncAuthService.Instance.Revoked += OnPairingsRevoked;
 
                 // 在背景執行緒中等待連線
                 _ = Task.Run(async () => await AcceptConnectionsAsync(_cancellationTokenSource.Token));
@@ -157,6 +181,8 @@ namespace RevitMCP.Core
             }
         }
 
+        private void OnPairingsRevoked(object sender, EventArgs e) => CloseAllBrowserConnections("網頁配對已撤銷");
+
         /// <summary>
         /// 接受 WebSocket 連線
         /// </summary>
@@ -167,6 +193,20 @@ namespace RevitMCP.Core
                 try
                 {
                     var context = await _httpListener.GetContextAsync();
+
+                    // 帶 Origin 標頭＝瀏覽器：走白名單＋配對 token＋指令白名單的獨立通道；沒有 Origin 的維持原樣。
+                    var originHeader = context.Request.Headers["Origin"];
+                    if (!string.IsNullOrEmpty(originHeader))
+                    {
+                        // 握手丟到 Task，不阻塞接受連線的迴圈（慢速或惡意用戶端不能卡住其他連線）。
+                        var browserContext = context;
+                        _ = Task.Run(async () =>
+                        {
+                            try { await HandleBrowserConnectionAsync(browserContext, originHeader, cancellationToken); }
+                            catch (Exception ex) { Logger.Error("[Socket] 瀏覽器連線處理失敗", ex); }
+                        });
+                        continue;
+                    }
 
                     if (context.Request.IsWebSocketRequest)
                     {
@@ -337,6 +377,28 @@ namespace RevitMCP.Core
             }
         }
 
+        private static async Task CloseSocketQuietlyAsync(WebSocket socket, WebSocketCloseStatus status, string description)
+        {
+            try
+            {
+                using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2)))
+                {
+                    if (socket.State == WebSocketState.Open)
+                    {
+                        await socket.CloseAsync(status, description, cts.Token);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"WebSocket 關閉失敗（可忽略）: {ex.Message}");
+            }
+            finally
+            {
+                socket.Dispose();
+            }
+        }
+
         /// <summary>
         /// 接收訊息
         /// </summary>
@@ -444,6 +506,14 @@ namespace RevitMCP.Core
         /// </summary>
         public async Task SendResponseAsync(RevitCommandResponse response, Guid connectionId)
         {
+            BrowserConnection browser;
+            lock (_browserLock) _browserConnections.TryGetValue(connectionId, out browser);
+            if (browser != null)
+            {
+                await SendBrowserAsync(browser, response);
+                return;
+            }
+
             // 鎖內快照後改用區域變數 socket 傳送，避免 IsConnected 檢查與 SendAsync 之間
             // _activeSocket 被 SwitchConnection()/Stop() 換掉或清空 (TOCTOU)。
             WebSocket socket;
@@ -513,6 +583,8 @@ namespace RevitMCP.Core
                 // 先取消所有背景任務
                 _cancellationTokenSource?.Cancel();
 
+                CloseAllBrowserConnections("服務關閉");
+
                 // 釋放連線鎖定 (只 Abort，不 CloseAsync/Dispose —— 交給 receive task 的 finally
                 // 處理 Dispose，維持單一 disposer 原則)
                 WebSocket ws;
@@ -560,6 +632,256 @@ namespace RevitMCP.Core
                 catch { }
 
                 Logger.Info("WebSocket 伺服器已完全停止");
+            }
+        }
+
+        // ------------------------------------------------------------------ 瀏覽器連線（D-710）
+
+        private async Task HandleBrowserConnectionAsync(HttpListenerContext context, string origin, CancellationToken cancellationToken)
+        {
+            var auth = ViewSyncAuthService.Instance;
+            if (!context.Request.IsWebSocketRequest || !auth.IsOriginAllowed(origin))
+            {
+                Logger.Info($"[Socket] 拒絕瀏覽器連線，Origin 不在白名單: {origin}");
+                context.Response.StatusCode = 403;
+                context.Response.Close();
+                return;
+            }
+
+            // 原子保留名額：先加再判斷，超過就退回，避免並行握手同時通過檢查。
+            if (Interlocked.Increment(ref _browserConnectionCount) > MaxBrowserConnections)
+            {
+                Interlocked.Decrement(ref _browserConnectionCount);
+                Logger.Info("[Socket] 拒絕瀏覽器連線：同時連線數已達上限");
+                context.Response.StatusCode = 503;
+                context.Response.Close();
+                return;
+            }
+
+            WebSocket socket;
+            try
+            {
+                var wsContext = await context.AcceptWebSocketAsync(null);
+                socket = wsContext.WebSocket;
+            }
+            catch (Exception ex)
+            {
+                Interlocked.Decrement(ref _browserConnectionCount);
+                Logger.Error("[Socket] 瀏覽器 WebSocket 握手失敗", ex);
+                return;
+            }
+
+            var connectionId = Guid.NewGuid();
+            var connection = new BrowserConnection { Socket = socket, Origin = origin };
+            lock (_browserLock) _browserConnections[connectionId] = connection;
+            Logger.Info($"[Socket] 瀏覽器已連線 ({connectionId}) Origin={origin}");
+            _ = Task.Run(async () => await ReceiveBrowserMessagesAsync(connection, connectionId, cancellationToken));
+        }
+
+        private async Task ReceiveBrowserMessagesAsync(BrowserConnection connection, Guid connectionId, CancellationToken cancellationToken)
+        {
+            var socket = connection.Socket;
+            var buffer = new byte[16 * 1024];
+            try
+            {
+                while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
+                {
+                    using (var messageStream = new MemoryStream())
+                    {
+                        WebSocketReceiveResult result;
+                        var tooLarge = false;
+                        do
+                        {
+                            result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+                            if (result.MessageType == WebSocketMessageType.Close)
+                            {
+                                await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "", cancellationToken);
+                                return;
+                            }
+
+                            if (result.MessageType != WebSocketMessageType.Text) continue;
+                            if (messageStream.Length + result.Count > MaxBrowserMessageBytes) { tooLarge = true; continue; }
+                            messageStream.Write(buffer, 0, result.Count);
+                        }
+                        while (!result.EndOfMessage);
+
+                        if (tooLarge)
+                        {
+                            await SendBrowserAsync(connection, new RevitCommandResponse { Success = false, Error = "訊息太大。", ErrorCode = "message_too_large" });
+                            continue;
+                        }
+
+                        if (result.MessageType != WebSocketMessageType.Text) continue;
+                        HandleBrowserMessage(Encoding.UTF8.GetString(messageStream.ToArray()), connection, connectionId);
+                        if (connection.AuthFailures >= MaxBrowserAuthFailures)
+                        {
+                            Logger.Info($"[Socket] 瀏覽器連線授權失敗過多，關閉 ({connectionId})");
+                            await CloseSocketQuietlyAsync(socket, WebSocketCloseStatus.PolicyViolation, "授權失敗過多");
+                            return;
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[Socket] 瀏覽器連線結束 ({connectionId}): {ex.Message}");
+            }
+            finally
+            {
+                bool removed;
+                lock (_browserLock) removed = _browserConnections.Remove(connectionId);
+                if (removed) Interlocked.Decrement(ref _browserConnectionCount);
+                Logger.Info($"[Socket] 瀏覽器已斷線 ({connectionId})");
+            }
+        }
+
+        /// <summary>授權（Origin → 指令白名單 → token）後才把請求交給 CommandReceived；配對指令在這裡就地處理。</summary>
+        private void HandleBrowserMessage(string message, BrowserConnection connection, Guid connectionId)
+        {
+            RevitCommandRequest request;
+            try
+            {
+                request = JsonConvert.DeserializeObject<RevitCommandRequest>(message);
+            }
+            catch (Exception)
+            {
+                _ = SendBrowserAsync(connection, new RevitCommandResponse { Success = false, Error = "無法解析請求。", ErrorCode = "bad_request" });
+                return;
+            }
+
+            if (request == null || string.IsNullOrEmpty(request.CommandName))
+            {
+                _ = SendBrowserAsync(connection, new RevitCommandResponse { Success = false, Error = "缺少 CommandName。", ErrorCode = "bad_request", RequestId = request?.RequestId });
+                return;
+            }
+
+            var parameters = request.Parameters as JObject ?? new JObject();
+            var token = parameters["token"]?.Type == JTokenType.String ? parameters["token"].Value<string>() : null;
+            var decision = ViewSyncAuthService.Instance.Authorize(connection.Origin, request.CommandName, token);
+            if (decision != AuthDecision.Allowed)
+            {
+                connection.AuthFailures++;
+                Logger.Info($"[Socket] 瀏覽器請求被拒 ({ViewSyncAuthorizer.ErrorCode(decision)}): {request.CommandName}");
+                _ = SendBrowserAsync(connection, new RevitCommandResponse
+                {
+                    Success = false,
+                    Error = ViewSyncAuthorizer.ErrorMessage(decision),
+                    ErrorCode = ViewSyncAuthorizer.ErrorCode(decision),
+                    RequestId = request.RequestId
+                });
+                return;
+            }
+
+            if (ViewSyncCommands.IsPair(request.CommandName))
+            {
+                var code = parameters["code"]?.Type == JTokenType.String ? parameters["code"].Value<string>() : null;
+                var newToken = ViewSyncAuthService.Instance.TryPair(connection.Origin, code, out var pairResult);
+                if (newToken == null)
+                {
+                    connection.AuthFailures++;
+                    _ = SendBrowserAsync(connection, new RevitCommandResponse
+                    {
+                        Success = false,
+                        Error = PairFailureMessage(pairResult),
+                        ErrorCode = "pair_" + pairResult.ToString().ToLowerInvariant(),
+                        RequestId = request.RequestId
+                    });
+                    return;
+                }
+
+                connection.Paired = true;
+                Logger.Info($"[Socket] 網頁配對成功 Origin={connection.Origin}");
+                _ = SendBrowserAsync(connection, new RevitCommandResponse
+                {
+                    Success = true,
+                    Data = new JObject { ["token"] = newToken, ["origin"] = OriginPolicy.Normalize(connection.Origin) },
+                    RequestId = request.RequestId
+                });
+                return;
+            }
+
+            connection.Paired = true; // 走到這裡＝token 已驗證通過
+            parameters.Remove("token"); // token 不往下傳，也不進日誌
+            parameters["__browser"] = true; // 由 SocketService 無條件覆寫；執行器據此不回傳本機路徑
+            request.Parameters = parameters;
+            request.ConnectionId = connectionId;
+            request.IsBrowser = true;
+            Logger.Info($"[Socket] 處理瀏覽器命令: {request.CommandName} (RequestId: {request.RequestId})");
+            CommandReceived?.Invoke(this, request);
+        }
+
+        private static string PairFailureMessage(PairingResult result)
+        {
+            switch (result)
+            {
+                case PairingResult.NoActiveCode: return "目前沒有配對碼：請在 Revit 功能區按「網頁配對」。";
+                case PairingResult.Expired: return "配對碼已過期，請在 Revit 重新按「網頁配對」。";
+                case PairingResult.TooManyAttempts: return "輸入錯誤次數過多，配對碼已作廢，請在 Revit 重新按「網頁配對」。";
+                default: return "配對碼不正確。";
+            }
+        }
+
+        private static async Task SendBrowserAsync(BrowserConnection connection, RevitCommandResponse response)
+        {
+            await SendBrowserTextAsync(connection, JsonConvert.SerializeObject(response), $"回應 RequestId: {response.RequestId}");
+        }
+
+        private static async Task SendBrowserTextAsync(BrowserConnection connection, string json, string what)
+        {
+            if (connection.Socket.State != WebSocketState.Open) return;
+            var bytes = Encoding.UTF8.GetBytes(json);
+            await connection.SendLock.WaitAsync();
+            try
+            {
+                if (connection.Socket.State == WebSocketState.Open)
+                    await connection.Socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[Socket] 發送瀏覽器訊息失敗 ({what})", ex);
+            }
+            finally
+            {
+                connection.SendLock.Release();
+            }
+        }
+
+        /// <summary>目前是否有已配對、仍連線中的瀏覽器連線（沒有就不必組推送內容）。</summary>
+        public bool HasPairedBrowserConnections()
+        {
+            lock (_browserLock)
+                return _browserConnections.Values.Any(c => c.Paired && c.Socket.State == WebSocketState.Open);
+        }
+
+        /// <summary>
+        /// 對所有已配對的瀏覽器連線推送一則事件（例如 camera_changed）。沒有連線時什麼都不做；
+        /// 送出失敗只寫 log，不丟例外（推送是盡力而為，網頁下次連線會用 list_cameras 補同步）。回傳實際送出的連線數。
+        /// </summary>
+        public int BroadcastToPairedBrowsers(string json, string what)
+        {
+            BrowserConnection[] targets;
+            lock (_browserLock)
+                targets = _browserConnections.Values.Where(c => c.Paired && c.Socket.State == WebSocketState.Open).ToArray();
+            foreach (var connection in targets)
+                _ = SendBrowserTextAsync(connection, json, what);
+            return targets.Length;
+        }
+
+        /// <summary>關閉所有瀏覽器連線（撤銷配對、停止服務時）。</summary>
+        public void CloseAllBrowserConnections(string reason)
+        {
+            BrowserConnection[] all;
+            lock (_browserLock)
+            {
+                all = _browserConnections.Values.ToArray();
+                _browserConnections.Clear();
+            }
+
+            foreach (var connection in all)
+            {
+                var socket = connection.Socket;
+                _ = Task.Run(async () => await CloseSocketQuietlyAsync(socket, WebSocketCloseStatus.NormalClosure, reason));
             }
         }
 
