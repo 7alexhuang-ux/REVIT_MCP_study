@@ -54,15 +54,8 @@ namespace RevitMCP.Core.IssueManager
         /// </summary>
         private static void FillSourcePaths(Autodesk.Revit.DB.Document doc, RevitDocInfo info)
         {
-            try
-            {
-                if (doc.IsWorkshared)
-                {
-                    var central = doc.GetWorksharingCentralModelPath();
-                    if (central != null) info.CentralPath = Autodesk.Revit.DB.ModelPathUtils.ConvertModelPathToUserVisiblePath(central);
-                }
-            }
-            catch (Exception) { /* 例如已分離的工作共享檔：沒有中央模型路徑 */ }
+            info.CentralPath = RevitSelectionCollector.ReadCentralPath(doc); // 已分離的工作共享檔等讀不到時為 null
+            // 工作共享：取的是中央模型檔的時間（＝最後同步到中央的時間），不是本機副本最後存檔的時間。
             info.SavedAtUtc = ReadSavedAtUtc(info.CentralPath) ?? ReadSavedAtUtc(info.Path);
         }
 

@@ -11,6 +11,7 @@
 ### ✨ 上傳到 Issue Manager：只傳圖面接到已上傳的模型、記下來源模型路徑（imsheetsonly，D-014，2026-11-01）
 
 - 勾選視窗不勾「匯出 3D 模型」時，多一個下拉「接到已上傳的模型」（來自新端點 `GET /api/addin/projects/:id/models`，預設最新一個能用的，也可選「不接」）。選了就不匯出 GLB，但 PDF、平面／立面／剖面位置、3D 視角（透視）照常匯出並接到那個模型；**座標原點沿用該模型的**，manifest 帶 `attachToModelId`。伺服器比對原點，對不上整包拒絕，外掛用白話顯示（`attach_origin_mismatch`／`attach_origin_unknown`／`attach_model_not_found`，後者伺服器用 404，已在通用 404 句之前特別處理）。
+- 🔴 補強（獨立審查）：外掛匯出模型的共用原點寫死是 0，單看原點分辨不出接錯 Revit 檔。下拉改為比對「模型登記的來源 Revit 檔」與目前開啟的檔案（`SourceIdentity`，檔案路徑或中央模型路徑任一相同＝同一檔）：不同檔不能選、來源未記錄要勾「我確認…」、預設只選來源相符的模型（沒有就「不接」）；伺服器另有 `attach_source_mismatch`。`ProjectSnapshot.DocumentCentralPath` 新增；下拉預設值在 WPF 換 ItemsSource 清掉選取後會重設；路徑截斷不再切斷代理對。
 - manifest `revitDoc` 多送選填的 `path`、`centralPath`（工作共享時）、`savedAt`（來源檔最後存檔時間）；路徑超過 500 字截斷。manifest schema 副本與網站端同步（含 `.sha256`）。
 - 修正（測試抓到）：模型清單的 `createdAt` 被 Newtonsoft 自動轉成日期型別，要同時接字串與日期兩種。
 - 測試：新增 `SheetsOnlyAttachTests` 19 項（匯出、manifest、視窗下拉規則、API 與錯誤白話、假伺服器全流程）；IssueManager 全部 321 通過（2 略過）；`tools/bundle-manifest.schema.test.mjs` 44／44（以 `IM_WEB_SCHEMA` 指向 imsheetsonly 的網站端 schema）；Release.R24 建置 0 錯誤。**Revit 實機（點下拉、真的上傳 CPC 中埔）未測。**

@@ -62,6 +62,7 @@ namespace RevitMCP.Core.IssueManager
         // D-870：不匯出模型時，可選「接到已上傳的模型」（只傳圖面）。
         private readonly ComboBox _attachBox = new ComboBox { MinWidth = 280, Margin = new Thickness(18, 2, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
         private readonly TextBlock _attachNote = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(18, 2, 0, 0), Foreground = System.Windows.Media.Brushes.DimGray };
+        private readonly CheckBox _attachConfirmBox = new CheckBox { Content = Strings.AttachConfirmText, Margin = new Thickness(18, 4, 0, 0) };
         private readonly StackPanel _attachPanel = new StackPanel();
         private int _attachGeneration;
         private readonly CheckBox _paramsBox = new CheckBox { Content = Strings.IncludeParamsText, Margin = new Thickness(0, 4, 0, 0), IsChecked = true };
@@ -174,6 +175,7 @@ namespace RevitMCP.Core.IssueManager
             _attachPanel.Children.Add(new TextBlock { Text = Strings.AttachLabel, Margin = new Thickness(18, 4, 0, 0) });
             _attachPanel.Children.Add(_attachBox);
             _attachPanel.Children.Add(_attachNote);
+            _attachPanel.Children.Add(_attachConfirmBox);
             lower.Children.Add(_attachPanel);
             lower.Children.Add(_paramsBox);
             lower.Children.Add(_summaryText);
@@ -212,6 +214,8 @@ namespace RevitMCP.Core.IssueManager
             Bind(_attachBox, ItemsControl.ItemsSourceProperty, "AttachOptions", BindingMode.OneWay);
             Bind(_attachBox, System.Windows.Controls.Primitives.Selector.SelectedItemProperty, "SelectedAttach", BindingMode.TwoWay);
             Bind(_attachNote, TextBlock.TextProperty, "AttachNote", BindingMode.OneWay);
+            Bind(_attachConfirmBox, System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty, "ConfirmUnverifiedAttach", BindingMode.TwoWay);
+            BindingOperations.SetBinding(_attachConfirmBox, UIElement.VisibilityProperty, new Binding("AttachNeedsConfirm") { Source = _vm, Mode = BindingMode.OneWay, Converter = new BooleanToVisibilityConverter() });
             BindingOperations.SetBinding(_attachPanel, UIElement.VisibilityProperty, new Binding("AttachVisible") { Source = _vm, Mode = BindingMode.OneWay, Converter = new BooleanToVisibilityConverter() });
             Bind(_uploadButton, ToolTipProperty, "BlockReason", BindingMode.OneWay);
 
@@ -642,6 +646,7 @@ namespace RevitMCP.Core.IssueManager
             _descriptionBox.IsEnabled = !busy;
             _sheetSetBox.IsEnabled = !busy;
             _attachBox.IsEnabled = !busy;
+            _attachConfirmBox.IsEnabled = !busy;
             _modelBox.IsEnabled = !busy;
             _paramsBox.IsEnabled = !busy;
             _loginButton.IsEnabled = !busy;

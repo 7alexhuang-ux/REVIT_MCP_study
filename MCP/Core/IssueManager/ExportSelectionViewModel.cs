@@ -65,8 +65,12 @@ namespace RevitMCP.Core.IssueManager
     {
         public AttachableModel Model { get; set; }
         public string Label { get; set; }
-        /// <summary>伺服器讀得到這個模型的座標原點；沒有原點的模型不能接（要重傳模型）。</summary>
-        public bool Usable { get { return Model == null || Model.HasOrigin; } }
+        /// <summary>這個模型的來源 Revit 檔與目前開啟的檔案比對的結果（「不接」固定 Match）。</summary>
+        public SourceVerdict Verdict { get; set; }
+        /// <summary>能選：讀得到座標原點、且不是來自另一個 Revit 檔（Mismatch 會整批跑位）。</summary>
+        public bool Usable { get { return Model == null || (Model.HasOrigin && Verdict != SourceVerdict.Mismatch); } }
+        /// <summary>來源 Revit 檔未記錄：可以選，但要使用者自己勾「我確認…」才能上傳。</summary>
+        public bool NeedsConfirm { get { return Model != null && Model.HasOrigin && Verdict == SourceVerdict.Unknown; } }
     }
 
     public sealed class SheetSetOption
@@ -101,6 +105,7 @@ namespace RevitMCP.Core.IssueManager
         private List<AttachOption> _attachOptions = new List<AttachOption>();
         private AttachOption _selectedAttach;
         private string _attachNote = string.Empty;
+        private bool _confirmUnverified;
 
         private bool _suspendCustomSwitch;
         private bool _isLoggedIn;
@@ -199,8 +204,18 @@ namespace RevitMCP.Core.IssueManager
         public AttachOption SelectedAttach
         {
             get { return _selectedAttach; }
-            set { if (Set(ref _selectedAttach, value ?? _attachOptions[_attachOptions.Count - 1])) { Raise("AttachNote"); RaiseDerived(); } }
+            set { if (Set(ref _selectedAttach, value ?? _attachOptions[_attachOptions.Count - 1])) { _confirmUnverified = false; Raise("ConfirmUnverifiedAttach"); Raise("AttachNote"); RaiseDerived(); } }
         }
+
+        /// <summary>選了「來源未記錄」的模型時，使用者自己勾的確認；換選項就清掉。</summary>
+        public bool ConfirmUnverifiedAttach
+        {
+            get { return _confirmUnverified; }
+            set { if (Set(ref _confirmUnverified, value)) RaiseDerived(); }
+        }
+
+        /// <summary>要顯示「我確認…」勾選：不匯出模型、且選的模型來源未記錄。</summary>
+        public bool AttachNeedsConfirm { get { return !_includeModel && _selectedAttach != null && _selectedAttach.NeedsConfirm; } }
 
         /// <summary>下拉旁的說明（讀取中、沒有模型、舊網站、讀取失敗）；平常為空。</summary>
         public string AttachNote { get { return _attachNote; } }
@@ -217,13 +232,20 @@ namespace RevitMCP.Core.IssueManager
             var options = new List<AttachOption>();
             foreach (var model in models ?? Enumerable.Empty<AttachableModel>())
             {
-                options.Add(new AttachOption { Model = model, Label = Strings.AttachOptionLabel(model.FileName, model.CreatedAt, model.VersionLabel, model.HasOrigin) });
+                var verdict = SourceIdentity.Compare(model.Source, Snapshot.DocumentPath, Snapshot.DocumentCentralPath);
+                options.Add(new AttachOption { Model = model, Verdict = verdict, Label = Strings.AttachOptionLabel(model.FileName, model.CreatedAt, model.VersionLabel, model.HasOrigin, verdict) });
             }
-            options.Add(new AttachOption { Model = null, Label = Strings.AttachNone });
+            options.Add(new AttachOption { Model = null, Verdict = SourceVerdict.Match, Label = Strings.AttachNone });
             _attachOptions = options;
-            _selectedAttach = _attachOptions.FirstOrDefault(o => o.Model != null && o.Model.HasOrigin) ?? _attachOptions[_attachOptions.Count - 1];
-            _attachNote = note ?? (_attachOptions.Count == 1 ? Strings.AttachEmpty : string.Empty);
-            Raise("AttachOptions"); Raise("SelectedAttach"); Raise("AttachNote"); RaiseDerived();
+            // 預設只選「來源確認相符」的模型；沒有就預設「不接」——來源未記錄的模型要使用者自己選並勾確認，不替他決定。
+            var best = options.FirstOrDefault(o => o.Model != null && o.Usable && o.Verdict == SourceVerdict.Match) ?? options[options.Count - 1];
+            _selectedAttach = best;
+            _confirmUnverified = false;
+            _attachNote = note ?? (options.Count == 1 ? Strings.AttachEmpty : string.Empty);
+            Raise("AttachOptions");
+            // WPF 換 ItemsSource 時會先把 SelectedItem 清成 null 再寫回（setter 會改成「不接」），所以換完清單後要重設一次預設值。
+            _selectedAttach = best;
+            Raise("SelectedAttach"); Raise("ConfirmUnverifiedAttach"); Raise("AttachNote"); RaiseDerived();
         }
 
         /// <summary>清空（換專案、登出、舊網站、讀取失敗）：只剩「不接」，並附說明。</summary>
@@ -231,8 +253,9 @@ namespace RevitMCP.Core.IssueManager
         {
             _attachOptions = new List<AttachOption> { new AttachOption { Model = null, Label = Strings.AttachNone } };
             _selectedAttach = _attachOptions[0];
+            _confirmUnverified = false;
             _attachNote = note ?? string.Empty;
-            Raise("AttachOptions"); Raise("SelectedAttach"); Raise("AttachNote"); RaiseDerived();
+            Raise("AttachOptions"); Raise("SelectedAttach"); Raise("ConfirmUnverifiedAttach"); Raise("AttachNote"); RaiseDerived();
         }
 
         public StageOption SelectedStage
@@ -398,7 +421,9 @@ namespace RevitMCP.Core.IssueManager
                 if (_selectedStage == null || _selectedStage.Code == null) return Strings.NoStageSelected;
                 if (string.IsNullOrWhiteSpace(_description)) return Strings.NoDescription;
                 if (!HasAnySelection) return Strings.NothingSelected;
-                if (!_includeModel && _selectedAttach != null && !_selectedAttach.Usable) return Strings.AttachNoOrigin;
+                if (!_includeModel && _selectedAttach != null && !_selectedAttach.Usable)
+                    return _selectedAttach.Model != null && _selectedAttach.Model.HasOrigin ? Strings.AttachSourceMismatch : Strings.AttachNoOrigin;
+                if (AttachNeedsConfirm && !_confirmUnverified) return Strings.AttachNeedsConfirm;
                 if (CheckedSheetCount > ManifestBuilder.MaxSheets) return Strings.TooManySheets(ManifestBuilder.MaxSheets);
                 if (CheckedViewCount > ManifestBuilder.MaxViews) return Strings.TooManyViews(ManifestBuilder.MaxViews);
                 return null;
@@ -419,6 +444,7 @@ namespace RevitMCP.Core.IssueManager
             Raise("BlockReason");
             Raise("CanUpload");
             Raise("EffectiveAttach");
+            Raise("AttachNeedsConfirm");
         }
 
         /// <summary>組出匯出請求。圖紙依圖號自然排序；每張圖紙只留下被勾選的視口視圖。</summary>

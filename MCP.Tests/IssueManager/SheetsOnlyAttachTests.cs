@@ -24,9 +24,18 @@ namespace RevitMCP.Tests.IssueManager
         [SetUp] public void SetUp() { _dir = TempDir.Create("sheetsonly"); }
         [TearDown] public void TearDown() { TempDir.TryDelete(_dir); }
 
-        private static AttachableModel Model(string id, string name, double[] origin, string version = "v3")
+        /// <summary>Samples.Snapshot() 的目前文件路徑（與 ExportSelectionViewModel 比對來源用）。</summary>
+        private const string CurrentPath = @"C:\models\AR_CPC.rvt";
+        private static readonly AttachModelSource SameFile = new AttachModelSource { FileName = "AR_CPC.rvt", Path = CurrentPath };
+        private static readonly AttachModelSource OtherFile = new AttachModelSource { FileName = "ST_CPC.rvt", Path = @"C:\models\ST_CPC.rvt" };
+
+        private static AttachableModel Model(string id, string name, double[] origin, string version = "v3", AttachModelSource source = null, bool unknownSource = false)
         {
-            return new AttachableModel { Id = id, FileName = name, VersionLabel = version, OriginOffsetMeters = origin, CreatedAt = new DateTimeOffset(2026, 10, 30, 8, 0, 0, TimeSpan.Zero) };
+            return new AttachableModel
+            {
+                Id = id, FileName = name, VersionLabel = version, OriginOffsetMeters = origin, CreatedAt = new DateTimeOffset(2026, 10, 30, 8, 0, 0, TimeSpan.Zero),
+                Source = unknownSource ? null : (source ?? SameFile)
+            };
         }
 
         private static MiniJsonSchema Schema()
@@ -171,12 +180,14 @@ namespace RevitMCP.Tests.IssueManager
         {
             var vm = Vm();
             vm.IncludeModel = false;
-            vm.SetAttachableModels(new[] { Model("m-new", "new.glb", null), Model("m-mid", "mid.glb", ModelOrigin), Model("m-old", "old.glb", ModelOrigin) });
+            vm.SetAttachableModels(new[] { Model("m-new", "new.glb", null), Model("m-mid", "mid.glb", ModelOrigin), Model("m-old", "old.glb", ModelOrigin, "v2", OtherFile) });
             Assert.AreEqual(4, vm.AttachOptions.Count);
-            Assert.AreEqual("m-mid", vm.SelectedAttach.Model.Id, "最新的沒有原點，預設選第一個能用的");
+            Assert.AreEqual("m-mid", vm.SelectedAttach.Model.Id, "最新的沒有原點，預設選第一個「能用且來源相符」的");
             Assert.IsNull(vm.AttachOptions.Last().Model);
             StringAssert.Contains(Strings.AttachNoOriginSuffix, vm.AttachOptions[0].Label);
             StringAssert.Contains("v3", vm.AttachOptions[1].Label);
+            StringAssert.Contains(Strings.AttachMismatchSuffix, vm.AttachOptions[2].Label);
+            Assert.IsFalse(vm.AttachOptions[2].Usable, "來自另一個 Revit 檔的模型不能選");
             Assert.AreEqual(string.Empty, vm.AttachNote);
         }
 
@@ -212,6 +223,68 @@ namespace RevitMCP.Tests.IssueManager
             vm.IncludeModel = true;
             Assert.IsNull(vm.EffectiveAttach, "勾了匯出模型就不接");
             Assert.IsNull(vm.BuildRequest().AttachedModel);
+        }
+
+        [Test]
+        public void X03_AttachedModelFromAnotherRevitFileIsBlockedWithAPlainReason()
+        {
+            var vm = Vm();
+            vm.SetAttachableModels(new[] { Model("m-st", "st.glb", ModelOrigin, "v1", OtherFile) });
+            vm.IncludeModel = false;
+            vm.SelectAllSheets(true);
+            Assert.IsNull(vm.SelectedAttach.Model, "沒有來源相符的模型就預設「不接」，不替使用者挑");
+            vm.SelectedAttach = vm.AttachOptions[0];
+            Assert.IsFalse(vm.CanUpload);
+            Assert.AreEqual(Strings.AttachSourceMismatch, vm.BlockReason);
+        }
+
+        [Test]
+        public void X03_ModelWithUnknownSourceNeedsAnExplicitConfirmation()
+        {
+            var vm = Vm();
+            vm.SetAttachableModels(new[] { Model("m-old", "old.glb", ModelOrigin, "v1", null, unknownSource: true) });
+            vm.IncludeModel = false;
+            vm.SelectAllSheets(true);
+            Assert.IsNull(vm.SelectedAttach.Model, "來源未記錄的模型不會被預設選上");
+            StringAssert.Contains(Strings.AttachUnknownSuffix, vm.AttachOptions[0].Label);
+            vm.SelectedAttach = vm.AttachOptions[0];
+            Assert.IsTrue(vm.AttachNeedsConfirm);
+            Assert.IsFalse(vm.CanUpload);
+            Assert.AreEqual(Strings.AttachNeedsConfirm, vm.BlockReason);
+            vm.ConfirmUnverifiedAttach = true;
+            Assert.IsTrue(vm.CanUpload, vm.BlockReason);
+            Assert.AreEqual("m-old", vm.BuildRequest().AttachedModel.Id);
+            vm.SelectedAttach = vm.AttachOptions.Last(); // 換選項：確認清掉
+            Assert.IsFalse(vm.ConfirmUnverifiedAttach);
+            vm.SelectedAttach = vm.AttachOptions[0];
+            Assert.IsFalse(vm.CanUpload, "換回來要重新確認");
+        }
+
+        [Test]
+        public void X03_ModelWithMatchingSourceNeedsNoConfirmation_AndWorkshareCentralPathAlsoMatches()
+        {
+            var snapshot = Samples.Snapshot();
+            snapshot.DocumentCentralPath = @"H:\central\AR-CPC.rvt";
+            var vm = new ExportSelectionViewModel(snapshot);
+            vm.SetProjects(new[] { new AddinProject { Id = "p1", Code = "CPC", Name = "測試專案" } });
+            vm.IsLoggedIn = true; vm.SelectedProject = vm.Projects[0]; vm.SelectedStage = vm.Stages.First(s => s.Code == "SD"); vm.Description = "x";
+            vm.IncludeModel = false; vm.SelectAllSheets(true);
+            // 模型是別人用另一個本機副本傳的：檔案路徑不同，中央模型路徑相同
+            vm.SetAttachableModels(new[] { Model("m1", "model.glb", ModelOrigin, "v3", new AttachModelSource { Path = @"C:\Users\other\AR-CPC_other.rvt", CentralPath = @"h:/CENTRAL/ar-cpc.rvt" }) });
+            Assert.AreEqual("m1", vm.SelectedAttach.Model.Id);
+            Assert.IsFalse(vm.AttachNeedsConfirm);
+            Assert.IsTrue(vm.CanUpload, vm.BlockReason);
+        }
+
+        [Test]
+        public void X03_DefaultSelectionSurvivesWpfClearingTheSelectionWhenTheItemsSourceChanges()
+        {
+            // WPF 換 ItemsSource 時會把 SelectedItem 清成 null 寫回 setter；模擬這個行為，預設值仍要是「來源相符」的模型（審查）。
+            var vm = Vm();
+            vm.IncludeModel = false;
+            vm.PropertyChanged += (s, e) => { if (e.PropertyName == "AttachOptions") vm.SelectedAttach = null; };
+            vm.SetAttachableModels(new[] { Model("m1", "model.glb", ModelOrigin) });
+            Assert.AreEqual("m1", vm.SelectedAttach.Model.Id);
         }
 
         [Test]
@@ -264,7 +337,8 @@ namespace RevitMCP.Tests.IssueManager
             {
                 AttachableModels = new List<JObject>
                 {
-                    new JObject { ["id"] = "m1", ["fileName"] = "model.glb", ["description"] = "基本設計", ["createdAt"] = "2026-10-30T08:00:00.000Z", ["versionLabel"] = "v3", ["originOffsetMeters"] = new JArray(-433.698, -1414.604, 0) },
+                    new JObject { ["id"] = "m1", ["fileName"] = "model.glb", ["description"] = "基本設計", ["createdAt"] = "2026-10-30T08:00:00.000Z", ["versionLabel"] = "v3", ["originOffsetMeters"] = new JArray(-433.698, -1414.604, 0),
+                        ["source"] = new JObject { ["fileName"] = "AR-CPC.rvt", ["path"] = @"H:\BIM\AR-CPC.rvt", ["centralPath"] = null } },
                     new JObject { ["id"] = "m2", ["fileName"] = "old.glb", ["description"] = "", ["createdAt"] = "2026-10-01T08:00:00.000Z", ["versionLabel"] = null, ["originOffsetMeters"] = null },
                     new JObject { ["fileName"] = "沒有 id 的壞資料" }
                 }
@@ -276,6 +350,9 @@ namespace RevitMCP.Tests.IssueManager
             Assert.IsTrue(models[0].HasOrigin);
             CollectionAssert.AreEqual(new[] { -433.698, -1414.604, 0 }, models[0].OriginOffsetMeters);
             Assert.AreEqual("v3", models[0].VersionLabel);
+            Assert.AreEqual(@"H:\BIM\AR-CPC.rvt", models[0].Source.Path);
+            Assert.IsNull(models[0].Source.CentralPath);
+            Assert.IsNull(models[1].Source, "沒有 source 欄位＝來源未記錄");
             Assert.AreEqual(new DateTimeOffset(2026, 10, 30, 8, 0, 0, TimeSpan.Zero), models[0].CreatedAt);
             Assert.IsFalse(models[1].HasOrigin);
             Assert.IsNull(models[1].VersionLabel);
@@ -299,9 +376,12 @@ namespace RevitMCP.Tests.IssueManager
             Assert.AreEqual(AddinErrorKind.Rejected, mismatch.Kind);
             StringAssert.Contains("跑位", mismatch.Message);
             StringAssert.Contains("整包沒有上傳", mismatch.Message);
+            var sourceMismatch = await AddinHttp.ToExceptionAsync(FakeHandler.Error(HttpStatusCode.BadRequest, "attach_source_mismatch"));
+            Assert.AreEqual(AddinErrorKind.Rejected, sourceMismatch.Kind);
+            StringAssert.Contains("另一個 Revit 檔", sourceMismatch.Message);
             var unknown = await AddinHttp.ToExceptionAsync(FakeHandler.Error(HttpStatusCode.BadRequest, "attach_origin_unknown"));
             StringAssert.Contains("沒有記錄座標原點", unknown.Message);
-            foreach (var ex in new[] { notFound, mismatch, unknown }) StringAssert.DoesNotContain("attach_", ex.Message);
+            foreach (var ex in new[] { notFound, mismatch, sourceMismatch, unknown }) StringAssert.DoesNotContain("attach_", ex.Message);
         }
 
         [Test]
@@ -309,6 +389,40 @@ namespace RevitMCP.Tests.IssueManager
         {
             var ex = await AddinHttp.ToExceptionAsync(FakeHandler.Error(HttpStatusCode.NotFound, "not_found"));
             Assert.AreEqual(AddinErrorKind.NotFound, ex.Kind);
+        }
+
+        // ── X04b 來源 Revit 檔身分（規則與網站端 src/lib/attach-source.ts 一致）─────────────
+
+        [Test]
+        public void X04b_SourceIdentityCompareMatchesTheServerRules()
+        {
+            var model = new AttachModelSource { Path = @"H:\我的雲端硬碟\BIM\AR-CPC.rvt", CentralPath = @"H:\central\AR-CPC.rvt" };
+            Assert.AreEqual(SourceVerdict.Match, SourceIdentity.Compare(model, "h:/我的雲端硬碟/bim/ar-cpc.rvt", null));
+            Assert.AreEqual(SourceVerdict.Match, SourceIdentity.Compare(model, @"C:\Users\alex\AR-CPC_alex.rvt", @"H:\CENTRAL\AR-CPC.rvt"), "工作共享：本機副本不同、中央模型相同");
+            Assert.AreEqual(SourceVerdict.Mismatch, SourceIdentity.Compare(model, @"H:\我的雲端硬碟\BIM\ST-CPC.rvt", null));
+            Assert.AreEqual(SourceVerdict.Unknown, SourceIdentity.Compare(null, @"C:\a.rvt", null));
+            Assert.AreEqual(SourceVerdict.Unknown, SourceIdentity.Compare(new AttachModelSource { FileName = "AR" }, @"C:\a.rvt", null));
+            Assert.AreEqual(SourceVerdict.Unknown, SourceIdentity.Compare(model, "  ", ""), "目前文件沒存檔：不能確認");
+            Assert.AreEqual("h:/bim/ar.rvt", SourceIdentity.Normalize(@" H:\BIM\AR.rvt\ "));
+            Assert.IsNull(SourceIdentity.Normalize("  "));
+        }
+
+        [Test]
+        public void X04b_UnverifiedSourceWarningHasAPlainSentence()
+        {
+            var text = WarningText.Describe("attach_source_unverified");
+            StringAssert.Contains("沒有記錄來源 Revit 檔", text);
+            StringAssert.DoesNotContain("attach_", text);
+            CollectionAssert.Contains(WarningText.KnownCodes, "attach_source_unverified");
+        }
+
+        [Test]
+        public void X04b_ClippingNeverSplitsASurrogatePair()
+        {
+            var text = new string('a', 497) + "\U0001F600\U0001F600"; // 兩個 emoji（各佔兩個 char），第 499 個 char 是代理對的前半
+            var clipped = ManifestBuilder.Clip(text, 499);
+            Assert.LessOrEqual(clipped.Length, 499);
+            Assert.IsFalse(char.IsHighSurrogate(clipped[clipped.Length - 2]), "「…」前面不能是落單的代理對前半");
         }
 
         // ── X05 假伺服器整合：manifest 到 finalize ─────────────────────────────

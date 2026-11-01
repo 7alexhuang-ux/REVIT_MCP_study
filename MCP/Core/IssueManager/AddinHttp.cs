@@ -140,6 +140,8 @@ namespace RevitMCP.Core.IssueManager
                     return "找不到要接的模型（可能已被刪除，或不在這個專案的工作版）。請重新選擇模型，或勾選「匯出 3D 模型」重傳。";
                 case "attach_origin_unknown":
                     return "選的模型沒有記錄座標原點，無法確認圖面對得上，這次沒有上傳。請改勾「匯出 3D 模型」重傳一次。";
+                case "attach_source_mismatch":
+                    return "選的模型是從另一個 Revit 檔匯出的，和目前開啟的檔案不同，接上去圖面會整批跑位，所以整包沒有上傳。請改選別的模型，或勾選「匯出 3D 模型」重傳。";
                 case "attach_origin_mismatch":
                     return "圖面的座標原點和選的模型對不上，連起來會跑位，所以整包沒有上傳。請確認選對模型；若專案基準點或共享座標改過，請勾選「匯出 3D 模型」重傳。";
                 default:

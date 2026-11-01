@@ -64,7 +64,10 @@ namespace RevitMCP.Core.IssueManager
         internal static string Clip(string text, int max)
         {
             if (text == null) return string.Empty;
-            return text.Length <= max ? text : text.Substring(0, max - 1) + "…";
+            if (text.Length <= max) return text;
+            var keep = max - 1;
+            if (keep > 0 && char.IsHighSurrogate(text[keep - 1])) keep--; // 不把代理對（罕用字、emoji）切成半個
+            return text.Substring(0, keep) + "…";
         }
 
         private static string RequireLength(string text, int max, string label)

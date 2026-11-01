@@ -21,7 +21,7 @@ namespace RevitMCP.Core.IssueManager
             "view_positions_not_uploadable", "named_views_without_model", "named_views_origin_mismatch", "named_views_skipped",
             "view_positions_without_model", "view_positions_origin_mismatch", "view_positions_duplicate_unique_id", "view_positions_skipped",
             "view_positions_no_geometry", "detail_viewports_not_linked", "non_3d_viewports_without_positions", "viewports_without_model",
-            "unknown_view", "unknown_sheet", "more_warnings",
+            "unknown_view", "unknown_sheet", "more_warnings", "attach_source_unverified",
         };
 
         public static string Describe(string code)
@@ -48,6 +48,7 @@ namespace RevitMCP.Core.IssueManager
                 case "view_positions_without_model": return "這次沒有匯出 3D 模型，所以平面、立面、剖面圖的位置沒有收。";
                 case "view_positions_origin_mismatch": return "視圖位置的原點和模型對不上，為避免位置跑掉，這次沒有收視圖位置。";
                 case "no_schedules": return "參數檔裡沒有面積表。";
+                case "attach_source_unverified": return "接到的模型沒有記錄來源 Revit 檔，無法確認這次的圖面和它是同一個檔案；請目視確認 3D 位置有沒有對上。";
                 case "unknown_sheet": return "有一筆視圖連結對不到這個版本裡的圖紙，已略過。";
                 case "unknown_view":
                     return string.IsNullOrWhiteSpace(first)

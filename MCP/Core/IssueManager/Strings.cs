@@ -90,15 +90,20 @@ namespace RevitMCP.Core.IssueManager
         public const string AttachLoadFailed = "讀不到這個專案已上傳的模型清單，目前只能不接；請稍後重開視窗再試，或勾選「匯出 3D 模型」。";
         public const string AttachNoOrigin = "選的模型沒有記錄座標原點，無法確認圖面對得上；請改選別的模型，或勾選「匯出 3D 模型」重傳";
         public const string AttachNoOriginSuffix = "（沒有座標原點，不能選）";
+        public const string AttachMismatchSuffix = "（來自另一個 Revit 檔，不能選）";
+        public const string AttachUnknownSuffix = "（來源 Revit 檔未記錄，需自己確認）";
+        public const string AttachSourceMismatch = "選的模型是從另一個 Revit 檔匯出的，和目前開啟的檔案不同，接上去圖面會整批跑位；請改選別的模型，或勾選「匯出 3D 模型」重傳";
+        public const string AttachNeedsConfirm = "這個模型沒有記錄來源 Revit 檔，請先勾選下方的確認";
+        public const string AttachConfirmText = "我確認這個模型就是用目前開啟的這個 Revit 檔匯出的（來源未記錄，無法自動核對）";
 
-        public static string AttachOptionLabel(string fileName, DateTimeOffset? createdAt, string versionLabel, bool hasOrigin)
+        public static string AttachOptionLabel(string fileName, DateTimeOffset? createdAt, string versionLabel, bool hasOrigin, SourceVerdict verdict = SourceVerdict.Match)
         {
             var parts = new System.Collections.Generic.List<string>();
             if (createdAt.HasValue) parts.Add(createdAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
             if (!string.IsNullOrWhiteSpace(versionLabel)) parts.Add(versionLabel);
             return (string.IsNullOrWhiteSpace(fileName) ? "（未命名模型）" : fileName)
                 + (parts.Count > 0 ? "（" + string.Join("，", parts) + "）" : string.Empty)
-                + (hasOrigin ? string.Empty : AttachNoOriginSuffix);
+                + (!hasOrigin ? AttachNoOriginSuffix : verdict == SourceVerdict.Mismatch ? AttachMismatchSuffix : verdict == SourceVerdict.Unknown ? AttachUnknownSuffix : string.Empty);
         }
 
         public static string AttachedNote(string fileName)

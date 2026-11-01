@@ -11,11 +11,13 @@ D-012 的外掛在不勾「匯出 3D 模型」時，3D 視角與平面／立面�
 
 1. **勾選視窗**：不勾「匯出 3D 模型」時出現下拉「接到已上傳的模型」，內容來自新端點 `GET /api/addin/projects/:id/models`（只含該專案工作版的模型，新的在前），預設第一個**能用**的（伺服器讀得到座標原點），最後一項固定是「不接（只傳圖面，圖紙不連 3D）」。勾了模型就隱藏。換專案會清掉舊專案的清單並重讀；舊網站（端點 404）、讀取失敗：只剩「不接」並說明，不擋上傳。
 2. **匯出**：選了模型就不匯出 GLB，但 `view_positions.json`、`named_views.json`（透視）、PDF、（勾了的話）`params.json` 照常匯出；**原點沿用被接模型的原點**（不重算——重算的原點可能因模型範圍改變而不同，就對不上它的 GLB），manifest 的 `originOffsetMeters` 也填這組，並多一個 `attachToModelId`。伺服器會再比對一次，對不上整包拒絕（`attach_origin_mismatch`），外掛用白話顯示。
-3. **來源路徑**：manifest 的 `revitDoc` 多送選填的 `path`（`doc.PathName`）、`centralPath`（工作共享時 `GetWorksharingCentralModelPath` 轉成使用者路徑）、`savedAt`（取檔案系統的最後存檔時間，中央模型優先；雲端模型或網路磁碟讀不到就省略）。路徑超過 500 字截斷（不讓整包被 schema 拒絕）。日誌不記路徑。
-4. **文字**：新增字串集中在 `Strings`；三個新錯誤碼的白話在 `AddinHttp.RejectedMessage`；`attach_model_not_found`（伺服器用 404）要在通用的 404 句之前特別處理，不然會被說成「找不到這個項目或沒有權限」。
+3. **來源 Revit 檔身分（獨立審查補強）**：外掛匯出模型的共用原點寫死 [0,0,0]，外掛傳的模型原點永遠是 0，單看原點分辨不出接錯檔。所以 models 端點多回模型登記的來源 `source`（`fileName／path／centralPath`，沒有記錄為 null），外掛用 `SourceIdentity.Compare`（規則與網站端 `attach-source.ts` 逐項一致：路徑正規化後，檔案路徑或中央模型路徑任一相同＝同一檔；兩邊都有路徑但交集為空＝不同檔；任一邊沒有＝未知）提早擋：不同檔的模型不能選；未知的可選但要勾「我確認這個模型就是用目前這個 Revit 檔匯出的」；預設只選「來源相符」的模型，沒有就預設「不接」。`ProjectSnapshot.DocumentCentralPath` 由 Revit 端在建快照後填入。伺服器 finalize 會再比一次（`attach_source_mismatch`／警告 `attach_source_unverified`）。
+4. **來源路徑**：manifest 的 `revitDoc` 多送選填的 `path`（`doc.PathName`）、`centralPath`（工作共享時 `GetWorksharingCentralModelPath` 轉成使用者路徑）、`savedAt`（取檔案系統的最後存檔時間，中央模型優先；雲端模型或網路磁碟讀不到就省略）。路徑超過 500 字截斷（不讓整包被 schema 拒絕）。日誌不記路徑。
+5. **文字**：新增字串集中在 `Strings`；三個新錯誤碼的白話在 `AddinHttp.RejectedMessage`；`attach_model_not_found`（伺服器用 404）要在通用的 404 句之前特別處理，不然會被說成「找不到這個項目或沒有權限」。
 
 **後果／限制**
 
+- 來源比對靠路徑：檔案搬家或改名會被當成「不同的檔」而擋下，要重傳模型；來源未記錄的舊模型第一次接要自己確認。
 - 沿用原點只能保證對得上 GLB 匯出時的座標；Revit 專案在上次匯出模型之後移動過專案基準點或共享座標，位置會整體偏移而伺服器偵測不到——移動過請勾「匯出 3D 模型」重傳。
 - 接模型的版本自己沒有模型：網站端「手動對應 3D 視圖」清單看不到、發行／提送時連結不會複製（見 IM D-872）。
 - 實機（Revit 裡點下拉、上傳 CPC 中埔）尚未測。

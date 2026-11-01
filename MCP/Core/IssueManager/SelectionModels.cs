@@ -99,6 +99,8 @@ namespace RevitMCP.Core.IssueManager
     {
         public string DocumentTitle { get; set; }
         public string DocumentPath { get; set; }
+        /// <summary>工作共享時中央模型的使用者路徑（D-871／D-870）；沒有為 null。由 Revit 端在建好快照後填入。</summary>
+        public string DocumentCentralPath { get; set; }
         public List<SheetItem> Sheets { get; set; } = new List<SheetItem>();
         public List<ViewItem> Views { get; set; } = new List<ViewItem>();
         public List<SheetSetItem> SheetSets { get; set; } = new List<SheetSetItem>();

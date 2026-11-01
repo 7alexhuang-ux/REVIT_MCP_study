@@ -17,7 +17,24 @@ namespace RevitMCP.Core.IssueManager
         public static ProjectSnapshot Collect(Document doc, Action<string> log = null)
         {
             if (doc == null) throw new ArgumentNullException("doc");
-            return SnapshotBuilder.Build(new RevitProjectSource(doc), log);
+            var snapshot = SnapshotBuilder.Build(new RevitProjectSource(doc), log);
+            snapshot.DocumentCentralPath = ReadCentralPath(doc);
+            return snapshot;
+        }
+
+        /// <summary>工作共享時中央模型的使用者路徑；不是工作共享、已分離或讀不到就回 null（不影響上傳）。</summary>
+        internal static string ReadCentralPath(Document doc)
+        {
+            try
+            {
+                if (!doc.IsWorkshared) return null;
+                var central = doc.GetWorksharingCentralModelPath();
+                return central == null ? null : ModelPathUtils.ConvertModelPathToUserVisiblePath(central);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         /// <summary>Revit 視圖種類 → manifest 種類；不對應模型位置的種類（圖例、明細表、製圖、漫遊、渲染…）回 null。</summary>

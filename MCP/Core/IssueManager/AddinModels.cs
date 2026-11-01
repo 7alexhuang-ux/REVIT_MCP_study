@@ -53,6 +53,8 @@ namespace RevitMCP.Core.IssueManager
         /// <summary>登記這個模型的版本號（例如 v3）；沒有時為 null。</summary>
         public string VersionLabel { get; set; }
         public double[] OriginOffsetMeters { get; set; }
+        /// <summary>這個模型當初從哪個 Revit 檔來（伺服器登記的路徑）；沒有記錄為 null。用來提早擋掉接錯檔。</summary>
+        public AttachModelSource Source { get; set; }
 
         public bool HasOrigin { get { return OriginOffsetMeters != null && OriginOffsetMeters.Length == 3; } }
 
@@ -79,6 +81,14 @@ namespace RevitMCP.Core.IssueManager
             return DateTimeOffset.TryParse((string)token, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out parsed) ? (DateTimeOffset?)parsed : null;
         }
 
+        private static AttachModelSource ParseSource(JToken token)
+        {
+            if (token == null || token.Type != JTokenType.Object) return null;
+            Func<string, string> text = key => token[key] != null && token[key].Type == JTokenType.String ? (string)token[key] : null;
+            var source = new AttachModelSource { FileName = text("fileName"), Path = text("path"), CentralPath = text("centralPath") };
+            return string.IsNullOrWhiteSpace(source.Path) && string.IsNullOrWhiteSpace(source.CentralPath) ? null : source;
+        }
+
         public static AttachableModel FromJson(JToken item)
         {
             double[] origin = null;
@@ -92,6 +102,7 @@ namespace RevitMCP.Core.IssueManager
                 Description = (string)item["description"],
                 CreatedAt = ParseTime(item["createdAt"]),
                 VersionLabel = item["versionLabel"] != null && item["versionLabel"].Type == JTokenType.String ? (string)item["versionLabel"] : null,
+                Source = ParseSource(item["source"]),
                 OriginOffsetMeters = origin
             };
         }
