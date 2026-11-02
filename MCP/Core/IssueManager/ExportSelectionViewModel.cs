@@ -176,9 +176,13 @@ namespace RevitMCP.Core.IssueManager
 
         public void SetProjects(IEnumerable<AddinProject> projects)
         {
+            var previousId = _selectedProject == null ? null : _selectedProject.Id;
             Projects = projects.ToList();
-            if (_selectedProject != null && !Projects.Any(p => p.Id == _selectedProject.Id)) SelectedProject = null;
             Raise("Projects");
+            // WPF 換 ItemsSource 時會先把 SelectedItem 清成 null 並寫回 SelectedProject（同 SetAttachableModels 的註解）；
+            // 而新清單是新的物件，舊的選取物件已不在清單裡（下拉會顯示空白）。所以換完清單後依編號重新選回同一個專案，沒有就清成 null。
+            var match = previousId == null ? null : Projects.FirstOrDefault(p => p.Id == previousId);
+            if (!ReferenceEquals(match, _selectedProject)) SelectedProject = match;
             RaiseDerived();
         }
 

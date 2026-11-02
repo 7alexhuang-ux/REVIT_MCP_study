@@ -86,6 +86,52 @@ namespace RevitMCP.Tests.IssueManager
         }
 
         [Test]
+        public void ProjectDropdownShowsAHintUntilAProjectIsSelectedAndKeepsTheSelectionOnReload()
+        {
+            RunSta(() =>
+            {
+                var vm = new ExportSelectionViewModel(Samples.Snapshot());
+                var window = NewWindow(vm);
+                Assert.AreEqual("沒有可上傳的專案", window.ProjectHint.Text, "已登入但清單是空的：提示要說明，不是留一個空白下拉");
+                Assert.AreEqual(System.Windows.Visibility.Visible, window.ProjectHint.Visibility);
+                Assert.AreEqual(System.Windows.Visibility.Visible, window.ReloadProjectsButton.Visibility);
+
+                vm.SetProjects(new[] { new AddinProject { Id = "p1", Code = "CPC", Name = "測試專案" }, new AddinProject { Id = "p2", Code = "G6", Name = "第二案" } });
+                Assert.AreEqual(2, window.ProjectBox.Items.Count, "清單換掉後下拉要有項目");
+                Assert.AreEqual("請選擇專案（共 2 個）", window.ProjectHint.Text);
+                Assert.AreEqual(System.Windows.Visibility.Visible, window.ProjectHint.Visibility);
+
+                window.ProjectBox.SelectedItem = vm.Projects[1];
+                Assert.AreEqual(System.Windows.Visibility.Collapsed, window.ProjectHint.Visibility, "選了專案就不再顯示提示");
+
+                // 重新讀取：伺服器回來的是新物件（同編號），要自動選回同一個專案，不能變成下拉空白。
+                vm.SetProjects(new[] { new AddinProject { Id = "p1", Code = "CPC", Name = "測試專案" }, new AddinProject { Id = "p2", Code = "G6", Name = "第二案" } });
+                Assert.AreEqual("p2", vm.SelectedProject.Id);
+                Assert.AreSame(vm.Projects[1], vm.SelectedProject);
+                Assert.AreSame(vm.Projects[1], window.ProjectBox.SelectedItem);
+
+                // 重新讀取後該專案已不在清單：清成未選並顯示提示。
+                vm.SetProjects(new[] { new AddinProject { Id = "p1", Code = "CPC", Name = "測試專案" } });
+                Assert.IsNull(vm.SelectedProject);
+                Assert.AreEqual(System.Windows.Visibility.Visible, window.ProjectHint.Visibility);
+            });
+        }
+
+        [Test]
+        public void ProjectHintTellsNotLoggedInAndConfigurationProblems()
+        {
+            RunSta(() =>
+            {
+                var notLoggedIn = NewWindow(new ExportSelectionViewModel(Samples.Snapshot()), new UploadWindowServices { Log = s => { } });
+                Assert.AreEqual("請先登入", notLoggedIn.ProjectHint.Text);
+                Assert.AreEqual(System.Windows.Visibility.Collapsed, notLoggedIn.ReloadProjectsButton.Visibility);
+
+                var misconfigured = NewWindow(new ExportSelectionViewModel(Samples.Snapshot()), new UploadWindowServices { ConfigurationError = "尚未設定", Log = s => { } });
+                Assert.AreEqual("尚未完成設定", misconfigured.ProjectHint.Text);
+            });
+        }
+
+        [Test]
         public void TreeCheckBoxesDriveTheSummaryAndWarnings()
         {
             RunSta(() =>
