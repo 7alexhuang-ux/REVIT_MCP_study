@@ -246,6 +246,8 @@ namespace RevitMCP.Core.IssueManager
                 Keep(outputPath);
                 return result;
             }
+            public SheetPlacementBatch ReadSheetPlacements(IReadOnlyList<SheetItem> sheets, double[] origin) { return _inner.ReadSheetPlacements(sheets, origin); }
+            public SectionLineBatch ReadSectionLines(IReadOnlyList<ViewItem> views, double[] origin) { return _inner.ReadSectionLines(views, origin); }
             public ParamsExportResult ExportParams(double[] origin, string outputPath)
             {
                 var result = _inner.ExportParams(origin, outputPath);

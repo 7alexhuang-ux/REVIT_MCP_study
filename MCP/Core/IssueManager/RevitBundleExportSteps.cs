@@ -91,6 +91,8 @@ namespace RevitMCP.Core.IssueManager
                         var outline = viewport.GetBoxOutline();
                         size.Width = outline.MaximumPoint.X - outline.MinimumPoint.X;
                         size.Height = outline.MaximumPoint.Y - outline.MinimumPoint.Y;
+                        size.MinX = outline.MinimumPoint.X; size.MinY = outline.MinimumPoint.Y;
+                        size.MaxX = outline.MaximumPoint.X; size.MaxY = outline.MaximumPoint.Y;
                         size.Ok = true;
                     }
                 }
@@ -215,6 +217,18 @@ namespace RevitMCP.Core.IssueManager
             if (skipped != null && skipped.Count > 0)
                 result.Warnings.Add("部分視圖讀不到位置而略過：" + string.Join("、", skipped.Properties().Select(p => p.Name + " " + p.Value)) + "。");
             return result;
+        }
+
+        public SheetPlacementBatch ReadSheetPlacements(IReadOnlyList<SheetItem> sheets, double[] originOffsetMeters)
+        {
+            var doc = RequireSameDocument();
+            return RevitSheetLayoutReader.ReadSheets(doc, sheets, originOffsetMeters);
+        }
+
+        public SectionLineBatch ReadSectionLines(IReadOnlyList<ViewItem> sectionAndElevationViews, double[] originOffsetMeters)
+        {
+            var doc = RequireSameDocument();
+            return RevitSheetLayoutReader.ReadSectionLines(doc, sectionAndElevationViews, originOffsetMeters);
         }
 
         public ParamsExportResult ExportParams(double[] originOffsetMeters, string outputPath)

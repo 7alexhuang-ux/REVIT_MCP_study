@@ -65,6 +65,13 @@ namespace RevitMCP.Core.IssueManager
 
         /// <summary>寬高是否已量測過（<see cref="ViewportElementId"/> 非 0 時才有意義；量過就不重量）。</summary>
         public bool SizeMeasured { get; set; }
+
+        /// <summary>量到的外框角點（英呎，圖紙座標）；<see cref="HasBox"/> 為 true 才有意義。圖紙版面匯出（imsheetmarks）重用它，不再多算一次昂貴的 GetBoxOutline。</summary>
+        public bool HasBox { get; set; }
+        public double BoxMinXFt { get; set; }
+        public double BoxMinYFt { get; set; }
+        public double BoxMaxXFt { get; set; }
+        public double BoxMaxYFt { get; set; }
     }
 
     /// <summary><see cref="IBundleExportSteps.MeasureViewports"/> 的單一結果；Ok＝false 時寬高為 0（面積視為 0）。</summary>
@@ -74,6 +81,11 @@ namespace RevitMCP.Core.IssueManager
         public double Width { get; set; }
         public double Height { get; set; }
         public bool Ok { get; set; }
+        /// <summary>外框角點（英呎，圖紙座標）；Ok 為 true 時有值。</summary>
+        public double MinX { get; set; }
+        public double MinY { get; set; }
+        public double MaxX { get; set; }
+        public double MaxY { get; set; }
     }
 
     public sealed class SheetItem
@@ -187,6 +199,11 @@ namespace RevitMCP.Core.IssueManager
         public bool IncludeParams { get; set; }
         /// <summary>伺服器（較舊版本）不核發視圖位置的上傳網址：不匯出位置檔（D-805）。</summary>
         public bool SkipViewPositions { get; set; }
+        /// <summary>
+        /// 匯出圖紙版面（視口外框、比例、旋轉、模型↔圖紙轉換、剖面／立面標記；imsheetmarks）：寫在 view_positions.json 的 <c>sheetLayout</c> 區塊，
+        /// 舊網站會忽略它。只在同時匯出位置檔時有意義；預設開。
+        /// </summary>
+        public bool IncludeSheetLayout { get; set; } = true;
         /// <summary>匯出前就已知、要放進 manifest warnings 的提醒（例如伺服器還不收 params）。</summary>
         public List<string> PreWarnings { get; set; } = new List<string>();
 

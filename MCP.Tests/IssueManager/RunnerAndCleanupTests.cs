@@ -237,8 +237,9 @@ namespace RevitMCP.Tests.IssueManager
                 Path.Combine(_dir, "b"), new LoggingProgress(events), CancellationToken.None);
 
             CollectionAssert.AreEqual(new[] { "doc", "pdf", "glb", "namedViews", "viewPositions" }, steps.Calls);
-            CollectionAssert.AreEqual(new[] { "report", "run", "report", "run", "report", "run", "report", "run", "report", "run", "report" }, events,
-                "doc／pdf／glb／namedViews／viewPositions 各自一次 ExternalEvent，步驟之間回到呼叫端（Revit 訊息迴圈）；manifest 不佔用 Revit 執行緒");
+            // imsheetmarks：位置檔之後多一個「圖紙版面」步驟（步驟回報、每批圖紙一次回報加一次 ExternalEvent）。
+            CollectionAssert.AreEqual(new[] { "report", "run", "report", "run", "report", "run", "report", "run", "report", "run", "report", "report", "run", "report" }, events,
+                "doc／pdf／glb／namedViews／viewPositions／圖紙版面 各自一次 ExternalEvent，步驟之間回到呼叫端（Revit 訊息迴圈）；manifest 不佔用 Revit 執行緒");
             Assert.IsTrue(File.Exists(bundle.ManifestPath));
         }
 
