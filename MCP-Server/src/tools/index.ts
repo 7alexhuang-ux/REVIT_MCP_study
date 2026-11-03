@@ -32,13 +32,14 @@ import { walkthroughTools } from "./walkthrough-tools.js";
 import { webCompareTools } from "./web-compare-tools.js";
 import { cameraTools } from "./camera-tools.js";
 import { cameraManagerTools } from "./camera-manager-tools.js";
+import { familyPreviewTools } from "./family-preview-tools.js";
 
 /**
  * Profile 對照表：每個 profile 包含哪些模組
  */
 const PROFILE_MODULES: Record<string, Tool[][]> = {
-    full: [documentTools, baseTools, wallTools, roomTools, corridorAnalysisTools, visualizationTools, scheduleTools, mepTools, curtainWallTools, smokeExhaustTools, STAIR_COMPLIANCE_TOOLS, sheetTools, detailComponentTools, dimensionTools, dependentViewTools, dwgColumnTools, clashTools, doorWindowLegendTools, listSeedsTools, walkthroughTools, webCompareTools],
-    architect: [documentTools, baseTools, wallTools, roomTools, corridorAnalysisTools, visualizationTools, scheduleTools, curtainWallTools, STAIR_COMPLIANCE_TOOLS, sheetTools, detailComponentTools, dimensionTools, dependentViewTools, dwgColumnTools, doorWindowLegendTools, listSeedsTools, walkthroughTools, webCompareTools],
+    full: [documentTools, baseTools, wallTools, roomTools, corridorAnalysisTools, visualizationTools, scheduleTools, mepTools, curtainWallTools, smokeExhaustTools, STAIR_COMPLIANCE_TOOLS, sheetTools, detailComponentTools, dimensionTools, dependentViewTools, dwgColumnTools, clashTools, doorWindowLegendTools, listSeedsTools, walkthroughTools, webCompareTools, familyPreviewTools],
+    architect: [documentTools, baseTools, wallTools, roomTools, corridorAnalysisTools, visualizationTools, scheduleTools, curtainWallTools, STAIR_COMPLIANCE_TOOLS, sheetTools, detailComponentTools, dimensionTools, dependentViewTools, dwgColumnTools, doorWindowLegendTools, listSeedsTools, walkthroughTools, webCompareTools, familyPreviewTools],
     mep: [documentTools, baseTools, mepTools, scheduleTools, visualizationTools, smokeExhaustTools, clashTools],
     structural: [documentTools, baseTools, wallTools, visualizationTools, dwgColumnTools, clashTools],
     "fire-safety": [documentTools, baseTools, roomTools, corridorAnalysisTools, visualizationTools, smokeExhaustTools],

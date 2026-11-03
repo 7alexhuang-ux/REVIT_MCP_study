@@ -669,6 +669,10 @@ namespace RevitMCP.Core
                         result = CreateCameraStations(parameters);
                         break;
 
+                    case "export_family_previews":
+                        result = ExportFamilyPreviews(parameters);
+                        break;
+
                     default:
                         throw new NotImplementedException($"未實作的命令: {request.CommandName}");
                 }

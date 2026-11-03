@@ -8,6 +8,13 @@
 
 ## [Unreleased]
 
+### 新增 — export_family_previews：族群各類型的 Revit 平面／立面／3D 預覽圖（2026-11-03）
+
+- 新工具 `export_family_previews`：以獨立族群文件開啟 .rfa（不載入、不修改目前專案），逐類型匯出平面、前立面、3D 擬真 PNG 與 manifest.json，結束不存檔關閉；單筆失敗只記錄。
+- Revit 2024 實測：繁中植栽 6 族群 100 筆 0 失敗，3D 擬真會顯示 RPC 照片樹。
+- `docs/reports/planting-families.html`：植栽族群一覽面板，繁中族群改用 Revit 實圖（WebP 內嵌單檔）；英文庫仍為示意圖。
+- Runtime 工具數實測 148（文件原寫 137 已過期，相機管理 9 支未同步），CLAUDE.md／README／inventory／PROJECT_INTRO 與 docs/BIM_MCP/reference 計數同步；QA/QC 54 PASS。
+
 ### 🔧 修正 — viewsync 透視視野：IM 對位視圖畫面空白（2026-10-31）
 
 - Revit 2024 實測：透視裁剪框 X／Y 是對稱矩形，位於眼睛前方固定 0.1 ft 的焦距平面（與近裁剪、目標距離無關）。舊 TargetPlane 換算以目標距離 63 m 算出 X ±152.7、Y ±85.8 ft，Revit 解讀為約 180° 視角，畫面空白。
