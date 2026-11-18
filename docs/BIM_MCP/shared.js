@@ -6,7 +6,7 @@
   // MEETUP_SIGNUP — 月小聚報名設定（url + eventDate 成對維護）
   // 開放報名：兩個欄位都填。url = 報名表單網址；eventDate = 活動日期 YYYY-MM-DD（台北時間）。
   // 自動關閉：活動當天（含）之前按鈕可按；台北時間過了 eventDate 就自動停用，不必記得回來改。
-  // 沒有新連結時：url 與 eventDate 都留空字串，所有 [data-meetup-link] 按鈕會顯示「目前未開放報名」且按不下去。
+  // 沒有新連結時：url 與 eventDate 都留空字串，所有 [data-meetup-link] 按鈕會顯示「未開放報名」且按不下去。
   // QA 7-17 會檢查：url 有填但 eventDate 缺漏／格式錯誤／已過期 → FAIL（逼你換下一場的連結＋日期，或清空 url）。
   // 格式：必須是單一一行 var MEETUP_SIGNUP = { url: "…", eventDate: "…" }; —— url 與 eventDate 都要用單引號或雙引號的純字串寫在這一行（不可用樣板字串、不可串接、值前後不可有空白），兩個鍵順序不拘、可有尾逗號，也不要另外對它重新賦值。
   // QA 7-17 會實際執行本檔，只信 window.__meetupSignupEffective() 回傳的 url / eventDate（即訪客實際看到的設定），並要求上面那一行原文含有同樣的純字串。
@@ -56,7 +56,7 @@
         el.removeAttribute("rel");
         el.setAttribute("aria-disabled", "true");
         el.classList.add("is-disabled");
-        el.textContent = "\uD83D\uDCDD 目前未開放報名";
+        el.textContent = "\uD83D\uDCDD 未開放報名";
         el.title = "下一場小聚的報名連結尚未公布";
       }
     });

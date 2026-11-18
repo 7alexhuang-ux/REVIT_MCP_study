@@ -7,11 +7,13 @@
 
 QA/QC 全綠（PASS 74／FAIL 0／WARN 4）；`dotnet test` R24、R25 各 838 通過、2 略過、0 失敗。N4～N7 與決策紀錄都已處理。
 
+> 更正（imrevitqafixr，2026-11-18）：本報告原稿第 14 行把兩個帳號資料夾名抄回 repo，216f268 提交後 QA 3-4 實為紅燈，上面「全綠」在 216f268 並不成立；B1 修後才全綠。歷史段落不改。
+
 ## 2. 做了什麼
 
 | 項目 | 修法（白話） | 證據 |
 |---|---|---|
-| 舊 QA/QC 失敗 1：`3-4` 寫死帳號名 | `SheetsOnlyAttachTests.cs` 兩處測試字串 `C:\Users\other\…`、`C:\Users\alex\…` 改成 QA 允許的占位寫法 `C:\Users\<OTHER_MACHINE_USER>\…`。測試只比檔名與中央路徑，不依賴帳號，所以行為不變 | 改後 `3-4` PASS；兩個測試仍過 |
+| 舊 QA/QC 失敗 1：`3-4` 寫死帳號名 | `SheetsOnlyAttachTests.cs` 兩處測試字串裡寫死的家目錄帳號資料夾名，改成 QA 允許的占位寫法（`<OTHER_MACHINE_USER>`）。測試只比檔名與中央路徑，不依賴帳號，所以行為不變 | 改後 `3-4` PASS；兩個測試仍過 |
 | 舊 QA/QC 失敗 2：`7-17` 聚會日期過期 | `docs/BIM_MCP/shared.js` 的 `MEETUP_SIGNUP` 改成 `{ url: "", eventDate: "" }`。這是檔頭註解寫明的做法：沒有下一場時兩欄留空，按鈕自動顯示「目前未開放報名」，**不會再隨時間過期**。下一場聚會把連結與日期成對填回去即可（舊表單連結仍可從 git 歷史找回，已不放在檔內） | `7-17` PASS |
 | N4 | `CLAUDE.md:500`：R25 實際輸出 **9** 個 DLL（8 個基本＋`System.Drawing.Common`）。我重編 `Release.R25` 實數 9：ClosedXML、DocumentFormat.OpenXml、ExcelNumberFormat、Irony、Newtonsoft.Json、RevitMCP、SixLabors.Fonts、System.Drawing.Common、XLParser。R26 沒有重編，文字寫明「未重新計數（先前為 8）」，**不杜撰** | 實跑 `dotnet build -c Release.R25` 0 錯誤 |
 | N5 | ADR 標題與各處引用改成「ADR D-015（Revit 跳轉）」，區別 camera-manager 另一套 D-001～D-046 編號：`docs/adr/D-015-…md` 標題、`REVIT_LINK.md`、`SPEC.md`、`CHANGELOG.md`、建造者報告 | grep 確認 |
