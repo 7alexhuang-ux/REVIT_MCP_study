@@ -24,6 +24,7 @@ Revit MCP 讓 AI 用 Model Context Protocol 呼叫 Autodesk Revit 的功能：AI
 | 設計選項 `list_design_options`／`export_design_options`、命名 3D 視圖 `export_named_views` | [WEB_COMPARE_EXPORT.md](WEB_COMPARE_EXPORT.md)「設計選項與命名視圖」、[ADR D-010](adr/D-010-design-options-and-named-views.md) |
 | 文件與連結 `open_document`／`list_open_documents`／`close_document`／`list_links`／`reload_links`、opt-in 自動啟動 | [WEB_COMPARE_EXPORT.md](WEB_COMPARE_EXPORT.md)「無人操作前置」 |
 | 上傳到 Issue Manager（功能區按鈕、勾選視窗、版本包、瀏覽器授權登入；不經 MCP、不是 MCP 工具） | [ISSUE_MANAGER_UPLOAD.md](ISSUE_MANAGER_UPLOAD.md)、[ADR D-011](adr/D-011-issue-manager-upload-addin.md)、[bundle-manifest.schema.json](schemas/bundle-manifest.schema.json) |
+| Revit 跳轉（網頁議題 ↔ Revit 元件／視圖／圖紙；四個瀏覽器唯讀指令、兩顆功能區按鈕、兩個 Claude 指令；2026-11-18 Alex 六題已答） | [REVIT_LINK.md](REVIT_LINK.md)、[ADR D-015](adr/D-015-revit-link-addin.md) |
 | 各 BIM 工作流 | `domain/*.md`（觸發字表見 CLAUDE.md） |
 
 資料合約摘要（網頁端依此讀取）：
