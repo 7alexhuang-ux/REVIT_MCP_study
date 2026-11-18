@@ -669,6 +669,10 @@ namespace RevitMCP.Core
                     case "check_stair_headroom":
                         result = CheckStairHeadroom(parameters);
                         break;
+                    case "export_family_previews":
+                        result = ExportFamilyPreviews(parameters);
+                        break;
+
                     case "create_stair_text_note_with_leader":
                         result = CreateTextNoteWithLeader(parameters);
                         break;

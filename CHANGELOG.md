@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 新增 — export_family_previews：族群各類型的 Revit 平面／立面／3D 預覽圖（2026-11-03，併自 grading-workflow-v2）
+
+- 新工具 `export_family_previews`：以獨立族群文件開啟 .rfa（不載入、不修改目前專案），逐類型匯出平面、前立面、3D 擬真 PNG 與 manifest.json，結束不存檔關閉；單筆失敗只記錄。
+- 合併說明（imrevitaddinjump，2026-11-18）：此分支與 grading-workflow-v2 的計數基線不同（本分支 276、對方 148），工具數與文件計數留待本次最後一次依原始碼重算，不照抄對方的 148。
+
 ### ✨ 上傳到 Issue Manager：只傳圖面接到已上傳的模型、記下來源模型路徑（imsheetsonly，D-014，2026-11-01）
 
 - 勾選視窗不勾「匯出 3D 模型」時，多一個下拉「接到已上傳的模型」（來自新端點 `GET /api/addin/projects/:id/models`，預設最新一個能用的，也可選「不接」）。選了就不匯出 GLB，但 PDF、平面／立面／剖面位置、3D 視角（透視）照常匯出並接到那個模型；**座標原點沿用該模型的**，manifest 帶 `attachToModelId`。伺服器比對原點，對不上整包拒絕，外掛用白話顯示（`attach_origin_mismatch`／`attach_origin_unknown`／`attach_model_not_found`，後者伺服器用 404，已在通用 404 句之前特別處理）。
