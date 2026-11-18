@@ -1,0 +1,24 @@
+[2026-11-18 21:04:39] [INFO] [Socket] 網頁配對成功 Origin=http://localhost:3713
+[2026-11-18 21:04:39] [INFO] [Socket] 處理瀏覽器命令: viewsync_get_selection (RequestId: im-mwm4vanu-1)
+[2026-11-18 21:04:44] [INFO] 使用者產生網頁配對碼
+[2026-11-18 21:04:59] [INFO] [Socket] 處理瀏覽器命令: viewsync_get_selection (RequestId: im-mwm4vq52-1)
+[2026-11-18 21:05:16] [INFO] [Socket] 處理瀏覽器命令: viewsync_open_link (RequestId: im-mwm4w331-1)
+[2026-11-18 21:05:34] [INFO] [RevitLink] 建立了一份草稿（create），元素數 1
+[2026-11-18 21:05:46] [INFO] [Socket] 處理瀏覽器命令: viewsync_draft_take (RequestId: im-mwm4wqp3-1)
+[2026-11-18 21:06:42] [INFO] [Socket] 處理瀏覽器命令: viewsync_get_selection (RequestId: im-mwm4xxoz-1)
+[2026-11-18 21:07:25] [INFO] [Socket] 處理瀏覽器命令: viewsync_open_link (RequestId: im-mwm4yv26-1)
+[2026-11-18 21:07:28] [INFO] [Socket] 處理瀏覽器命令: viewsync_open_link (RequestId: im-mwm4yxei-1)
+[2026-11-18 21:07:30] [INFO] [Socket] 處理瀏覽器命令: viewsync_open_link (RequestId: im-mwm4yyii-1)
+[2026-11-18 21:07:31] [INFO] [Socket] 處理瀏覽器命令: viewsync_open_link (RequestId: im-mwm4yz9q-1)
+[2026-11-18 21:07:57] [INFO] [Socket] 處理瀏覽器命令: viewsync_open_link (RequestId: im-mwm4zjr5-1)
+[2026-11-18 21:08:13] [INFO] [RevitLink] 建立了一份草稿（lookup），元素數 1
+[2026-11-18 21:08:29] [INFO] [Socket] 處理瀏覽器命令: viewsync_draft_take (RequestId: im-mwm508id-1)
+[2026-11-18 21:09:06] [INFO] [Socket] 瀏覽器請求被拒 (command_not_allowed): viewsync_draft_put
+[2026-11-18 21:09:06] [INFO] [Socket] 處理瀏覽器命令: viewsync_status (RequestId: tslm5wvvw3nk)
+[2026-11-18 21:09:28] [INFO] [RevitLink] 建立了一份草稿（create），元素數 1
+[2026-11-18 21:10:35] [INFO] [Socket] 處理瀏覽器命令: viewsync_open_link (RequestId: im-mwm52x7c-1)
+[2026-11-18 21:10:45] [INFO] [Socket] 處理瀏覽器命令: viewsync_open_link (RequestId: im-mwm534zw-1)
+[2026-11-18 21:10:55] [INFO] [Socket] 處理瀏覽器命令: viewsync_open_link (RequestId: im-mwm53d6m-1)
+[2026-11-18 21:10:56] [INFO] [Socket] 處理瀏覽器命令: viewsync_open_link (RequestId: im-mwm53dn3-1)
+[2026-11-18 21:10:57] [INFO] [Socket] 處理瀏覽器命令: viewsync_open_link (RequestId: im-mwm53efk-1)
+[2026-11-18 21:10:57] [INFO] [Socket] 處理瀏覽器命令: viewsync_open_link (RequestId: im-mwm53etf-1)

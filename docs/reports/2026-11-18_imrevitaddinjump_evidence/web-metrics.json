@@ -1,0 +1,128 @@
+[
+  {
+    "name": "web-unpaired",
+    "w": 1280,
+    "h": 800,
+    "sw": 1280,
+    "sh": 800,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  },
+  {
+    "name": "web-selection-read",
+    "w": 1280,
+    "h": 800,
+    "sw": 1280,
+    "sh": 800,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  },
+  {
+    "name": "issue-desktop-link-added",
+    "w": 1280,
+    "h": 800,
+    "sw": 1280,
+    "sh": 800,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  },
+  {
+    "name": "issue-desktop-jumped",
+    "w": 1280,
+    "h": 800,
+    "sw": 1280,
+    "sh": 800,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  },
+  {
+    "name": "draft-desktop",
+    "w": 1280,
+    "h": 800,
+    "sw": 1280,
+    "sh": 800,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  },
+  {
+    "name": "web-selection-read",
+    "w": 1280,
+    "h": 800,
+    "sw": 1280,
+    "sh": 800,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  },
+  {
+    "name": "issueB-all-jumped",
+    "w": 1280,
+    "h": 800,
+    "sw": 1280,
+    "sh": 800,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  },
+  {
+    "name": "issueB-all-jumped",
+    "w": 1280,
+    "h": 800,
+    "sw": 1280,
+    "sh": 800,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  },
+  {
+    "name": "issue-desktop-revision-warn",
+    "w": 1280,
+    "h": 800,
+    "sw": 1280,
+    "sh": 800,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  },
+  {
+    "name": "lookup-desktop",
+    "w": 1280,
+    "h": 800,
+    "sw": 1280,
+    "sh": 800,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  },
+  {
+    "name": "issue-mobile",
+    "w": 390,
+    "h": 844,
+    "sw": 390,
+    "sh": 844,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  },
+  {
+    "name": "issue-desktop-jumped",
+    "w": 1280,
+    "h": 800,
+    "sw": 1280,
+    "sh": 800,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  },
+  {
+    "name": "issue-desktop-revision-warn",
+    "w": 1280,
+    "h": 800,
+    "sw": 1280,
+    "sh": 800,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  },
+  {
+    "name": "issueB-all-jumped",
+    "w": 1280,
+    "h": 800,
+    "sw": 1280,
+    "sh": 800,
+    "noHorizontalOverflow": true,
+    "noVerticalScroll": true
+  }
+]

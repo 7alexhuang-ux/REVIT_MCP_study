@@ -1,0 +1,73 @@
+{
+  "jumpStatus": "jumped",
+  "jumpText": "已跳轉\n已在 Revit 選取 1 個元素。\n模型版本不同\n這個連結是在較舊的模型版本建立的，位置可能已變動。",
+  "selectionText": "已讀到 1 個元素，會全部加入這個議題",
+  "draftInfo": "Revit 資訊\n模型：Snowdon_test\n視圖：L1\n圖紙：A101\n選取的元素（1）\n牆 Exterior - 12 5/8\" Rainscreen w Insultation on Metal Stud (Alley)\n50f92000-82f8-4258-b6a8-bb42c01b00a0-0009741e",
+  "draftShot": 1,
+  "lookupText": "這個元素有哪些議題\n\n這是 Revit 目前選取的元素，在系統裡的相關議題（只列你看得到的未結議題）。\n\n模型：Snowdon_test\n\n找到 2 個議題\n\n牆 Exterior - 12 5/8\" Rainscreen w Insultation on Metal Stud (Alley)\n\n50f92000-82f8-4258-b6a8-bb42c01b00a0-0009741e\n\n#1 核心筒混凝土牆開孔位置要確認\nSnowdon 實機驗收 0e3cf9\n未處理\n#2 另一件議題（沒有 Revit 連結）\nSnowdon 實機驗收 0e3cf9\n未處理",
+  "s6b": [
+    201,
+    201,
+    201
+  ],
+  "s7": [
+    {
+      "row": "元素",
+      "status": "hidden_in_view",
+      "text": "元素在這個視圖看不到 已選取元素，但它在目前視圖被隱藏或被視圖範圍切掉。已切到可以看到它的視圖。 模型版本不同 這個連結是在較舊的模型版本建立的，位置可能已變動。"
+    },
+    {
+      "row": "元素",
+      "status": "fallback",
+      "text": "找不到原本的元素 找不到原本的元素（可能已被刪除），已改為開啟視圖「L1」。"
+    },
+    {
+      "row": "元素",
+      "status": "fallback",
+      "text": "找不到原本的元素 找不到原本的元素（可能已被刪除），已改為開啟視圖「First Floor Plan」。"
+    },
+    {
+      "row": "元素",
+      "status": "link_invalid",
+      "text": "這個連結已失效 元素、視圖、圖紙都找不到了，可能已被刪除或換了模型。舊的資訊與截圖還在下面。"
+    }
+  ],
+  "s8": {
+    "status": "jumped",
+    "text": "已跳轉 已在 Revit 選取 1 個元素。 模型版本不同 這個連結是在較舊的模型版本建立的，位置可能已變動。"
+  },
+  "s9": {
+    "hasToken": true,
+    "draftPut": {
+      "success": false,
+      "error": "瀏覽器不能呼叫這個指令。",
+      "code": "command_not_allowed",
+      "hasRevision": false
+    },
+    "createWall": {
+      "success": false,
+      "error": "瀏覽器不能呼叫這個指令。",
+      "code": "command_not_allowed",
+      "hasRevision": false
+    },
+    "draftTakeNoToken": {
+      "success": false,
+      "error": "尚未配對：請在 Revit 功能區按「網頁配對」取得配對碼。",
+      "code": "token_missing",
+      "hasRevision": false
+    },
+    "status": {
+      "success": true,
+      "hasRevision": true
+    }
+  },
+  "baseLink": {
+    "modelGuid": "46ec4172-06ee-4490-8b81-5cb4f0c7c011",
+    "modelName": "Snowdon_test",
+    "viewUniqueId": "abf6d7c8-77b7-4005-a8b7-5dd2b1220a3c-00149bb5",
+    "viewName": "L1",
+    "sheetNumber": "A101",
+    "modelRevision": "125:8c757e9c-41d3-48dd-8d4b-b0215e197f78"
+  },
+  "lastUrl": "http://localhost:3713/revit/lookup?code=<隱藏>"
+}
