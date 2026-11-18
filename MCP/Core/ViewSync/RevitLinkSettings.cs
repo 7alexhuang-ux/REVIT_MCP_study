@@ -22,6 +22,8 @@ namespace RevitMCP.Core.ViewSync
         public int DraftMinutes { get; private set; } = DefaultDraftMinutes;
         public int CaptureMaxEdgePx { get; private set; } = DefaultCaptureMaxEdgePx;
         public bool CaptureEnabled { get; private set; } = true;
+        /// <summary>用哪個瀏覽器開預填頁（執行檔完整路徑，網址會當成唯一引數傳入）；空＝系統預設瀏覽器。</summary>
+        public string BrowserPath { get; private set; }
         /// <summary>讀檔失敗的原因（沒有檔案不算失敗）；null＝正常。</summary>
         public string LoadError { get; private set; }
 
@@ -43,6 +45,8 @@ namespace RevitMCP.Core.ViewSync
                 settings.CaptureMaxEdgePx = ClampInt(json["captureMaxEdgePx"], 400, 4000, DefaultCaptureMaxEdgePx);
                 var capture = json["captureEnabled"];
                 if (capture != null && capture.Type == JTokenType.Boolean) settings.CaptureEnabled = (bool)capture;
+                var browser = json["browserPath"];
+                if (browser != null && browser.Type == JTokenType.String) settings.BrowserPath = ((string)browser).Trim();
             }
             catch (Exception)
             {

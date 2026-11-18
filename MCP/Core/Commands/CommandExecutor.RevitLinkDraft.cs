@@ -10,6 +10,18 @@ namespace RevitMCP.Core
 {
     public partial class CommandExecutor
     {
+        /// <summary>用設定指定的瀏覽器開網址；沒設定（或檔案不存在）就用系統預設瀏覽器。</summary>
+        private static void RevitLinkOpenBrowser(string url, string browserPath)
+        {
+            if (!string.IsNullOrWhiteSpace(browserPath) && System.IO.File.Exists(browserPath))
+            {
+                Process.Start(new ProcessStartInfo(browserPath, "\"" + url + "\"") { UseShellExecute = false });
+                return;
+            }
+            if (!string.IsNullOrWhiteSpace(browserPath)) Logger.Error("[RevitLink] browserPath 指向的檔案不存在，改用系統預設瀏覽器。");
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+
         /// <summary>
         /// 取目前選取＋（建立議題時）視圖截圖 → 暫存草稿（記憶體、取一次就刪、預設 10 分鐘）→ 以預設瀏覽器開 {IM}/revit/draft?code=… 或 /revit/lookup?code=…。
         /// kind：create＝建立議題；lookup＝這個元素有哪些議題。截圖失敗或設定關閉時仍可繼續（草稿沒有截圖，預填頁顯示「沒有截圖」）。
@@ -58,7 +70,7 @@ namespace RevitMCP.Core
 
             // 日誌只記數量；不記識別碼、代碼、截圖。
             Logger.Info("[RevitLink] 建立了一份草稿（" + kind + "），元素數 " + elementCount);
-            Process.Start(new ProcessStartInfo(baseUrl + page + "?code=" + Uri.EscapeDataString(code)) { UseShellExecute = true });
+            RevitLinkOpenBrowser(baseUrl + page + "?code=" + Uri.EscapeDataString(code), settings.BrowserPath);
 
             return new JObject
             {

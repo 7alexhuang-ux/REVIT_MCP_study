@@ -84,6 +84,7 @@ Alex 2026-11-18 對 IM 規格 §26 的六題給了答案，外掛端照做、不
 | `draftMinutes` | 10 | 草稿保存分鐘（1–60） |
 | `captureMaxEdgePx` | 2000 | 截圖長邊像素（400–4000） |
 | `captureEnabled` | true | 設為 false 時建立議題不截圖（預填頁顯示「沒有截圖」） |
+| `browserPath` | 空＝系統預設瀏覽器 | 指定用哪個瀏覽器開預填頁（執行檔完整路徑，網址當唯一引數）；檔案不存在時改用預設瀏覽器並記一行日誌 |
 
 新增的錯誤碼（只出現在功能區按鈕／Claude 指令路徑，不經瀏覽器）：`im_url_missing`（沒有 IM 網址）、`im_url_invalid`（網址不是 https／本機 http）。
 

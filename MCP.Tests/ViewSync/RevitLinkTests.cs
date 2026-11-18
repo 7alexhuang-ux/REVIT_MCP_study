@@ -196,6 +196,14 @@ namespace RevitMCP.Tests.ViewSync
         }
 
         [Test]
+        public void Load_ReadsBrowserPath_AndDefaultsToEmpty()
+        {
+            Assert.That(RevitLinkSettings.Load(Write("c1.json", "{}")).BrowserPath, Is.Null);
+            Assert.That(RevitLinkSettings.Load(Write("c2.json", "{\"browserPath\":\" C:\\\\tools\\\\open.cmd \"}")).BrowserPath, Is.EqualTo("C:\\tools\\open.cmd"));
+            Assert.That(RevitLinkSettings.Load(Write("c3.json", "{\"browserPath\":123}")).BrowserPath, Is.Null, "不是字串就當沒設定");
+        }
+
+        [Test]
         public void Load_BrokenJson_FallsBackToDefaults_WithErrorAndNoContentLeak()
         {
             var path = Write("b.json", "{ this is not json https://secret.example.com");
