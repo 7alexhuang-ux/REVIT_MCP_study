@@ -1,4 +1,4 @@
-# D-015：Revit 跳轉走瀏覽器直連既有 WebSocket、四個唯讀指令＋內部草稿暫存、兩個反向入口共用同一段程式
+# ADR D-015（Revit 跳轉）：Revit 跳轉走瀏覽器直連既有 WebSocket、四個唯讀指令＋內部草稿暫存、兩個反向入口共用同一段程式
 
 > 文件性質：架構決策紀錄（人類與 AI 共用）。日期：2026-11-18。分支 `imrevitaddinjump`。
 > 依據：Issue Manager（IM）repo `docs/spec/revit-link.md`（IM 端決策 D-950～D-959，Alex 2026-11-18 已拍板六題）。編號 D-015：已掃本 repo 全部分支的 `docs/adr/`，最大為 D-014，D-015 空號。
@@ -18,7 +18,7 @@ IM 要讓網頁議題能「跳到 Revit 裡的那個元件」，也要讓人在 
 6. **唯讀範圍硬規定**：本功能原始碼不得有 `Transaction`、建立視圖、套用暫時設定、刪除或修改元素；單元測試掃原始碼保證。
 7. **同一份原始碼支援 Revit 2024（`ElementId` 32 位元）與 2025+（64 位元）**，一律經 `RevitCompatibility` helper。
 8. **IM 網址解析不猜預設值**：`imBaseUrl` → `ISSUE_MANAGER_URL` → `issue-manager.json` → 網頁白名單第一筆；只收 https（本機測試才允許 http 迴圈位址）。
-9. 外掛端可調的值放 `%APPDATA%\RevitMCP\revit-link.json`（草稿分鐘、截圖長邊、是否截圖、IM 網址）；沒有檔案就全用預設。
+9. 外掛端可調的值放 `%APPDATA%\RevitMCP\revit-link.json`（草稿分鐘、截圖長邊、是否截圖、IM 網址、`browserPath` 指定用哪個瀏覽器開預填頁，檔案不存在時改用預設瀏覽器並記一行日誌）；沒有檔案就全用預設。
 
 ## 理由
 

@@ -8,7 +8,7 @@
 
 ## [Unreleased]
 
-### ✨ Revit 跳轉：網頁議題 ↔ Revit 元件／視圖／圖紙（imrevitaddinjump，D-015，2026-11-18）
+### ✨ Revit 跳轉：網頁議題 ↔ Revit 元件／視圖／圖紙（imrevitaddinjump，ADR D-015（Revit 跳轉），2026-11-18）
 
 - 瀏覽器（已配對）新增四個**唯讀**指令：`viewsync_open_link`（切視圖、選取元件；元素 UniqueId → ElementId 提示 → 視圖 → 圖紙退化、`hidden_in_view`、模型版本不同回 `modelRevisionDiffers` 仍跳轉、`revisionPolicy` continue／block／sheet_only）、`viewsync_get_selection`、`viewsync_capture_view`（≤5 MB 自動降解析度）、`viewsync_draft_take`（取一次就刪）。`viewsync_draft_put` 只供外掛內部、不在瀏覽器白名單。`viewsync_status` 的 `model` 多 `revision`（存檔次數:版本 GUID）。
 - 功能區「Issue Manager」面板新增兩顆按鈕「在 IM 建立議題」「這個元素有哪些議題」（`TransactionMode.ReadOnly`）；Claude／MCP 新增 `open_issue_draft`、`open_element_issues`，兩個入口共用 `OpenIssueDraft`。MCP 工具數 276 → 279（含併入的 `export_family_previews`），文件計數與 tools-index／skills-index 依原始碼重算並重產。

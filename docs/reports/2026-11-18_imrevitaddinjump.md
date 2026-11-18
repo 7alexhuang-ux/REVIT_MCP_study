@@ -1,7 +1,7 @@
 # 報告：Revit 跳轉外掛端整合與實機驗收（imrevitaddinjump）
 
 > 日期：2026-11-18。分支 `imrevitaddinjump`（從 `imaddinmerge` f4abd77 開出）。執行者：Claude Sonnet 5.5（8.ape 帳號派工）。
-> 規格：[REVIT_LINK.md](../REVIT_LINK.md)、[ADR D-015](../adr/D-015-revit-link-addin.md)。來源：Issue Manager（IM）`imrevitjump` 分支的 `docs/spec/revit-link.md`、`addin/revit-link/` 草稿、`src/lib/revit-protocol.ts`。
+> 規格：[REVIT_LINK.md](../REVIT_LINK.md)、[ADR D-015（Revit 跳轉）](../adr/D-015-revit-link-addin.md)。來源：Issue Manager（IM）`imrevitjump` 分支的 `docs/spec/revit-link.md`、`addin/revit-link/` 草稿、`src/lib/revit-protocol.ts`。
 > 證據（截圖、日誌、結果 JSON）：[2026-11-18_imrevitaddinjump_evidence/](2026-11-18_imrevitaddinjump_evidence/)。
 
 ## 1. 結論
@@ -55,7 +55,7 @@ Alex 要的五件事，**全部在 Revit 2025 實機（Snowdon Towers Sample Arc
 | 未配對的白話說明 | ✅ 沒配對時網頁顯示「還沒和 Revit 配對」 | `web-unpaired.png` |
 | 網頁截圖尺寸 | 桌面 1280×800、手機 390×844，`scrollWidth`／`scrollHeight` 都等於視窗（無橫向溢出）。手機版沒有「在 Revit 開啟」 | `web-metrics.json`、`issue-mobile.png` |
 
-離線測試：`dotnet test MCP.Tests` **837 通過、2 略過、0 失敗**（含新增 `RevitLinkTests`）；Release.R24 與 Release.R25 都 0 錯誤。QA/QC（`verify-qaqc.ps1 -SkipBuild -SkipDeploy`，需 UTF-8 主控台）72 PASS、2 FAIL（見第 6 節，皆非本件造成）。
+離線測試：`dotnet test MCP.Tests` **838 通過、2 略過、0 失敗**（2026-11-18 imrevitqafix 實跑 R24、R25 各一次；原寫 837 為舊數）（含新增 `RevitLinkTests`）；Release.R24 與 Release.R25 都 0 錯誤。QA/QC（`verify-qaqc.ps1 -SkipBuild -SkipDeploy`，需 UTF-8 主控台）72 PASS、2 FAIL（見第 6 節，皆非本件造成）。
 
 ## 5. 未解項與已知限制
 

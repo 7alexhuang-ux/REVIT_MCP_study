@@ -270,7 +270,7 @@ namespace RevitMCP.Tests.IssueManager
             vm.IsLoggedIn = true; vm.SelectedProject = vm.Projects[0]; vm.SelectedStage = vm.Stages.First(s => s.Code == "SD"); vm.Description = "x";
             vm.IncludeModel = false; vm.SelectAllSheets(true);
             // 模型是別人用另一個本機副本傳的：檔案路徑不同，中央模型路徑相同
-            vm.SetAttachableModels(new[] { Model("m1", "model.glb", ModelOrigin, "v3", new AttachModelSource { Path = @"C:\Users\other\AR-CPC_other.rvt", CentralPath = @"h:/CENTRAL/ar-cpc.rvt" }) });
+            vm.SetAttachableModels(new[] { Model("m1", "model.glb", ModelOrigin, "v3", new AttachModelSource { Path = @"C:\Users\<OTHER_MACHINE_USER>\AR-CPC_other.rvt", CentralPath = @"h:/CENTRAL/ar-cpc.rvt" }) });
             Assert.AreEqual("m1", vm.SelectedAttach.Model.Id);
             Assert.IsFalse(vm.AttachNeedsConfirm);
             Assert.IsTrue(vm.CanUpload, vm.BlockReason);
@@ -398,7 +398,7 @@ namespace RevitMCP.Tests.IssueManager
         {
             var model = new AttachModelSource { Path = @"H:\我的雲端硬碟\BIM\AR-CPC.rvt", CentralPath = @"H:\central\AR-CPC.rvt" };
             Assert.AreEqual(SourceVerdict.Match, SourceIdentity.Compare(model, "h:/我的雲端硬碟/bim/ar-cpc.rvt", null));
-            Assert.AreEqual(SourceVerdict.Match, SourceIdentity.Compare(model, @"C:\Users\alex\AR-CPC_alex.rvt", @"H:\CENTRAL\AR-CPC.rvt"), "工作共享：本機副本不同、中央模型相同");
+            Assert.AreEqual(SourceVerdict.Match, SourceIdentity.Compare(model, @"C:\Users\<OTHER_MACHINE_USER>\AR-CPC_alex.rvt", @"H:\CENTRAL\AR-CPC.rvt"), "工作共享：本機副本不同、中央模型相同");
             Assert.AreEqual(SourceVerdict.Mismatch, SourceIdentity.Compare(model, @"H:\我的雲端硬碟\BIM\ST-CPC.rvt", null));
             Assert.AreEqual(SourceVerdict.Unknown, SourceIdentity.Compare(null, @"C:\a.rvt", null));
             Assert.AreEqual(SourceVerdict.Unknown, SourceIdentity.Compare(new AttachModelSource { FileName = "AR" }, @"C:\a.rvt", null));

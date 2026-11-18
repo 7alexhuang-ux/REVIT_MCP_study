@@ -12,7 +12,7 @@
   // QA 7-17 會實際執行本檔，只信 window.__meetupSignupEffective() 回傳的 url / eventDate（即訪客實際看到的設定），並要求上面那一行原文含有同樣的純字串。
   // 舊的八月表單連結可從 git 歷史 e805fac 找回，不要再填回來。
   // ============================================================
-  var MEETUP_SIGNUP = { url: "https://forms.gle/B27MLgRv5EWYdp5s6", eventDate: "2026-10-24" };  // url = 報名表單；eventDate = 活動日期 YYYY-MM-DD（台北時間），活動當天結束後自動停用
+  var MEETUP_SIGNUP = { url: "", eventDate: "" };  // url = 報名表單；eventDate = 活動日期 YYYY-MM-DD（台北時間），活動當天結束後自動停用
   // 唯讀 getter：執行期與 QA 7-17 都讀這個物件，所以閘門檢查的就是訪客實際看到的設定。
   window.__meetupSignupEffective = function () { return { url: MEETUP_SIGNUP.url, eventDate: MEETUP_SIGNUP.eventDate }; };
 

@@ -1,6 +1,6 @@
 # Revit 跳轉（外掛端）：網頁 ↔ Revit 元件／視圖／圖紙
 
-> 文件性質：功能規格（人類與 AI 共用）。建立日期：2026-11-18。分支 `imrevitaddinjump`。決策見 [ADR D-015](adr/D-015-revit-link-addin.md)。
+> 文件性質：功能規格（人類與 AI 共用）。建立日期：2026-11-18。分支 `imrevitaddinjump`。決策見 [ADR D-015（Revit 跳轉）](adr/D-015-revit-link-addin.md)。
 > 來源：Issue Manager（IM）repo 的 `docs/spec/revit-link.md`（§15 通道與指令、§16 識別碼、§17 觸發位置、§18 反向流程、§19 錯誤狀態、§20 安全性、§21 可編輯設定、§24 驗收、§27 實作版合約），以及 IM 端同分支 `src/lib/revit-protocol.ts`（協定常數與解析函式，格式只在那個檔案）。
 > 本檔只寫**外掛端**要做的事；網頁端、資料庫、API 都在 IM repo，本 repo 不實作。
 > 與 IM 規格衝突時，欄位與指令名稱以 IM 的 `revit-protocol.ts` 為準，行為以本檔為準（本檔補了 IM 草稿沒寫到的 Revit 版本差異與按鈕啟用條件）。
