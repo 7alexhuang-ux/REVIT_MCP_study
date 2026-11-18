@@ -22,6 +22,12 @@
     <PackageReference Include="ClosedXML" Version="0.102.3" />
   </ItemGroup>
 
+  <!-- Release.R25／R26 是 .NET 8：System.Drawing（Bitmap／Graphics，RevitGltfExportContext 縮圖用）不再內建，要補套件，否則 R25／R26 編不過
+       （2026-11-18 imrevitaddinjump 發現；.NET Framework 4.8 的 R22～R24 不需要）。 -->
+  <ItemGroup Condition="'$(TargetFramework)' != 'net48'">
+    <PackageReference Include="System.Drawing.Common" Version="8.0.*" />
+  </ItemGroup>
+
   <!-- 整地圖說 ribbon 色磚 Badge 圖示（嵌入組件，讀取見 Application.LoadGradingIcon）。 -->
   <ItemGroup>
     <EmbeddedResource Include="Resources\icons\*_16.png" />

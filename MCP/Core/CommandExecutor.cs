@@ -155,6 +155,32 @@ namespace RevitMCP.Core
                         result = ViewSyncCreateView(parameters);
                         break;
 
+                    // Revit 跳轉（docs/REVIT_LINK.md、ADR D-015）：四個唯讀指令（瀏覽器白名單內）＋兩個只給 Claude／MCP 的入口。
+                    // viewsync_draft_put 刻意不在這裡：只有 OpenIssueDraft 在外掛內部呼叫 RevitLinkDraftStore.Put。
+                    case "viewsync_open_link":
+                        result = ViewSyncOpenLink(parameters);
+                        break;
+
+                    case "viewsync_get_selection":
+                        result = ViewSyncGetSelection(parameters);
+                        break;
+
+                    case "viewsync_capture_view":
+                        result = ViewSyncCaptureView(parameters);
+                        break;
+
+                    case "viewsync_draft_take":
+                        result = ViewSyncDraftTake(parameters);
+                        break;
+
+                    case "open_issue_draft":
+                        result = OpenIssueDraft("create");
+                        break;
+
+                    case "open_element_issues":
+                        result = OpenIssueDraft("lookup");
+                        break;
+
                     case "viewsync_debug_fov":
                         result = ViewSyncDebugFov(parameters);
                         break;

@@ -45,6 +45,7 @@ namespace RevitMCP.Core
             {
                 ["title"] = info.Title,
                 ["guid"] = info.Guid,
+                ["revision"] = RevitLinkRevisionOf(doc), // 存檔次數:版本 GUID（Revit 跳轉用；取不到為 null）
             };
             // 本機路徑只回給沒有 Origin 的本機連線；瀏覽器連線（SocketService 加 __browser）不回。
             if (p["__browser"]?.Type != JTokenType.Boolean || !p["__browser"].Value<bool>())

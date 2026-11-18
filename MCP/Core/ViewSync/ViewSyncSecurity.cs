@@ -19,6 +19,14 @@ namespace RevitMCP.Core.ViewSync
         public const string OpenView = "viewsync_open_view";
         public const string CreateView = "viewsync_create_view";
 
+        // Revit 跳轉（docs/REVIT_LINK.md、ADR D-015）：以下四個全部唯讀（不改模型、不建立視圖、不動「已修改」旗標），瀏覽器可呼叫。
+        public const string OpenLink = "viewsync_open_link";
+        public const string GetSelection = "viewsync_get_selection";
+        public const string CaptureView = "viewsync_capture_view";
+        public const string DraftTake = "viewsync_draft_take";
+        /// <summary>只供外掛內部暫存草稿；刻意不放進 Authorized，瀏覽器送來一律 command_not_allowed。</summary>
+        public const string DraftPut = "viewsync_draft_put";
+
         /// <summary>
         /// 相機管理（issue-manager D-712 網頁版相機管理）可由瀏覽器呼叫的指令。與 viewsync_* 同樣的 Origin＋token 規則。
         /// 不含 get_camera_info（只給 MCP 內部用）。
@@ -31,7 +39,7 @@ namespace RevitMCP.Core.ViewSync
 
         /// <summary>配對以外、需要 token 的瀏覽器指令（也是會轉給 CommandExecutor 的指令）。</summary>
         public static readonly string[] Authorized =
-            new[] { Status, ApplyTemp, OpenView, CreateView }.Concat(CameraCommands).ToArray();
+            new[] { Status, ApplyTemp, OpenView, CreateView, OpenLink, GetSelection, CaptureView, DraftTake }.Concat(CameraCommands).ToArray();
 
         /// <summary>名稱完全相等（不分大小寫）才算；不 Trim，避免白名單判斷與執行器判斷不一致。</summary>
         public static bool IsBrowserAllowed(string commandName)

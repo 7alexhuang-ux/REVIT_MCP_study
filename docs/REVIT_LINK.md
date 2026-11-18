@@ -48,10 +48,10 @@ Alex 2026-11-18 對 IM 規格 §26 的六題給了答案，外掛端照做、不
 
 | MCP 工具 | 對應 | 回傳 |
 |---|---|---|
-| `open_issue_draft` | `OpenIssueDraft("create")` | `{ opened:true, url }` |
-| `open_element_issues` | `OpenIssueDraft("lookup")` | `{ opened:true, url }` |
+| `open_issue_draft` | `OpenIssueDraft("create")` | `{ opened, kind, url, elementCount, pairedWebDevices }` |
+| `open_element_issues` | `OpenIssueDraft("lookup")` | `{ opened, kind, url, elementCount, pairedWebDevices }` |
 
-兩者都需要 Revit 已開專案且**至少選了一個元素**（沒選回 `selection_empty`）。MCP 工具名稱用 snake_case；MCP-Server 端各加一個工具定義，並補上註解（`title`、`readOnlyHint`）。
+兩者都需要 Revit 已開專案且**至少選了一個元素**（沒選回 `selection_empty`）。回傳的 `url` **刻意不含一次性代碼**（代碼只交給瀏覽器，不進 Claude 對話與日誌）；`pairedWebDevices` 為 0 代表還沒有網頁配對，網頁會領不到草稿。（2026-11-18 實作時補：IM 草稿原寫 `{ opened, url }` 含代碼，改為不含，是為了不讓一次性代碼留在對話紀錄。）MCP 工具名稱用 snake_case；MCP-Server 端各加一個工具定義，並補上註解（`title`、`readOnlyHint`）。
 
 ## 2. 功能區按鈕位置
 
@@ -84,6 +84,8 @@ Alex 2026-11-18 對 IM 規格 §26 的六題給了答案，外掛端照做、不
 | `draftMinutes` | 10 | 草稿保存分鐘（1–60） |
 | `captureMaxEdgePx` | 2000 | 截圖長邊像素（400–4000） |
 | `captureEnabled` | true | 設為 false 時建立議題不截圖（預填頁顯示「沒有截圖」） |
+
+新增的錯誤碼（只出現在功能區按鈕／Claude 指令路徑，不經瀏覽器）：`im_url_missing`（沒有 IM 網址）、`im_url_invalid`（網址不是 https／本機 http）。
 
 - 版本不同時要不要擋、要不要只開到圖紙，由**網頁專案設定**決定，經 `revisionPolicy` 參數送進來；外掛不自己決定。
 - 圖號、視圖名稱等可顯示欄位全由網頁端專案設定控制；外掛只回傳事實，不做可見度判斷。

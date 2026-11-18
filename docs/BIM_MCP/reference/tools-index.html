@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script>try{if(localStorage.getItem("bim-theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
-<title>Tools 索引（276 個）· BIM_MCP</title>
-<meta property="og:title" content="RevitMCP Tools 索引：276 個執行層工具">
-<meta property="og:description" content="276 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
+<title>Tools 索引（279 個）· BIM_MCP</title>
+<meta property="og:title" content="RevitMCP Tools 索引：279 個執行層工具">
+<meta property="og:description" content="279 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@300;400;600;700;800&display=swap">
@@ -88,17 +88,17 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">276 個</span></div>
+  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">279 個</span></div>
   <h1 class="bim-hero-title">Tools · <span class="accent">執行層</span><br>模型上真正被動到的那一下</h1>
-  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 276 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
+  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 279 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
 </header>
 
 <section class="bim-section">
   <h2 class="bim-section-title">先看懂三個標記</h2>
   <p>每張卡右上角的標記來自 <code>annotations.ts</code> 集中產生的 <code>annotations</code>，不是這一頁另外標的。</p>
   <ul>
-    <li><strong>唯讀</strong>（102 個）——設計上不寫入 Revit 模型（<code>export_*</code> 與 <code>capture_view_image</code> 會另外寫出外部或暫存檔案）。</li>
-    <li><strong>會寫入</strong>（170 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
+    <li><strong>唯讀</strong>（104 個）——設計上不寫入 Revit 模型（<code>export_*</code> 與 <code>capture_view_image</code> 會另外寫出外部或暫存檔案）。</li>
+    <li><strong>會寫入</strong>（171 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
     <li><strong>破壞性</strong>（4 個）——刪除或不可逆地取代既有內容：<code>curate_mep_sizes · dedup_detail_elements_in_view · delete_element · import_excel_to_drafting_views</code>。這份名單是白名單，程式碼裡多一個就會被閘門擋下。</li>
   </ul>
   <p style="color:var(--text-muted);font-size:13px;">「唯讀」是工具作者的宣告，不是執行時的沙箱。它告訴你這支工具<em>設計上</em>不寫入，不是保證它<em>不可能</em>寫入。</p>
@@ -111,21 +111,21 @@
       <tr><th>類</th><th>名稱</th><th class="num">數量</th><th>涵蓋</th></tr>
     </thead>
     <tbody>
-        <tr><td><strong><a href="#cat-A">A</a></strong></td><td>基礎與查詢</td><td class="num">33</td><td>讀模型、找元素、問參數，也含少數寫入前置（載入共用參數）。</td></tr>
+        <tr><td><strong><a href="#cat-A">A</a></strong></td><td>基礎與查詢</td><td class="num">35</td><td>讀模型、找元素、問參數，也含少數寫入前置（載入共用參數）。</td></tr>
         <tr><td><strong><a href="#cat-B">B</a></strong></td><td>建模與構件</td><td class="num">75</td><td>產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</td></tr>
         <tr><td><strong><a href="#cat-C">C</a></strong></td><td>房間與空間</td><td class="num">19</td><td>房間邊界、編號、面積、走廊、施工架周長。</td></tr>
         <tr><td><strong><a href="#cat-D">D</a></strong></td><td>MEP 與碰撞</td><td class="num">25</td><td>風管系統、空間代表點、套管開孔、CSA 干涉、梁下淨高與管線淨距檢討。</td></tr>
         <tr><td><strong><a href="#cat-E">E</a></strong></td><td>法規檢核</td><td class="num">13</td><td>排煙、偵煙、樓梯——有法源、有判準的檢查。</td></tr>
-        <tr><td><strong><a href="#cat-F">F</a></strong></td><td>視圖與圖紙</td><td class="num">52</td><td>建視圖、裁剪、圖紙配置、視埠定位、跨專案複製。</td></tr>
+        <tr><td><strong><a href="#cat-F">F</a></strong></td><td>視圖與圖紙</td><td class="num">53</td><td>建視圖、裁剪、圖紙配置、視埠定位、跨專案複製。</td></tr>
         <tr><td><strong><a href="#cat-G">G</a></strong></td><td>標註與詳圖</td><td class="num">28</td><td>尺寸、詳圖元件、填充區域、圖例、明細表、文字。</td></tr>
         <tr><td><strong><a href="#cat-H">H</a></strong></td><td>視覺化</td><td class="num">31</td><td>上色、覆寫、隱藏顯示，也含材質與 Type 建構。</td></tr>
     </tbody>
   </table>
-  <p style="color:var(--text-muted);font-size:13px;">分類是 56 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 276。這一頁由 <code>scripts/gen-tools-index.py</code> 從 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
+  <p style="color:var(--text-muted);font-size:13px;">分類是 58 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 279。這一頁由 <code>scripts/gen-tools-index.py</code> 從 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
 </section>
 
 <section class="bim-section" data-search-root>
-  <h2 class="bim-section-title">276 個工具 · 依用途分組</h2>
+  <h2 class="bim-section-title">279 個工具 · 依用途分組</h2>
   <div class="bim-search">
     <label for="tool-search">搜尋工具名稱或描述</label>
     <input type="search" id="tool-search" data-search-input placeholder="例如：採光、牆、sheet">
@@ -139,7 +139,7 @@
   </div>
 
     <div data-search-group="A">
-    <h3 id="cat-A" class="cat-header">A · 基礎與查詢（33 個）</h3>
+    <h3 id="cat-A" class="cat-header">A · 基礎與查詢（35 個）</h3>
     <p class="cat-blurb">讀模型、找元素、問參數，多數工作的第一步；也包含少數寫入型前置工具（如載入共用參數檔 load_shared_parameters）。</p>
     </div>
     <div class="tool-card" id="adjust_section_datums" data-tool="adjust_section_datums" data-search-item data-effect="write" data-search-in="A">
@@ -380,6 +380,26 @@
       </div>
       <div>
         <div class="tool-desc">開啟本機 RVT。預設 detach=true，保留工作集並啟用文件；不儲存原檔。工作共享中央檔（IsCentral）搭配 detach=false 一律拒絕；detach=false 不會自動退回分離模式，失敗會明確回報。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="open_element_issues" data-tool="open_element_issues" data-search-item data-effect="readonly" data-search-in="A">
+      <div>
+        <div class="tool-name">open_element_issues</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">revit-link-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">查 Issue Manager 上與 Revit 目前選取元素相關的議題（用預設瀏覽器開啟「這個元素有哪些議題」頁）。需要 Revit 已開專案且至少選了一個元素；需要使用者已在 Revit 啟動 MCP 服務並完成網頁配對。唯讀，不修改 Revit 模型。觸發條件：使用者說「這個元素有哪些議題」「W-12 牆有沒有人開過議題」「看一下這個元件的議題」。回傳 { opened, kind, url, elementCount, pairedWebDevices }。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="open_issue_draft" data-tool="open_issue_draft" data-search-item data-effect="readonly" data-search-in="A">
+      <div>
+        <div class="tool-name">open_issue_draft</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">revit-link-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">把 Revit 目前選取的元素與目前視圖截圖，帶到 Issue Manager 的「建立議題」預填頁（用預設瀏覽器開啟；使用者在網頁按送出才會真的建立議題，關掉頁面就全部丟棄）。需要 Revit 已開專案且至少選了一個元素；需要使用者已在 Revit 啟動 MCP 服務並完成網頁配對。唯讀，不修改 Revit 模型。觸發條件：使用者說「幫我建立議題」「把這個元件開成議題」「這個牆有問題，開個議題」「在 IM 建立議題」。回傳 { opened, kind, url, elementCount, pairedWebDevices }；pairedWebDevices 為 0 代表還沒有網頁配對，網頁會領不到草稿。</div>
       </div>
     </div>
     <div class="tool-card" id="query_elements" data-tool="query_elements" data-search-item data-effect="readonly" data-search-in="A">
@@ -1812,7 +1832,7 @@
       </div>
     </div>
     <div data-search-group="F">
-    <h3 id="cat-F" class="cat-header">F · 視圖與圖紙（52 個）</h3>
+    <h3 id="cat-F" class="cat-header">F · 視圖與圖紙（53 個）</h3>
     <p class="cat-blurb">建視圖、裁剪、圖紙配置、視埠定位、跨專案複製。</p>
     </div>
     <div class="tool-card" id="align_titleblocks_on_sheets" data-tool="align_titleblocks_on_sheets" data-search-item data-effect="write" data-search-in="F">
@@ -2023,6 +2043,16 @@
       </div>
       <div>
         <div class="tool-desc">把主模型及每個設計選項分別匯出 GLB，避免跨選項集組合爆炸；保留逐元素 extras 並加 designOption 穩定 UniqueId。暫存視圖與設定在 TransactionGroup RollBack 後復原；API 無法可靠顯示選項時明確失敗。產生 design_options.json 與 design_options_export.json，再用 merge-option-glbs 合併。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="export_family_previews" data-tool="export_family_previews" data-search-item data-effect="write" data-search-in="F">
+      <div>
+        <div class="tool-name">export_family_previews</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">family-preview-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">匯出 Revit 族群（.rfa）每個類型的預覽圖：平面、立面、3D（Realistic）各一張 PNG，並在 outputDir 寫 manifest.json。族群以獨立族群文件開啟並於結束後不存檔關閉，不會載入或修改目前專案。單一類型或單一族群失敗只記錄並繼續。適用於在網頁上檢視植栽等族群在 Revit 內的實際樣貌。</div>
       </div>
     </div>
     <div class="tool-card" id="export_model_gltf" data-tool="export_model_gltf" data-search-item data-effect="write" data-search-in="F">
@@ -2947,7 +2977,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / tools-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">276 個 MCP 工具完整索引，由 scripts/gen-tools-index.py 從 registerRevitTools() 產生；唯讀/寫入標註由 annotations.ts 集中產生。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">279 個 MCP 工具完整索引，由 scripts/gen-tools-index.py 從 registerRevitTools() 產生；唯讀/寫入標註由 annotations.ts 集中產生。</p>
 </footer>
 
 <script src="../shared.js"></script>

@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+### ✨ Revit 跳轉：網頁議題 ↔ Revit 元件／視圖／圖紙（imrevitaddinjump，D-015，2026-11-18）
+
+- 瀏覽器（已配對）新增四個**唯讀**指令：`viewsync_open_link`（切視圖、選取元件；元素 UniqueId → ElementId 提示 → 視圖 → 圖紙退化、`hidden_in_view`、模型版本不同回 `modelRevisionDiffers` 仍跳轉、`revisionPolicy` continue／block／sheet_only）、`viewsync_get_selection`、`viewsync_capture_view`（≤5 MB 自動降解析度）、`viewsync_draft_take`（取一次就刪）。`viewsync_draft_put` 只供外掛內部、不在瀏覽器白名單。`viewsync_status` 的 `model` 多 `revision`（存檔次數:版本 GUID）。
+- 功能區「Issue Manager」面板新增兩顆按鈕「在 IM 建立議題」「這個元素有哪些議題」（`TransactionMode.ReadOnly`）；Claude／MCP 新增 `open_issue_draft`、`open_element_issues`，兩個入口共用 `OpenIssueDraft`。MCP 工具數 276 → 279（含併入的 `export_family_previews`），文件計數與 tools-index／skills-index 依原始碼重算並重產。
+- 外掛端設定檔 `%APPDATA%\RevitMCP\revit-link.json`（IM 網址、草稿分鐘、截圖長邊、是否截圖；沒有檔案就全用預設）。草稿只放記憶體、10 分鐘過期、代碼 ≥128 位元；Claude 回傳的網址不含代碼。
+- 修正建置：Release.R25／R26（.NET 8）補 `System.Drawing.Common` 套件，之前 `RevitGltfExportContext.cs` 的縮圖程式碼在 R25 編不過。
+- 測試：新增 `RevitLinkTests`（草稿暫存、白名單、設定與 IM 網址解析、唯讀原始碼掃描）；MCP.Tests 全部 837 通過（2 略過）。Revit 實機驗收見 docs/reports/2026-11-18_imrevitaddinjump.md。
+
 ### 新增 — export_family_previews：族群各類型的 Revit 平面／立面／3D 預覽圖（2026-11-03，併自 grading-workflow-v2）
 
 - 新工具 `export_family_previews`：以獨立族群文件開啟 .rfa（不載入、不修改目前專案），逐類型匯出平面、前立面、3D 擬真 PNG 與 manifest.json，結束不存檔關閉；單筆失敗只記錄。

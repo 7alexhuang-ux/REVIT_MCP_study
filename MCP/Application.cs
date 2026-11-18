@@ -130,6 +130,23 @@ namespace RevitMCP
                         "RevitMCP.Commands.UploadToIssueManagerCommand");
                     uploadButtonData.ToolTip = Core.IssueManager.Strings.ButtonTooltip;
                     issueManagerPanel.AddItem(uploadButtonData);
+
+                    // Revit 跳轉（docs/REVIT_LINK.md、ADR D-015）：反向入口，與 Claude 指令（open_issue_draft、open_element_issues）共用 OpenIssueDraft。
+                    PushButtonData createIssueButtonData = new PushButtonData(
+                        "RevitLinkCreateIssue",
+                        Core.ViewSync.RevitLinkStrings.ButtonCreateText,
+                        assemblyPath,
+                        "RevitMCP.Commands.CreateIssueFromRevitCommand");
+                    createIssueButtonData.ToolTip = Core.ViewSync.RevitLinkStrings.ButtonCreateTooltip;
+                    issueManagerPanel.AddItem(createIssueButtonData);
+
+                    PushButtonData elementIssuesButtonData = new PushButtonData(
+                        "RevitLinkElementIssues",
+                        Core.ViewSync.RevitLinkStrings.ButtonLookupText,
+                        assemblyPath,
+                        "RevitMCP.Commands.ElementIssuesFromRevitCommand");
+                    elementIssuesButtonData.ToolTip = Core.ViewSync.RevitLinkStrings.ButtonLookupTooltip;
+                    issueManagerPanel.AddItem(elementIssuesButtonData);
                 }
                 catch (Exception ex)
                 {

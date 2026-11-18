@@ -103,6 +103,9 @@ export const OVERRIDE: Record<string, ClassificationHints> = {
     import_excel_to_drafting_views: { readOnlyHint: false, destructiveHint: true },
     // 讀模型、寫系統暫存圖檔（預設用完即刪），不異動 Revit 模型 → 同 export_* 歸類為唯讀
     capture_view_image: { readOnlyHint: true, destructiveHint: false },
+    // Revit 跳轉反向入口（D-015）：讀選取與視圖截圖、開瀏覽器，不異動 Revit 模型（C# handler 無 Transaction；TransactionMode.ReadOnly 的功能區按鈕共用同一段）
+    open_issue_draft: { readOnlyHint: true, destructiveHint: false },
+    open_element_issues: { readOnlyHint: true, destructiveHint: false },
 
     // ── issue #137：前綴規則（analyze_ / check_ / get_）判為唯讀，但這些工具的 C# handler
     //    在「預設參數」下就會開 Transaction 並 Commit。前綴本身仍由其他約 80 支工具倚賴，

@@ -52,5 +52,7 @@
     <Compile Include="..\MCP\Core\ViewSync\ExportOriginRegistry.cs" Link="Core\ViewSync\ExportOriginRegistry.cs" />
     <Compile Include="..\MCP\Core\ViewSync\ViewSyncRequest.cs" Link="Core\ViewSync\ViewSyncRequest.cs" />
     <Compile Include="..\MCP\Core\ViewSync\CameraChangeMessage.cs" Link="Core\ViewSync\CameraChangeMessage.cs" />
+    <Compile Include="..\MCP\Core\ViewSync\RevitLinkDraftStore.cs" Link="Core\ViewSync\RevitLinkDraftStore.cs" />
+    <Compile Include="..\MCP\Core\ViewSync\RevitLinkSettings.cs" Link="Core\ViewSync\RevitLinkSettings.cs" />
   </ItemGroup>
 </Project>
