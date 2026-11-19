@@ -36,8 +36,12 @@ namespace RevitMCP.Core.Grading
         private const int MaximumDiscretizedPointCount = 100000;
         private const double ChordLengthToleranceFactor = 1e-9;
 
-        // 底面法向量 Z 分量上限：-cos(15°)。允許至約 15 度（約 1:3.7）的斜板底面，仍排除側面與頂面。
-        private const double BottomFaceNormalZMaximum = -0.965925826289068;
+        // 朝下面判定：法向量 Z 分量 < -0.1（面與水平夾角 < 約 84°）。涵蓋斜板、改過形狀的板的各個斜面，
+        // 仍排除垂直側面（Z≈0）與頂面（Z>0）。舊值 -cos(15°) 會漏掉較陡的斜面。
+        private const double BottomFaceNormalZMaximum = -0.1;
+
+        // 投影面積小於此值（平方英呎，約 1 cm²）的朝下面視為退化面，略過。
+        private const double MinimumBottomFaceAreaSquareFeet = 1e-6;
 
         // 銜接帶控制環密度：直邊最大弦長 1 m、凸角圓弧最大角步距 15°（貼合距離場坡腳、消除三角網過衝）。
         private static readonly double RingMaxChordFeet =
@@ -428,10 +432,9 @@ namespace RevitMCP.Core.Grading
 
             var xyTolerance = UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters);
             var elevationTolerance = UnitUtils.ConvertToInternalUnits(2.0, UnitTypeId.Millimeters);
-            using (_timeline.Measure("重疊衝突檢查"))
-            {
-                EnsureNoConflictingOverlaps(footprints, xyTolerance, elevationTolerance);
-            }
+            // 一片樓板可有多個朝下面：攤平成「一面一個 footprint」（洞已隨各面帶入）。
+            // 投影重疊不再視為衝突——同一點多塊板底取最低（最深）者（頂點分類見下方）。
+            footprints = footprints.SelectMany(footprint => footprint.SplitRegions()).ToList();
 
             // 連續放坡（使用者裁決 2026-07-08：壓蓋板緣不要高差）：放坡帶內「會被覆蓋的外露非控制樓板」
             // 自動納入控制樓板——地形沿板底通過、於板緣接續放坡；投影重疊衝突或底面抽取失敗者
@@ -485,7 +488,8 @@ namespace RevitMCP.Core.Grading
             foreach (var footprint in footprints)
             {
                 var terrainHitCount = 0;
-                foreach (var boundaryPoint in footprint.OuterLoop)
+                // 外框與洞的邊界點都要取樣：洞邊緣也是板緣，網格需在此留稜線。
+                foreach (var boundaryPoint in footprint.AllLoops().SelectMany(loop => loop))
                 {
                     var terrainZ = IntersectTerrainTopZ(solids, boundaryPoint, rayBottomZ, rayTopZ);
                     if (!terrainZ.HasValue)
@@ -605,26 +609,12 @@ namespace RevitMCP.Core.Grading
             for (var positionIndex = 0; positionIndex < allPositions.Count; positionIndex++)
             {
                 var position = allPositions[positionIndex];
-                double? targetZ = null;
-                foreach (var footprint in footprints)
+                // 頂點正下方有板底（板投影內、不在洞內）→ 目標高程取所有覆蓋板底中最低者；
+                // 多塊樓板重疊（例如地下室板嵌在一樓板的開口內、或上下疊板）不再報錯。
+                if (FootprintCoverage.TryLowestBottomZ(
+                    footprints, ToPoint2D(position), xyTolerance, out var lowestBottomZ))
                 {
-                    if (!Polygon2D.Contains(footprint.OuterLoop, ToPoint2D(position), xyTolerance))
-                    {
-                        continue;
-                    }
-
-                    var bottomZ = footprint.BottomElevationAt(position.X, position.Y);
-                    if (targetZ.HasValue && Math.Abs(targetZ.Value - bottomZ) > elevationTolerance)
-                    {
-                        throw new InvalidOperationException("樓板投影重疊且目標高程衝突，已中止整地。");
-                    }
-
-                    targetZ = targetZ ?? bottomZ;
-                }
-
-                if (targetZ.HasValue)
-                {
-                    targets.Add(new VertexTarget(position, targetZ.Value));
+                    targets.Add(new VertexTarget(position, lowestBottomZ));
                     assignedIndices.Add(positionIndex);
                 }
             }
@@ -661,16 +651,19 @@ namespace RevitMCP.Core.Grading
                     var nearestFootprintIndex = -1;
                     var nearestDistance = double.MaxValue;
                     var nearestBoundary = default(Point2D);
+                    var nearestOnHole = false;
                     for (var footprintIndex = 0; footprintIndex < footprints.Count; footprintIndex++)
                     {
                         var footprint = footprints[footprintIndex];
-                        var (boundaryPoint, distance) = Polygon2D.NearestBoundaryPoint(footprint.OuterLoop, sample);
+                        // 最近邊界含洞邊：落在未被其他板填住的開口內的頂點，以洞緣為放坡起點。
+                        var (boundaryPoint, distance, onHole) = footprint.NearestBoundary(sample);
                         if (distance < nearestDistance)
                         {
                             nearestDistance = distance;
                             nearestFootprint = footprint;
                             nearestFootprintIndex = footprintIndex;
                             nearestBoundary = boundaryPoint;
+                            nearestOnHole = onHole;
                         }
                     }
 
@@ -682,7 +675,8 @@ namespace RevitMCP.Core.Grading
                     var boundaryBottomZ = nearestFootprint.BottomElevationAt(nearestBoundary.X, nearestBoundary.Y);
                     var localTerrainZ = position.Z;
                     // V3-S2：距離場坡率取「最近邊界位置」生效值（逐邊政策＋角點混坡）。
-                    var fieldRate = rateFields?[nearestFootprintIndex]?.RateAt(nearestBoundary)
+                    // 洞緣上的最近點不在外框邊上，逐邊政策坡率場不適用，改用預設坡率。
+                    var fieldRate = (nearestOnHole ? null : rateFields?[nearestFootprintIndex]?.RateAt(nearestBoundary))
                         ?? settings.RunPerRise;
                     var targetZ = settings.Mode == GradingMode.OffsetTransition
                         ? TransitionGeometry.OffsetTargetZ(
@@ -690,15 +684,14 @@ namespace RevitMCP.Core.Grading
                         : TransitionGeometry.SlopeTargetZ(
                             boundaryBottomZ, localTerrainZ, nearestDistance, fieldRate);
 
-                    // 不覆蓋政策：頂點落在外露非控制樓板投影內 → 目標壓至板底以下。
+                    // 不覆蓋政策：頂點落在外露非控制樓板投影內（洞內不算）→ 目標壓至板底以下。
                     foreach (var capFloor in capFloorFootprints)
                     {
-                        if (!Polygon2D.Contains(capFloor.OuterLoop, sample, xyTolerance))
+                        if (!capFloor.TryLowestBottomZ(sample, xyTolerance, out var floorBottomZ))
                         {
                             continue;
                         }
 
-                        var floorBottomZ = capFloor.BottomElevationAt(sample.X, sample.Y);
                         var capped = FloorBurialCheck.CapTargetZ(
                             targetZ, localTerrainZ, floorBottomZ, capTolerance);
                         if (capped < targetZ)
@@ -799,7 +792,7 @@ namespace RevitMCP.Core.Grading
 
             // 方案指標：最大挖深/填高取自控制點原高程與目標高程差；
             // 擾動面積 = 樓板投影面積（精確）＋銜接帶外圈面積（近似，圈點缺段時取樣不全）。
-            var disturbedArea = footprints.Sum(fp => Polygon2D.Area(fp.OuterLoop));
+            var disturbedArea = footprints.Sum(fp => fp.OwnRegionArea());
             var disturbedAreaIsApproximate = false;
             if (settings.Mode != GradingMode.FootprintOnly && transitionRings != null)
             {
@@ -846,56 +839,6 @@ namespace RevitMCP.Core.Grading
         // 頂點在 AddPoints 或重新生成後可能有極小的 XY 位移，比對採 10 mm 容差。
         private static double VertexMatchTolerance =>
             UnitUtils.ConvertToInternalUnits(10.0, UnitTypeId.Millimeters);
-
-        private static void EnsureNoConflictingOverlaps(
-            IReadOnlyList<FloorFootprint> footprints,
-            double xyTolerance,
-            double elevationTolerance)
-        {
-            for (var firstIndex = 0; firstIndex < footprints.Count; firstIndex++)
-            {
-                for (var secondIndex = firstIndex + 1; secondIndex < footprints.Count; secondIndex++)
-                {
-                    var first = footprints[firstIndex];
-                    var second = footprints[secondIndex];
-                    if (!Polygon2D.Overlaps(first.OuterLoop, second.OuterLoop, xyTolerance))
-                    {
-                        continue;
-                    }
-
-                    if (HasConflictingElevation(first, second, xyTolerance, elevationTolerance)
-                        || HasConflictingElevation(second, first, xyTolerance, elevationTolerance))
-                    {
-                        throw new InvalidOperationException(
-                            $"樓板 ID {first.FloorId} 與 {second.FloorId} 的投影重疊且底面高程不同，請先處理衝突。");
-                    }
-                }
-            }
-        }
-
-        private static bool HasConflictingElevation(
-            FloorFootprint sampled,
-            FloorFootprint other,
-            double xyTolerance,
-            double elevationTolerance)
-        {
-            foreach (var point in sampled.OuterLoop)
-            {
-                if (!Polygon2D.Contains(other.OuterLoop, point, xyTolerance))
-                {
-                    continue;
-                }
-
-                var sampledZ = sampled.BottomElevationAt(point.X, point.Y);
-                var otherZ = other.BottomElevationAt(point.X, point.Y);
-                if (Math.Abs(sampledZ - otherZ) > elevationTolerance)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
 
         internal static IReadOnlyList<Solid> CollectSolids(Element element)
         {
@@ -1072,9 +1015,9 @@ namespace RevitMCP.Core.Grading
             }
 
             var matchTolerance = VertexMatchTolerance;
-            foreach (var footprint in footprints)
+            // 外框與洞緣都刻成網格稜線（洞緣也是板緣）。
+            foreach (var loop in footprints.SelectMany(footprint => footprint.AllLoops()))
             {
-                var loop = footprint.OuterLoop;
                 for (var index = 0; index < loop.Count; index++)
                 {
                     var startVertex = FindNearestVertex(vertices, loop[index], matchTolerance);
@@ -1271,7 +1214,7 @@ namespace RevitMCP.Core.Grading
                     var ringXY = new Point2D(
                         boundaryPoint.X + (direction.X * extension),
                         boundaryPoint.Y + (direction.Y * extension));
-                    if (footprints.Any(other => Polygon2D.Contains(other.OuterLoop, ringXY, xyTolerance)))
+                    if (footprints.Any(other => other.CoversXY(ringXY, xyTolerance)))
                     {
                         breakTracker.MarkSkipped();
                         continue; // 凹角或鄰板：圈點落回投影內時跳過，缺段由鄰板邊界摺線把關。
@@ -1308,7 +1251,7 @@ namespace RevitMCP.Core.Grading
                         var fillXY = new Point2D(
                             boundaryPoint.X + (direction.X * fillDistance),
                             boundaryPoint.Y + (direction.Y * fillDistance));
-                        if (footprints.Any(other => Polygon2D.Contains(other.OuterLoop, fillXY, xyTolerance)))
+                        if (footprints.Any(other => other.CoversXY(fillXY, xyTolerance)))
                         {
                             continue;
                         }
@@ -1404,7 +1347,7 @@ namespace RevitMCP.Core.Grading
             var minY = double.MaxValue;
             var maxX = double.MinValue;
             var maxY = double.MinValue;
-            foreach (var footprint in footprints)
+            foreach (var footprint in footprints.SelectMany(fp => fp.SplitRegions()))
             {
                 foreach (var point in footprint.OuterLoop)
                 {
@@ -1470,7 +1413,8 @@ namespace RevitMCP.Core.Grading
                         for (var y = extent.MinY + (sampleStep / 2); y <= extent.MaxY; y += sampleStep)
                         {
                             var sample = new Point2D(x, y);
-                            if (!Polygon2D.Contains(candidate.OuterLoop, sample, xyTolerance))
+                            // 覆蓋判定含洞、含候選板的全部朝下面；落在洞內的取樣點不屬該板。
+                            if (!candidate.TryLowestBottomZ(sample, xyTolerance, out var candidateBottomZ))
                             {
                                 continue;
                             }
@@ -1485,15 +1429,16 @@ namespace RevitMCP.Core.Grading
                             var nearestDistance = double.MaxValue;
                             var nearestIndex = -1;
                             var nearestBoundary = default(Point2D);
+                            var nearestOnHole = false;
                             for (var index = 0; index < working.Count; index++)
                             {
-                                var (boundaryPoint, distance) = Polygon2D.NearestBoundaryPoint(
-                                    working[index].OuterLoop, sample);
+                                var (boundaryPoint, distance, onHole) = working[index].NearestBoundary(sample);
                                 if (distance < nearestDistance)
                                 {
                                     nearestDistance = distance;
                                     nearestIndex = index;
                                     nearestBoundary = boundaryPoint;
+                                    nearestOnHole = onHole;
                                 }
                             }
 
@@ -1504,7 +1449,7 @@ namespace RevitMCP.Core.Grading
 
                             var boundaryBottomZ = working[nearestIndex]
                                 .BottomElevationAt(nearestBoundary.X, nearestBoundary.Y);
-                            var fieldRate = rateFields?[nearestIndex]?.RateAt(nearestBoundary)
+                            var fieldRate = (nearestOnHole ? null : rateFields?[nearestIndex]?.RateAt(nearestBoundary))
                                 ?? settings.RunPerRise;
                             var fieldTarget = settings.Mode == GradingMode.OffsetTransition
                                 ? TransitionGeometry.OffsetTargetZ(
@@ -1512,7 +1457,7 @@ namespace RevitMCP.Core.Grading
                                 : TransitionGeometry.SlopeTargetZ(
                                     boundaryBottomZ, originalZ.Value, nearestDistance, fieldRate);
                             samples.Add((
-                                candidate.BottomElevationAt(sample.X, sample.Y),
+                                candidateBottomZ,
                                 originalZ.Value,
                                 fieldTarget));
                         }
@@ -1524,12 +1469,12 @@ namespace RevitMCP.Core.Grading
                     }
 
                     // 與既有控制板投影重疊且板底高程衝突 → 無法納入，退回壓蓋保護（共邊等高不算衝突）。
-                    var trial = new List<FloorFootprint>(working) { candidate };
-                    try
-                    {
-                        EnsureNoConflictingOverlaps(trial, xyTolerance, elevationTolerance);
-                    }
-                    catch (InvalidOperationException)
+                    // 判斷只用於「要不要自動納入」：整地主流程的重疊已改取最低板底、不再報錯，
+                    // 但自動納入的非控制板若與控制板疊在同一處又不等高，納入會改變使用者沒選的板的處理，故仍退回壓蓋。
+                    var candidateRegions = candidate.SplitRegions();
+                    if (candidateRegions.Any(region => working.Any(existing =>
+                        FootprintCoverage.HasElevationConflict(
+                            existing, region, xyTolerance, elevationTolerance))))
                     {
                         warnings.Add(
                             $"非控制樓板 ID {candidate.FloorId} 會被放坡覆蓋，但與控制樓板投影重疊且底面高程衝突，"
@@ -1537,7 +1482,7 @@ namespace RevitMCP.Core.Grading
                         continue;
                     }
 
-                    working.Add(candidate);
+                    working.AddRange(candidateRegions);
                     added = true;
                     warnings.Add(
                         $"非控制樓板 ID {candidate.FloorId} 會被放坡覆蓋，已自動納入控制樓板連續放坡"
@@ -1751,13 +1696,35 @@ namespace RevitMCP.Core.Grading
                     for (var y = minY - bandWidth + (sampleStep / 2); y <= maxY + bandWidth; y += sampleStep)
                     {
                         var sample = new Point2D(x, y);
-                        if (footprints.Any(any => Polygon2D.Contains(any.OuterLoop, sample, xyTolerance)))
+                        if (footprints.Any(any => any.CoversXY(sample, xyTolerance)))
                         {
                             continue; // 投影內由既有 2 mm 抽樣把關。
                         }
 
-                        var (boundaryPoint, distance) = Polygon2D.NearestBoundaryPoint(loop, sample);
+                        var (boundaryPoint, distance, onHole) = footprint.NearestBoundary(sample);
                         if (distance < boundaryMargin || distance > bandWidth - boundaryMargin)
+                        {
+                            continue;
+                        }
+
+                        // 頂點分類只認「最近邊界」所屬的那一面（同距取序號小者）；驗收也只檢查該面，
+                        // 避免同一樓板的多個朝下面、或相鄰階差板，以不是實際施放者的板底誤判包絡。
+                        var isNearestFootprint = true;
+                        for (var otherIndex = 0; otherIndex < footprints.Count && isNearestFootprint; otherIndex++)
+                        {
+                            if (otherIndex == footprintIndex)
+                            {
+                                continue;
+                            }
+
+                            var otherDistance = footprints[otherIndex].NearestBoundary(sample).Distance;
+                            if (otherIndex < footprintIndex ? otherDistance <= distance : otherDistance < distance)
+                            {
+                                isNearestFootprint = false;
+                            }
+                        }
+
+                        if (!isNearestFootprint)
                         {
                             continue;
                         }
@@ -1774,7 +1741,7 @@ namespace RevitMCP.Core.Grading
                         {
                             // V3-S2：貼合判定用該取樣點最近邊界位置的生效坡率（逐邊政策＋角點混坡），
                             // 與放坡寫入端同一個坡率場；用預設坡率會在例外邊誤判帶內外。
-                            var fieldRate = rateFields?[footprintIndex]?.RateAt(boundaryPoint)
+                            var fieldRate = (onHole ? null : rateFields?[footprintIndex]?.RateAt(boundaryPoint))
                                 ?? settings.RunPerRise;
                             var targetZ = TransitionGeometry.SlopeTargetZ(
                                 boundaryBottomZ, terrainZ.Value, distance, fieldRate);
@@ -1836,12 +1803,25 @@ namespace RevitMCP.Core.Grading
                     for (var y = minY + sampleStep / 2; y <= maxY; y += sampleStep)
                     {
                         var sample = new Point2D(x, y);
-                        if (!Polygon2D.Contains(loop, sample, xyTolerance))
+                        // 洞內的點不屬該板；洞緣（含洞邊界 margin 內）與外框一樣略過。
+                        if (!footprint.CoversOwnRegion(sample, xyTolerance))
                         {
                             continue;
                         }
 
-                        if (Polygon2D.DistanceToBoundary(loop, sample) < boundaryMargin)
+                        // 多塊板重疊時，任何覆蓋此點的板的邊界 margin 內都略過（邊緣處網格取決於鄰近板緣）。
+                        var nearAnyBoundary = false;
+                        foreach (var other in footprints)
+                        {
+                            if (other.CoversOwnRegion(sample, xyTolerance)
+                                && other.NearestBoundary(sample).Distance < boundaryMargin)
+                            {
+                                nearAnyBoundary = true;
+                                break;
+                            }
+                        }
+
+                        if (nearAnyBoundary)
                         {
                             continue;
                         }
@@ -1853,7 +1833,12 @@ namespace RevitMCP.Core.Grading
                             continue;
                         }
 
-                        var bottomZ = footprint.BottomElevationAt(x, y);
+                        // 期望高程＝該點正下方所有板底的最低者（與頂點分類同一規則）。
+                        if (!FootprintCoverage.TryLowestBottomZ(footprints, sample, xyTolerance, out var bottomZ))
+                        {
+                            continue;
+                        }
+
                         if (Math.Abs(surfaceZ.Value - bottomZ) > elevationTolerance)
                         {
                             var deviationMillimeters = UnitUtils.ConvertFromInternalUnits(
@@ -1894,62 +1879,165 @@ namespace RevitMCP.Core.Grading
                 UnitUtils.ConvertFromInternalUnits(fill, UnitTypeId.CubicMeters));
         }
 
+        /// <summary>
+        /// 擷取樓板的板底投影：收集全部朝下面（含斜面、改過形狀的板的各個面、非平面面），
+        /// 每個面各一個區域（外框＋洞＋該面的板底高程函式）；面積最大者為主區域，其餘放 ExtraRegions。
+        /// 同一 (x,y) 被多個面覆蓋時，由 TryLowestBottomZ 取最低板底。
+        /// </summary>
         private static FloorFootprint ExtractBottomFootprint(Floor floor)
         {
+            var floorId = floor.Id.Value;
+            var bounds = floor.get_BoundingBox(null);
+            var zLow = (bounds?.Min.Z ?? -1000.0) - 1.0;
+            var zHigh = (bounds?.Max.Z ?? 1000.0) + 1.0;
+
+            var regions = new List<FloorFootprint>();
             var geometry = floor.get_Geometry(new Options());
-            var bottomFaces = new List<PlanarFace>();
             if (geometry != null)
             {
-                foreach (var geometryObject in geometry)
+                foreach (var solid in EnumerateSolids(geometry))
                 {
-                    if (!(geometryObject is Solid solid) || solid.Volume <= 0)
-                    {
-                        continue;
-                    }
-
                     foreach (Face face in solid.Faces)
                     {
-                        if (face is PlanarFace planarFace && planarFace.FaceNormal.Z < BottomFaceNormalZMaximum)
+                        if (!IsDownwardFace(face))
                         {
-                            bottomFaces.Add(planarFace);
+                            continue;
+                        }
+
+                        var region = TryBuildBottomRegion(floorId, face, zLow, zHigh);
+                        if (region != null)
+                        {
+                            regions.Add(region);
                         }
                     }
                 }
             }
 
-            if (bottomFaces.Count != 1)
+            if (regions.Count == 0)
             {
                 throw new InvalidOperationException(
-                    $"樓板 ID {floor.Id.Value} 沒有可用的單一平面底面");
+                    $"樓板 ID {floorId} 沒有可用的朝下底面");
             }
 
-            var bottomFace = bottomFaces[0];
-            var loops = bottomFace.GetEdgesAsCurveLoops();
+            var primary = regions.OrderByDescending(region => region.OwnRegionArea()).First();
+            primary.ExtraRegions = regions.Where(region => !ReferenceEquals(region, primary)).ToList();
+            return primary;
+        }
+
+        private static IEnumerable<Solid> EnumerateSolids(GeometryElement geometry)
+        {
+            foreach (var geometryObject in geometry)
+            {
+                if (geometryObject is Solid solid)
+                {
+                    if (solid.Volume > 0)
+                    {
+                        yield return solid;
+                    }
+                }
+                else if (geometryObject is GeometryInstance instance)
+                {
+                    var instanceGeometry = instance.GetInstanceGeometry();
+                    if (instanceGeometry == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (var nested in EnumerateSolids(instanceGeometry))
+                    {
+                        yield return nested;
+                    }
+                }
+            }
+        }
+
+        private static bool IsDownwardFace(Face face)
+        {
+            if (face is PlanarFace planarFace)
+            {
+                return planarFace.FaceNormal.Z < BottomFaceNormalZMaximum;
+            }
+
+            // 非平面面：以參數範圍中心的法向量判斷朝向。
+            var box = face.GetBoundingBox();
+            if (box == null)
+            {
+                return false;
+            }
+
+            var middle = new UV((box.Min.U + box.Max.U) / 2.0, (box.Min.V + box.Max.V) / 2.0);
+            return face.ComputeNormal(middle).Z < BottomFaceNormalZMaximum;
+        }
+
+        /// <summary>單一朝下面 → 區域（外框＝面積最大的環，其餘環為洞）；退化面回 null。</summary>
+        private static FloorFootprint TryBuildBottomRegion(long floorId, Face face, double zLow, double zHigh)
+        {
+            var loops = face.GetEdgesAsCurveLoops();
             if (loops == null || loops.Count == 0)
             {
-                throw new InvalidOperationException(
-                    $"樓板 ID {floor.Id.Value} 沒有可用的單一平面底面");
+                return null;
             }
 
-            var outerLoop = loops
+            var discretized = loops
                 .Select(DiscretizeLoop)
                 .Where(points => points.Count >= 3)
                 .OrderByDescending(points => Math.Abs(SignedArea(points)))
-                .FirstOrDefault();
-            if (outerLoop == null)
+                .ToList();
+            if (discretized.Count == 0
+                || Math.Abs(SignedArea(discretized[0])) < MinimumBottomFaceAreaSquareFeet)
             {
-                throw new InvalidOperationException(
-                    $"樓板 ID {floor.Id.Value} 沒有可用的單一平面底面");
+                return null;
             }
 
-            var origin = bottomFace.Origin;
-            var normal = bottomFace.FaceNormal;
             return new FloorFootprint
             {
-                FloorId = floor.Id.Value,
-                OuterLoop = outerLoop,
-                BottomElevationAt = (x, y) => origin.Z
-                    - ((normal.X * (x - origin.X) + normal.Y * (y - origin.Y)) / normal.Z)
+                FloorId = floorId,
+                OuterLoop = discretized[0],
+                Holes = discretized
+                    .Skip(1)
+                    .Where(points => Math.Abs(SignedArea(points)) >= MinimumBottomFaceAreaSquareFeet)
+                    .ToList(),
+                BottomElevationAt = BuildBottomElevationFunction(face, zLow, zHigh)
+            };
+        }
+
+        private static Func<double, double, double> BuildBottomElevationFunction(
+            Face face,
+            double zLow,
+            double zHigh)
+        {
+            if (face is PlanarFace planarFace)
+            {
+                var origin = planarFace.Origin;
+                var normal = planarFace.FaceNormal;
+                return (x, y) => FootprintCoverage.PlaneZ(
+                    origin.X, origin.Y, origin.Z, normal.X, normal.Y, normal.Z, x, y);
+            }
+
+            // 非平面面：垂直線與面求交取最低交點；求不到時退回最近點投影的 Z（邊界點可能剛好落在面外一點點）。
+            return (x, y) =>
+            {
+                var line = Line.CreateBound(new XYZ(x, y, zLow), new XYZ(x, y, zHigh));
+                if (face.Intersect(line, out var hits) == SetComparisonResult.Overlap && hits != null)
+                {
+                    var lowest = double.NaN;
+                    foreach (IntersectionResult hit in hits)
+                    {
+                        var z = hit.XYZPoint.Z;
+                        if (double.IsNaN(lowest) || z < lowest)
+                        {
+                            lowest = z;
+                        }
+                    }
+
+                    if (!double.IsNaN(lowest))
+                    {
+                        return lowest;
+                    }
+                }
+
+                var projection = face.Project(new XYZ(x, y, (zLow + zHigh) / 2.0));
+                return projection != null ? projection.XYZPoint.Z : double.NaN;
             };
         }
 

@@ -144,14 +144,278 @@ namespace RevitMCP.Core.Grading
         }
     }
 
+    /// <summary>
+    /// 樓板的一個「朝下面」投影區域：外框、內部開口（洞）與板底高程函式。
+    /// 一片樓板可有多個朝下面（斜板、改過形狀的板、板底有階差）：最大面放在本物件，
+    /// 其餘面放在 <see cref="ExtraRegions"/>；整地時以 <see cref="SplitRegions"/> 攤平成一面一個 footprint。
+    /// 洞不屬於該樓板——洞內的點不受該板控制；洞邊界上的點仍屬該板（板緣）。
+    /// </summary>
     public sealed class FloorFootprint
     {
         public long FloorId { get; set; }
         public IReadOnlyList<Point2D> OuterLoop { get; set; }
+
+        /// <summary>內部開口（洞）的環；null 或空＝無洞。</summary>
+        public IReadOnlyList<IReadOnlyList<Point2D>> Holes { get; set; }
+
         public Func<double, double, double> BottomElevationAt { get; set; }
 
         /// <summary>板的邊坡率政策（V3-S2；無政策＝null/空，放坡時全邊用預設坡率）。</summary>
         public IReadOnlyList<EdgeSlopePolicy> EdgePolicies { get; set; }
+
+        /// <summary>同一片樓板的其他朝下面（各為單一區域、無 ExtraRegions）；null 或空＝只有一個面。</summary>
+        public IReadOnlyList<FloorFootprint> ExtraRegions { get; set; }
+
+        private static readonly IReadOnlyList<IReadOnlyList<Point2D>> NoHoles = new IReadOnlyList<Point2D>[0];
+
+        public IReadOnlyList<IReadOnlyList<Point2D>> HoleLoops => Holes ?? NoHoles;
+
+        /// <summary>外框＋全部洞的環（外框在前）。</summary>
+        public IEnumerable<IReadOnlyList<Point2D>> AllLoops()
+        {
+            yield return OuterLoop;
+            foreach (var hole in HoleLoops)
+            {
+                yield return hole;
+            }
+        }
+
+        /// <summary>攤平：本面（不含 ExtraRegions）＋其他面，各自是單一區域的 footprint。</summary>
+        public IReadOnlyList<FloorFootprint> SplitRegions()
+        {
+            var result = new List<FloorFootprint>
+            {
+                new FloorFootprint
+                {
+                    FloorId = FloorId,
+                    OuterLoop = OuterLoop,
+                    Holes = Holes,
+                    BottomElevationAt = BottomElevationAt,
+                    EdgePolicies = EdgePolicies
+                }
+            };
+            if (ExtraRegions != null)
+            {
+                foreach (var extra in ExtraRegions)
+                {
+                    result.AddRange(extra.SplitRegions());
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>點是否落在「本面」的外框內且不在洞的內部（洞邊界與外框邊界都算板上）。不含 ExtraRegions。</summary>
+        public bool CoversOwnRegion(Point2D point, double tolerance)
+        {
+            if (!Polygon2D.Contains(OuterLoop, point, tolerance))
+            {
+                return false;
+            }
+
+            foreach (var hole in HoleLoops)
+            {
+                if (Polygon2D.Contains(hole, point, tolerance)
+                    && Polygon2D.DistanceToBoundary(hole, point) > Math.Abs(tolerance))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>點是否被本樓板任一朝下面覆蓋（含 ExtraRegions）。</summary>
+        public bool CoversXY(Point2D point, double tolerance)
+        {
+            if (CoversOwnRegion(point, tolerance))
+            {
+                return true;
+            }
+
+            if (ExtraRegions != null)
+            {
+                foreach (var extra in ExtraRegions)
+                {
+                    if (extra.CoversXY(point, tolerance))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>本樓板在該點正下方的最低板底高程（所有覆蓋該點的朝下面取最低）；無面覆蓋則回 false。</summary>
+        public bool TryLowestBottomZ(Point2D point, double tolerance, out double z)
+        {
+            z = 0;
+            var found = false;
+            if (CoversOwnRegion(point, tolerance) && BottomElevationAt != null)
+            {
+                var value = BottomElevationAt(point.X, point.Y);
+                if (!double.IsNaN(value) && !double.IsInfinity(value))
+                {
+                    z = value;
+                    found = true;
+                }
+            }
+
+            if (ExtraRegions != null)
+            {
+                foreach (var extra in ExtraRegions)
+                {
+                    if (extra.TryLowestBottomZ(point, tolerance, out var extraZ) && (!found || extraZ < z))
+                    {
+                        z = extraZ;
+                        found = true;
+                    }
+                }
+            }
+
+            return found;
+        }
+
+        /// <summary>本面最近邊界（外框或洞）；OnHole 表示最近邊界在洞上。不含 ExtraRegions。</summary>
+        public (Point2D Point, double Distance, bool OnHole) NearestBoundary(Point2D sample)
+        {
+            var (bestPoint, bestDistance) = Polygon2D.NearestBoundaryPoint(OuterLoop, sample);
+            var onHole = false;
+            foreach (var hole in HoleLoops)
+            {
+                if (hole == null || hole.Count < 2)
+                {
+                    continue;
+                }
+
+                var (holePoint, holeDistance) = Polygon2D.NearestBoundaryPoint(hole, sample);
+                if (holeDistance < bestDistance)
+                {
+                    bestPoint = holePoint;
+                    bestDistance = holeDistance;
+                    onHole = true;
+                }
+            }
+
+            return (bestPoint, bestDistance, onHole);
+        }
+
+        /// <summary>本面面積＝外框面積減洞面積。不含 ExtraRegions。</summary>
+        public double OwnRegionArea()
+        {
+            var area = Polygon2D.Area(OuterLoop);
+            foreach (var hole in HoleLoops)
+            {
+                if (hole != null && hole.Count >= 3)
+                {
+                    area -= Polygon2D.Area(hole);
+                }
+            }
+
+            return Math.Max(area, 0);
+        }
+    }
+
+    /// <summary>多片樓板的覆蓋查詢（純函式）。</summary>
+    public static class FootprintCoverage
+    {
+        /// <summary>
+        /// 點正下方所有樓板板底中最低（最深）者；洞內的點不受該板控制。
+        /// 多片樓板重疊時取最低板底，不視為衝突。無任何樓板覆蓋則回 false。
+        /// </summary>
+        public static bool TryLowestBottomZ(
+            IEnumerable<FloorFootprint> footprints,
+            Point2D point,
+            double tolerance,
+            out double z)
+        {
+            z = 0;
+            var found = false;
+            foreach (var footprint in footprints)
+            {
+                if (footprint.TryLowestBottomZ(point, tolerance, out var candidate)
+                    && (!found || candidate < z))
+                {
+                    z = candidate;
+                    found = true;
+                }
+            }
+
+            return found;
+        }
+
+        /// <summary>
+        /// 平面（過 origin、法向量 normal）在 (x,y) 處的 Z；斜板、改過形狀的板的各個平面面共用。
+        /// 法向量 Z 分量為零（垂直面）無法求解，回 NaN。
+        /// </summary>
+        public static double PlaneZ(
+            double originX, double originY, double originZ,
+            double normalX, double normalY, double normalZ,
+            double x, double y)
+        {
+            if (Math.Abs(normalZ) < 1e-12)
+            {
+                return double.NaN;
+            }
+
+            return originZ - (((normalX * (x - originX)) + (normalY * (y - originY))) / normalZ);
+        }
+
+        public static bool AnyCovers(IEnumerable<FloorFootprint> footprints, Point2D point, double tolerance)
+        {
+            foreach (var footprint in footprints)
+            {
+                if (footprint.CoversXY(point, tolerance))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 兩個單一區域是否「投影重疊且板底高程不同」（以 a 的外框頂點取樣 b 的覆蓋，反向亦同）。
+        /// 僅供自動納入鄰接樓板時判斷要不要納入；整地主流程重疊一律取最低板底，不再用此判斷報錯。
+        /// </summary>
+        public static bool HasElevationConflict(
+            FloorFootprint first,
+            FloorFootprint second,
+            double xyTolerance,
+            double elevationTolerance)
+        {
+            if (!Polygon2D.Overlaps(first.OuterLoop, second.OuterLoop, xyTolerance))
+            {
+                return false;
+            }
+
+            return SamplesConflict(first, second, xyTolerance, elevationTolerance)
+                || SamplesConflict(second, first, xyTolerance, elevationTolerance);
+        }
+
+        private static bool SamplesConflict(
+            FloorFootprint sampled,
+            FloorFootprint other,
+            double xyTolerance,
+            double elevationTolerance)
+        {
+            foreach (var point in sampled.OuterLoop)
+            {
+                if (!other.CoversOwnRegion(point, xyTolerance))
+                {
+                    continue;
+                }
+
+                if (Math.Abs(sampled.BottomElevationAt(point.X, point.Y)
+                    - other.BottomElevationAt(point.X, point.Y)) > elevationTolerance)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 
     /// <summary>整地執行的單一階段耗時。</summary>
