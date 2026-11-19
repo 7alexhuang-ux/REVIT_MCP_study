@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+### 🔧 修正 — 整地：樓板開口（洞）不屬該板、多板重疊取最低板底、多朝下面／斜面板底（2026-11-20）
+
+- 實機失敗兩例：一樓板 315196 中間開口嵌入地下室板 314871（板底低約 2 m）被誤判「投影重疊且底面高程不同」中止；斜板、改過形狀的板（底面多個面）被拒「沒有可用的單一平面底面」。
+- `ExtractBottomFootprint`：改為收集全部朝下面（法向量 Z < -0.1，含非平面面與 GeometryInstance 內實體），每面一個區域（外框＋內環為洞＋板底高程函式）；最大面為主區域、其餘放 `FloorFootprint.ExtraRegions`。`ExtractBottomFootprints` 仍一片板一個 footprint（與 floors 同序），外框／範圍線／限建檢查等呼叫端行為不變。
+- `ApplyGrading`：移除 `EnsureNoConflictingOverlaps` 報錯，進入後先攤平成「一面一個 footprint」；頂點分類取該點所有覆蓋板底的最低者（洞內不受該板控制、洞緣仍屬板緣）；洞緣也取樣並刻摺線；表面抽樣驗收以同規則（最低板底、洞與任一覆蓋板邊界 margin 內略過）；銜接帶包絡驗收只檢查最近邊界所屬面。放坡外圈仍只沿外框外推，洞內未被填住的頂點以洞緣為起點（預設坡率）。
+- 純函式 `FloorFootprint`（洞、覆蓋、最低板底、攤平、最近邊界）與 `FootprintCoverage`（多板最低板底、平面 Z、自動納入用的高程衝突判斷）放 `GradingModels.cs`；`FloorFootprintCoverageTests` 新增 10 項。自動納入鄰接非控制樓板仍沿用高程衝突判斷（衝突者退回壓蓋保護）。
+- 規格 `docs/superpowers/specs/2026-07-02-toposolid-footprint-cut-fill-design.md` 規則 1／2／6、失敗條件與「樓板底面通用化」同步更新。NUnit 475 通過；R24 建置 0 錯誤。未連 Revit、未部署，實機（315196／314871、斜板、改形板）待驗。
+
 ### ✨ Revit 跳轉：網頁議題 ↔ Revit 元件／視圖／圖紙（imrevitaddinjump，ADR D-015（Revit 跳轉），2026-11-18）
 
 - 瀏覽器（已配對）新增四個**唯讀**指令：`viewsync_open_link`（切視圖、選取元件；元素 UniqueId → ElementId 提示 → 視圖 → 圖紙退化、`hidden_in_view`、模型版本不同回 `modelRevisionDiffers` 仍跳轉、`revisionPolicy` continue／block／sheet_only）、`viewsync_get_selection`、`viewsync_capture_view`（≤5 MB 自動降解析度）、`viewsync_draft_take`（取一次就刪）。`viewsync_draft_put` 只供外掛內部、不在瀏覽器白名單。`viewsync_status` 的 `model` 多 `revision`（存檔次數:版本 GUID）。

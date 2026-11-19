@@ -329,6 +329,29 @@ namespace RevitMCP.Core
             return UnitUtils.ConvertFromInternalUnits(squareFeet, UnitTypeId.SquareMeters);
         }
 
+        /// <summary>一片樓板全部朝下面的外框離散點板底高程極值（斜板、多面板各面都納入）。</summary>
+        private static (double MinZ, double MaxZ) BottomZRange(FloorFootprint footprint)
+        {
+            var minZ = double.MaxValue;
+            var maxZ = double.MinValue;
+            foreach (var region in footprint.SplitRegions())
+            {
+                foreach (var point in region.OuterLoop)
+                {
+                    var z = region.BottomElevationAt(point.X, point.Y);
+                    if (double.IsNaN(z) || double.IsInfinity(z))
+                    {
+                        continue;
+                    }
+
+                    minZ = Math.Min(minZ, z);
+                    maxZ = Math.Max(maxZ, z);
+                }
+            }
+
+            return (minZ, maxZ);
+        }
+
         /// <summary>建立每片控制樓板的登記指標（面積讀內建參數、板底高程掃邊界離散點取極值）。</summary>
         private static IReadOnlyList<FloorMetric> BuildFloorMetrics(
             IReadOnlyList<Floor> floors,
@@ -339,14 +362,7 @@ namespace RevitMCP.Core
             {
                 var footprint = footprints[index];
                 var floor = floors[index];
-                var minZ = double.MaxValue;
-                var maxZ = double.MinValue;
-                foreach (var point in footprint.OuterLoop)
-                {
-                    var z = footprint.BottomElevationAt(point.X, point.Y);
-                    minZ = Math.Min(minZ, z);
-                    maxZ = Math.Max(maxZ, z);
-                }
+                var (minZ, maxZ) = BottomZRange(footprint);
 
                 var areaParameter = floor.get_Parameter(BuiltInParameter.HOST_AREA_COMPUTED);
                 var areaSquareMeters = areaParameter != null && areaParameter.HasValue
@@ -405,14 +421,7 @@ namespace RevitMCP.Core
             var snapshots = new List<FloorGeometrySnapshot>(footprints.Count);
             foreach (var footprint in footprints)
             {
-                var minZ = double.MaxValue;
-                var maxZ = double.MinValue;
-                foreach (var point in footprint.OuterLoop)
-                {
-                    var z = footprint.BottomElevationAt(point.X, point.Y);
-                    minZ = Math.Min(minZ, z);
-                    maxZ = Math.Max(maxZ, z);
-                }
+                var (minZ, maxZ) = BottomZRange(footprint);
 
                 snapshots.Add(new FloorGeometrySnapshot
                 {
