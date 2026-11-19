@@ -54,6 +54,16 @@ namespace RevitMCP.Core.IssueManager
         private readonly Button _logoutButton = MakeButton(Strings.Logout);
         private readonly Button _switchButton = MakeButton(Strings.SwitchAccount);
         private readonly ComboBox _projectBox = new ComboBox { MinWidth = 280 };
+        // 專案下拉沒選東西時顯示的提示（讀取中／請選擇專案／沒有可上傳的專案／讀取失敗／請先登入）；不攔截滑鼠，點下去仍是點到下拉。
+        private readonly TextBlock _projectHint = new TextBlock
+        {
+            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(8, 0, 28, 0), IsHitTestVisible = false, Foreground = System.Windows.Media.Brushes.DimGray
+        };
+        private readonly Button _reloadProjectsButton = MakeButton("重新讀取");
+        private int _projectsGeneration;
+        private bool _projectsLoading;
+        private string _projectsError;
         private readonly ComboBox _stageBox = new ComboBox { MinWidth = 280 };
         private readonly TextBox _descriptionBox = new TextBox { MinHeight = 48, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         private readonly ComboBox _sheetSetBox = new ComboBox { MinWidth = 280 };
@@ -111,6 +121,8 @@ namespace RevitMCP.Core.IssueManager
         public TextBlock AccountText { get { return _accountText; } }
         public ComboBox StageBox { get { return _stageBox; } }
         public ComboBox ProjectBox { get { return _projectBox; } }
+        public TextBlock ProjectHint { get { return _projectHint; } }
+        public Button ReloadProjectsButton { get { return _reloadProjectsButton; } }
         public ComboBox SheetSetBox { get { return _sheetSetBox; } }
         public TreeView Tree { get { return _tree; } }
         public CheckBox ModelBox { get { return _modelBox; } }
@@ -148,7 +160,15 @@ namespace RevitMCP.Core.IssueManager
             var form = new Grid { Margin = new Thickness(0, 0, 0, 8) };
             form.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             form.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            AddFormRow(form, 0, "專案", _projectBox);
+            // 專案列：下拉＋蓋在下拉上的提示字（還沒選專案時顯示目前狀態，下拉空白不再讓人以為壞了）＋重新讀取鈕。
+            var projectCell = new Grid();
+            projectCell.Children.Add(_projectBox);
+            projectCell.Children.Add(_projectHint);
+            var projectRow = new DockPanel { LastChildFill = true };
+            DockPanel.SetDock(_reloadProjectsButton, Dock.Right);
+            projectRow.Children.Add(_reloadProjectsButton);
+            projectRow.Children.Add(projectCell);
+            AddFormRow(form, 0, "專案", projectRow);
             AddFormRow(form, 1, "設計階段", _stageBox);
             AddFormRow(form, 2, "版本說明", _descriptionBox);
             AddFormRow(form, 3, "圖紙集", _sheetSetBox);
@@ -292,6 +312,7 @@ namespace RevitMCP.Core.IssueManager
             _loginButton.Click += async (s, e) => await LoginAsync(false);
             _switchButton.Click += async (s, e) => await LoginAsync(true);
             _logoutButton.Click += async (s, e) => await LogoutAsync();
+            _reloadProjectsButton.Click += async (s, e) => await LoadProjectsAsync();
             _uploadButton.Click += async (s, e) => await UploadAsync();
             _retryButton.Click += async (s, e) => await RetryAsync();
             _cancelButton.Click += (s, e) => CancelOrClose();
@@ -331,6 +352,23 @@ namespace RevitMCP.Core.IssueManager
             _summaryText.Text = _vm.SummaryText;
             _warningText.Text = string.Join("\n", _vm.MissingWarnings);
             _uploadButton.IsEnabled = _vm.CanUpload;
+            RefreshProjectHint();
+        }
+
+        /// <summary>專案下拉的提示字與「重新讀取」鈕：依登入、讀取中、失敗、清單數量顯示目前狀態；選了專案就隱藏提示。</summary>
+        private void RefreshProjectHint()
+        {
+            string text;
+            if (_services.ConfigurationError != null) text = "尚未完成設定";
+            else if (!_vm.IsLoggedIn) text = Strings.NotLoggedInReason;
+            else if (_projectsLoading) text = "讀取專案中…";
+            else if (_projectsError != null) text = "專案讀取失敗，請按「重新讀取」";
+            else if (_vm.Projects.Count == 0) text = "沒有可上傳的專案";
+            else text = Strings.NoProjectSelected + "（共 " + _vm.Projects.Count + " 個）";
+            _projectHint.Text = text;
+            _projectHint.Visibility = _vm.SelectedProject == null ? WpfVisibility.Visible : WpfVisibility.Collapsed;
+            _reloadProjectsButton.Visibility = _vm.IsLoggedIn && _services.ConfigurationError == null ? WpfVisibility.Visible : WpfVisibility.Collapsed;
+            _reloadProjectsButton.IsEnabled = !_running && !_projectsLoading;
         }
 
         private void SetStatus(string text)
@@ -364,22 +402,45 @@ namespace RevitMCP.Core.IssueManager
 
         private async Task LoadProjectsAsync()
         {
+            if (_services.Api == null) return;
+            var generation = 0;
             try
             {
-                Ui(() => SetStatus("讀取可上傳的專案…"));
-                var projects = await _services.Api.GetProjectsAsync(CancellationToken.None);
                 Ui(() =>
                 {
+                    generation = ++_projectsGeneration;
+                    _projectsLoading = true;
+                    _projectsError = null;
+                    SetStatus("讀取可上傳的專案…");
+                    RefreshProjectHint();
+                });
+                if (_services.Log != null) _services.Log("上傳視窗：開始讀取專案清單。");
+                var projects = await _services.Api.GetProjectsAsync(CancellationToken.None);
+                if (_services.Log != null) _services.Log("上傳視窗：專案清單讀取完成，" + projects.Count + " 個。");
+                Ui(() =>
+                {
+                    if (generation != _projectsGeneration) return; // 登出、換帳號或又按了重新讀取：這份舊結果作廢
+                    _projectsLoading = false;
                     _vm.SetProjects(projects);
-                    SetStatus(projects.Count == 0 ? "這個帳號目前沒有可以上傳工作版的專案。" : string.Empty);
+                    // 只有一個專案就直接選好（少按一次）；多個專案維持沒選，提示字會寫「請選擇專案」。
+                    if (projects.Count == 1 && _vm.SelectedProject == null) _vm.SelectedProject = _vm.Projects[0];
+                    SetStatus(projects.Count == 0
+                        ? "這個帳號目前沒有可以上傳工作版的專案。"
+                        : _vm.SelectedProject != null ? "已讀取專案清單。" : "已讀取 " + projects.Count + " 個可上傳的專案，請從「專案」下拉選一個。");
+                    RefreshProjectHint();
                 });
             }
             catch (Exception ex)
             {
+                if (_services.Log != null) _services.Log("上傳視窗：專案清單讀取失敗（" + ex.GetType().Name + "）。");
                 Ui(() =>
                 {
+                    if (generation != _projectsGeneration) return;
+                    _projectsLoading = false;
+                    _projectsError = ex.Message;
                     ShowError(ex);
                     RefreshAccount();
+                    RefreshProjectHint();
                 });
             }
         }
@@ -431,6 +492,7 @@ namespace RevitMCP.Core.IssueManager
                 {
                     _loggingIn = true;
                     SetBusy(true);
+                    _projectsGeneration++; _projectsLoading = false; _projectsError = null;
                     _vm.SetProjects(new AddinProject[0]);
                     SetStatus("已開啟瀏覽器，請在瀏覽器中登入並按「授權」（最多等待 2 分鐘）…");
                     _cts = new CancellationTokenSource();
@@ -477,6 +539,7 @@ namespace RevitMCP.Core.IssueManager
                 var outcome = await _services.Auth.LogoutAsync(CancellationToken.None);
                 Ui(() =>
                 {
+                    _projectsGeneration++; _projectsLoading = false; _projectsError = null;
                     _vm.SetProjects(new AddinProject[0]);
                     _resultText.Text = string.Empty;
                     // 伺服器端撤銷沒成功時如實告知（本機資料不論如何都已刪除），並指引到網站手動撤銷。

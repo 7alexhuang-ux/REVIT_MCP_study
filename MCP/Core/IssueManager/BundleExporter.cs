@@ -41,8 +41,27 @@ namespace RevitMCP.Core.IssueManager
         void ExportNamedViews(IReadOnlyList<string> viewUniqueIds, double[] originOffsetMeters, string workDirectory, string outputPath);
         /// <summary>匯出 view_positions.json（平面／天花／剖面／立面的樓層高度、視圖範圍、裁剪框、剖面框；D-597），原點必須與 GLB 相同。</summary>
         ViewPositionsResult ExportViewPositions(IReadOnlyList<string> viewUniqueIds, double[] originOffsetMeters, string workDirectory, string outputPath);
+        /// <summary>
+        /// 讀圖紙版面（imsheetmarks）：每張圖紙的紙張尺寸與每個視口的外框、比例、旋轉、視圖座標系。
+        /// <see cref="BundleExporter"/> 會分批（每批數張圖紙、一次 ExternalEvent）呼叫；單張讀不到的圖紙略過並寫入 Warnings，不丟例外。
+        /// </summary>
+        SheetPlacementBatch ReadSheetPlacements(IReadOnlyList<SheetItem> sheets, double[] originOffsetMeters);
+        /// <summary>讀勾選的剖面／立面視圖的剖切線（glTF 公尺），供判斷每張平面圖上看得到哪些標記（imsheetmarks）。</summary>
+        SectionLineBatch ReadSectionLines(IReadOnlyList<ViewItem> sectionAndElevationViews, double[] originOffsetMeters);
         /// <summary>匯出 params.json（im-revit-params/1：樓層、構件參數、房間面積表；D-802）。讀不到的欄位給 null，不猜。</summary>
         ParamsExportResult ExportParams(double[] originOffsetMeters, string outputPath);
+    }
+
+    public sealed class SheetPlacementBatch
+    {
+        public List<SheetPlacement> Sheets { get; set; } = new List<SheetPlacement>();
+        public List<string> Warnings { get; set; } = new List<string>();
+    }
+
+    public sealed class SectionLineBatch
+    {
+        public List<SectionLine> Lines { get; set; } = new List<SectionLine>();
+        public List<string> Warnings { get; set; } = new List<string>();
     }
 
     public sealed class ViewPositionsResult
@@ -139,9 +158,11 @@ namespace RevitMCP.Core.IssueManager
             // 位置資料需要模型才有意義（網站端沒有 GLB、也沒接模型就不匯入，D-705）；沒模型時略過並在下面說明。
             var doExportPositions = hasModelTarget && positioned.Count > 0 && !request.SkipViewPositions;
             var doExportParams = request.IncludeParams;
-            var toMeasure = ViewportsNeedingMeasure(request);
+            // imsheetmarks：圖紙版面（寫進位置檔的 sheetLayout 區塊）需要每個視口的外框，單一視口的圖紙也要量。
+            var doSheetLayout = doExportPositions && request.IncludeSheetLayout && request.Sheets.Count > 0;
+            var toMeasure = ViewportsNeedingMeasure(request, doSheetLayout);
             var doMeasure = toMeasure.Count > 0;
-            var total = 1 + (doMeasure ? 1 : 0) + (doExportPdf ? 1 : 0) + (doExportModel ? 1 : 0) + (doExportNamedViews ? 1 : 0) + (doExportPositions ? 1 : 0) + (doExportParams ? 1 : 0) + 1;
+            var total = 1 + (doMeasure ? 1 : 0) + (doExportPdf ? 1 : 0) + (doExportModel ? 1 : 0) + (doExportNamedViews ? 1 : 0) + (doExportPositions ? 1 : 0) + (doSheetLayout ? 1 : 0) + (doExportParams ? 1 : 0) + 1;
             var step = 0;
             var warnings = new List<string>(request.PreWarnings ?? new List<string>());
             var files = new List<BundleFile>();
@@ -172,6 +193,11 @@ namespace RevitMCP.Core.IssueManager
                         {
                             viewport.Width = size.Width;
                             viewport.Height = size.Height;
+                            viewport.HasBox = true;
+                            viewport.BoxMinXFt = size.MinX;
+                            viewport.BoxMinYFt = size.MinY;
+                            viewport.BoxMaxXFt = size.MaxX;
+                            viewport.BoxMaxYFt = size.MaxY;
                         }
                         viewport.SizeMeasured = true; // 量不到＝面積 0，主要視口退回清單中的第一個；不重量
                     }
@@ -241,6 +267,22 @@ namespace RevitMCP.Core.IssueManager
                 warnings.AddRange(positions != null ? positions.Warnings : new List<string>());
                 if (positions != null && positions.ViewCount < positioned.Count)
                     warnings.Add("勾選的 " + positioned.Count + " 個平面／立面／剖面視圖中，只有 " + positions.ViewCount + " 個讀得到位置，其餘在 3D 對照時會顯示「尚無 3D 對應」。");
+                if (doSheetLayout)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    ++step;
+                    progress.Report("匯出圖紙版面（視口位置與剖面標記）", step, total);
+                    try
+                    {
+                        await AddSheetLayoutAsync(request, steps, runner, positionsPath, positionsOrigin, warnings, progress, step, total, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        // 圖紙版面是附加資料：失敗不拖垮位置與模型，位置檔維持原樣照常上傳。
+                        warnings.Add("圖紙版面匯出失敗（" + ex.GetType().Name + "），已略過；圖面上的剖面線點選對應不會有資料，位置與模型照常上傳。");
+                    }
+                }
                 files.Add(Describe(BundleFile.ViewPositions, ViewPositionsName, positionsPath));
             }
 
@@ -271,20 +313,59 @@ namespace RevitMCP.Core.IssueManager
         /// 需要量測外框的視口：要有 ViewportElementId、還沒量過，且所屬圖紙在請求中有兩個以上視口
         /// （只有一個視口時它必然是主要視口，面積無關）。已去除重複的視口。
         /// </summary>
-        internal static List<ViewportItem> ViewportsNeedingMeasure(ExportRequest request)
+        internal static List<ViewportItem> ViewportsNeedingMeasure(ExportRequest request, bool needBox = false)
         {
             var result = new List<ViewportItem>();
             var seen = new HashSet<long>();
             foreach (var sheet in request.Sheets)
             {
-                if (sheet.Viewports.Count < 2) continue;
+                // needBox（匯出圖紙版面）：單一視口的圖紙也要外框，且要真的有外框角點才算量過。
+                if (!needBox && sheet.Viewports.Count < 2) continue;
                 foreach (var viewport in sheet.Viewports)
                 {
-                    if (viewport.ViewportElementId == 0 || viewport.SizeMeasured) continue;
+                    if (viewport.ViewportElementId == 0 || (needBox ? viewport.HasBox : viewport.SizeMeasured)) continue;
                     if (seen.Add(viewport.ViewportElementId)) result.Add(viewport);
                 }
             }
             return result;
+        }
+
+        /// <summary>每批讀幾張圖紙的版面（每批一次 ExternalEvent，批次之間更新進度與檢查取消）。</summary>
+        public const int LayoutChunkSize = 4;
+        /// <summary>位置檔（jsonFile）網站端上限 4 MiB；併入版面後超過這個安全值就捨棄版面，不讓整包被拒。</summary>
+        internal const int MaxViewPositionsBytes = 3900000;
+
+        private static async Task AddSheetLayoutAsync(ExportRequest request, IBundleExportSteps steps, IApiThreadRunner runner, string positionsPath,
+            double[] origin, List<string> warnings, IExportProgress progress, int step, int total, CancellationToken ct)
+        {
+            var placements = new List<SheetPlacement>();
+            for (var offset = 0; offset < request.Sheets.Count; offset += LayoutChunkSize)
+            {
+                ct.ThrowIfCancellationRequested();
+                progress.Report("匯出圖紙版面 " + offset + "/" + request.Sheets.Count, step, total);
+                var chunk = request.Sheets.Skip(offset).Take(LayoutChunkSize).ToList();
+                var batch = await runner.RunAsync(() => steps.ReadSheetPlacements(chunk, origin), ct).ConfigureAwait(false);
+                if (batch == null) continue;
+                placements.AddRange(batch.Sheets ?? new List<SheetPlacement>());
+                warnings.AddRange(batch.Warnings ?? new List<string>());
+            }
+            ct.ThrowIfCancellationRequested();
+            var markerViews = request.Views.Where(v => v.Kind == ViewKinds.Section || v.Kind == ViewKinds.Elevation).ToList();
+            var lines = new SectionLineBatch();
+            if (markerViews.Count > 0)
+            {
+                lines = await runner.RunAsync(() => steps.ReadSectionLines(markerViews, origin), ct).ConfigureAwait(false) ?? lines;
+                warnings.AddRange(lines.Warnings ?? new List<string>());
+            }
+            var layout = SheetMarkMath.BuildLayout(placements, lines.Lines);
+            if (layout == null) return;
+            var merged = SheetMarkMath.MergeIntoViewPositions(File.ReadAllText(positionsPath, Encoding.UTF8), layout);
+            if (Encoding.UTF8.GetByteCount(merged) > MaxViewPositionsBytes)
+            {
+                warnings.Add("圖紙版面資料太大（超過 Issue Manager 位置檔的上限），已略過；請分批上傳圖紙。");
+                return;
+            }
+            File.WriteAllText(positionsPath, merged, new UTF8Encoding(false));
         }
 
         private static void TryDeleteDirectory(string path)

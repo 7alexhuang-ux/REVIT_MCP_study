@@ -75,6 +75,27 @@ namespace RevitMCP.Tests.IssueManager
             return new ViewPositionsResult { ViewCount = PositionViewCountOverride >= 0 ? PositionViewCountOverride : viewUniqueIds.Count };
         }
 
+        /// <summary>圖紙版面（imsheetmarks）：預設不回任何版面（位置檔維持原樣）；測試要驗證時自行填入。</summary>
+        public List<SheetPlacement> PlacementsToReturn = new List<SheetPlacement>();
+        public List<SectionLine> SectionLinesToReturn = new List<SectionLine>();
+        public Exception ThrowInPlacements;
+        public List<int> PlacementBatchSizes = new List<int>();
+
+        public SheetPlacementBatch ReadSheetPlacements(IReadOnlyList<SheetItem> sheets, double[] originOffsetMeters)
+        {
+            PlacementBatchSizes.Add(sheets.Count);
+            if (ThrowInPlacements != null) throw ThrowInPlacements;
+            var ids = new HashSet<string>(sheets.Select(s => s.UniqueId));
+            return new SheetPlacementBatch { Sheets = PlacementsToReturn.Where(p => ids.Contains(p.SheetUniqueId)).ToList() };
+        }
+
+        public SectionLineBatch ReadSectionLines(IReadOnlyList<ViewItem> views, double[] originOffsetMeters)
+        {
+
+            var ids = new HashSet<string>(views.Select(v => v.UniqueId));
+            return new SectionLineBatch { Lines = SectionLinesToReturn.Where(l => ids.Contains(l.ViewUniqueId)).ToList() };
+        }
+
         public ParamsExportResult ExportParams(double[] originOffsetMeters, string outputPath)
         {
             Calls.Add("params"); LastParamsOrigin = originOffsetMeters;
@@ -161,8 +182,8 @@ namespace RevitMCP.Tests.IssueManager
             Assert.AreEqual(12.5, (double)manifest["originOffsetMeters"][0]);
             Assert.AreEqual(bundle.Files.First(f => f.Kind == "pdf").Sha256, (string)manifest["files"]["pdf"]["sha256"]);
             CollectionAssert.Contains(manifest["warnings"].Select(w => (string)w).ToList(), "2 個材質的貼圖檔找不到，已退回材質顏色。");
-            Assert.AreEqual(6, progress.Steps.Count);
-            StringAssert.StartsWith("1/6", progress.Steps[0]);
+            Assert.AreEqual(8, progress.Steps.Count, "圖紙版面多一步（imsheetmarks）：步驟回報一次加批次回報一次");
+            StringAssert.StartsWith("1/7", progress.Steps[0]);
 
         }
 
