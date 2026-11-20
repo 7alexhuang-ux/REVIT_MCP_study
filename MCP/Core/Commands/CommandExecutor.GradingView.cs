@@ -1173,20 +1173,23 @@ namespace RevitMCP.Core
             // 還互相疊字，一律剔除；合併間距 3m→5m 再減量。
             var containTolerance = UnitUtils.ConvertToInternalUnits(50, UnitTypeId.Millimeters);
             var samples = new List<(XYZ Projected, double? OriginalZ)>();
-            for (var footprintIndex = 0; footprintIndex < footprints.Count; footprintIndex++)
+            // 多朝下面的樓板攤平成「一面一區域」：每個面的外框都取樣；
+            // 其他面（含同片板的其他面）內部的點與洞內的點照舊剔除。
+            var regions = footprints.SelectMany(footprint => footprint.SplitRegions()).ToList();
+            for (var footprintIndex = 0; footprintIndex < regions.Count; footprintIndex++)
             {
-                var loop = footprints[footprintIndex].OuterLoop;
+                var loop = regions[footprintIndex].OuterLoop;
                 var step = Math.Max(1, loop.Count / 8);
                 for (var index = 0; index < loop.Count; index += step)
                 {
                     var boundary = loop[index];
                     var insideOtherFloor = false;
-                    for (var other = 0; other < footprints.Count; other++)
+                    for (var other = 0; other < regions.Count; other++)
                     {
                         // 嚴格內部才剔除：共享邊上的點（含端點＝聯集外角）距邊界≈0，保留。
                         if (other != footprintIndex
-                            && Polygon2D.Contains(footprints[other].OuterLoop, boundary, containTolerance)
-                            && Polygon2D.DistanceToBoundary(footprints[other].OuterLoop, boundary) > containTolerance)
+                            && regions[other].CoversOwnRegion(boundary, containTolerance)
+                            && regions[other].NearestBoundary(boundary).Distance > containTolerance)
                         {
                             insideOtherFloor = true;
                             break;

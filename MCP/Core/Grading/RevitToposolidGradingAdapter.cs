@@ -43,6 +43,10 @@ namespace RevitMCP.Core.Grading
         // 投影面積小於此值（平方英呎，約 1 cm²）的朝下面視為退化面，略過。
         private const double MinimumBottomFaceAreaSquareFeet = 1e-6;
 
+        // 階差環偏移量（mm）：須大於頂點比對容差（VertexMatchTolerance 10 mm）才不會與共邊頂點混淆，
+        // 又遠小於表面抽樣驗收的板緣 margin（300 mm），使階差區落在驗收略過帶內。
+        private const double StepInsetMillimeters = 30.0;
+
         // 銜接帶控制環密度：直邊最大弦長 1 m、凸角圓弧最大角步距 15°（貼合距離場坡腳、消除三角網過衝）。
         private static readonly double RingMaxChordFeet =
             UnitUtils.ConvertToInternalUnits(1000.0, UnitTypeId.Millimeters);
@@ -520,6 +524,31 @@ namespace RevitMCP.Core.Grading
                 }
             }
 
+            // 階差環：相鄰／重疊的板底不同高時，較高板底一側在共邊旁加一圈緊貼的點（見 FootprintCoverage.BuildStepRings），
+            // 讓階差接近垂直，避免地形從共邊斜到較高板內下一個頂點、挖出楔形。
+            var stepRings = FootprintCoverage.BuildStepRings(
+                footprints,
+                UnitUtils.ConvertToInternalUnits(StepInsetMillimeters, UnitTypeId.Millimeters),
+                xyTolerance,
+                elevationTolerance);
+            foreach (var stepPoint in stepRings.SelectMany(ring => ring).Where(point => point.HasValue).Select(point => point.Value))
+            {
+                var stepTerrainZ = IntersectTerrainTopZ(solids, stepPoint, rayBottomZ, rayTopZ);
+                if (!stepTerrainZ.HasValue)
+                {
+                    continue; // 規則 7：超出地形不處理。
+                }
+
+                var stepCandidate = new XYZ(stepPoint.X, stepPoint.Y, stepTerrainZ.Value);
+                if (HasNearbyXY(existingPositions, stepCandidate, xyTolerance)
+                    || HasNearbyXY(pointsToAdd, stepCandidate, xyTolerance))
+                {
+                    continue;
+                }
+
+                pointsToAdd.Add(stepCandidate);
+            }
+
             boundarySampleScope.Dispose();
 
             if (pointsToAdd.Count > 0)
@@ -536,7 +565,7 @@ namespace RevitMCP.Core.Grading
             // 杜絕外部高處地形的三角形跨越樓板上空。
             using (_timeline.Measure("邊界摺線"))
             {
-                DrawBoundarySplitLines(editor, footprints, xyTolerance);
+                DrawBoundarySplitLines(editor, footprints, stepRings, xyTolerance);
                 doc.Regenerate();
             }
 
@@ -1003,6 +1032,7 @@ namespace RevitMCP.Core.Grading
         private static void DrawBoundarySplitLines(
             SlabShapeEditor editor,
             IReadOnlyList<FloorFootprint> footprints,
+            IReadOnlyList<IReadOnlyList<Point2D?>> stepRings,
             double xyTolerance)
         {
             var vertices = new List<SlabShapeVertex>();
@@ -1014,34 +1044,53 @@ namespace RevitMCP.Core.Grading
                 }
             }
 
-            var matchTolerance = VertexMatchTolerance;
-            // 外框與洞緣都刻成網格稜線（洞緣也是板緣）。
+            // 線段清單：外框與洞緣（洞緣也是板緣）＋階差環相鄰兩點（兩端都有點才連）。
+            var segments = new List<(Point2D Start, Point2D End)>();
             foreach (var loop in footprints.SelectMany(footprint => footprint.AllLoops()))
             {
                 for (var index = 0; index < loop.Count; index++)
                 {
-                    var startVertex = FindNearestVertex(vertices, loop[index], matchTolerance);
-                    var endVertex = FindNearestVertex(vertices, loop[(index + 1) % loop.Count], matchTolerance);
-                    if (startVertex == null || endVertex == null)
-                    {
-                        // 邊界點可能因超出地形未建立（規則 7），跳過該段；完整性由表面抽樣驗收把關。
-                        continue;
-                    }
+                    segments.Add((loop[index], loop[(index + 1) % loop.Count]));
+                }
+            }
 
-                    if (XYDistanceSquared(startVertex.Position, endVertex.Position) <= xyTolerance * xyTolerance)
+            foreach (var ring in stepRings)
+            {
+                for (var index = 0; index < ring.Count; index++)
+                {
+                    var from = ring[index];
+                    var to = ring[(index + 1) % ring.Count];
+                    if (from.HasValue && to.HasValue)
                     {
-                        continue;
+                        segments.Add((from.Value, to.Value));
                     }
+                }
+            }
 
-                    try
-                    {
-                        DrawSlabSplitLine(editor, startVertex, endVertex);
-                    }
-                    catch (Autodesk.Revit.Exceptions.ApplicationException)
-                    {
-                        // 既有摺線或退化線段會被 Revit 拒絕；缺段風險由表面抽樣驗收把關。
-                        continue;
-                    }
+            var matchTolerance = VertexMatchTolerance;
+            foreach (var segment in segments)
+            {
+                var startVertex = FindNearestVertex(vertices, segment.Start, matchTolerance);
+                var endVertex = FindNearestVertex(vertices, segment.End, matchTolerance);
+                if (startVertex == null || endVertex == null)
+                {
+                    // 邊界點可能因超出地形未建立（規則 7），跳過該段；完整性由表面抽樣驗收把關。
+                    continue;
+                }
+
+                if (XYDistanceSquared(startVertex.Position, endVertex.Position) <= xyTolerance * xyTolerance)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    DrawSlabSplitLine(editor, startVertex, endVertex);
+                }
+                catch (Autodesk.Revit.Exceptions.ApplicationException)
+                {
+                    // 既有摺線或退化線段會被 Revit 拒絕；缺段風險由表面抽樣驗收把關。
+                    continue;
                 }
             }
         }
@@ -1809,12 +1858,13 @@ namespace RevitMCP.Core.Grading
                             continue;
                         }
 
-                        // 多塊板重疊時，任何覆蓋此點的板的邊界 margin 內都略過（邊緣處網格取決於鄰近板緣）。
+                        // 任一塊板（含洞緣）的邊界 margin 內都略過：相鄰／重疊板底不同高時，
+                        // 共邊旁有階差環（StepInsetMillimeters，遠小於 margin），階差區落在略過帶內；
+                        // 不限覆蓋此點的板——較低板的板緣外側、仍在較高板內的取樣點同樣受階差影響。
                         var nearAnyBoundary = false;
                         foreach (var other in footprints)
                         {
-                            if (other.CoversOwnRegion(sample, xyTolerance)
-                                && other.NearestBoundary(sample).Distance < boundaryMargin)
+                            if (other.NearestBoundary(sample).Distance < boundaryMargin)
                             {
                                 nearAnyBoundary = true;
                                 break;
@@ -1997,12 +2047,14 @@ namespace RevitMCP.Core.Grading
                     .Skip(1)
                     .Where(points => Math.Abs(SignedArea(points)) >= MinimumBottomFaceAreaSquareFeet)
                     .ToList(),
-                BottomElevationAt = BuildBottomElevationFunction(face, zLow, zHigh)
+                BottomElevationAt = BuildBottomElevationFunction(floorId, face, discretized[0], zLow, zHigh)
             };
         }
 
         private static Func<double, double, double> BuildBottomElevationFunction(
+            long floorId,
             Face face,
+            IReadOnlyList<Point2D> outerLoop,
             double zLow,
             double zHigh)
         {
@@ -2014,30 +2066,62 @@ namespace RevitMCP.Core.Grading
                     origin.X, origin.Y, origin.Z, normal.X, normal.Y, normal.Z, x, y);
             }
 
-            // 非平面面：垂直線與面求交取最低交點；求不到時退回最近點投影的 Z（邊界點可能剛好落在面外一點點）。
-            return (x, y) =>
+            // 非平面面：鉛直線與面求交取最低交點（不再用 Project——最近點投影不是鉛直，板緣附近有誤差）。
+            // 邊界點離散後可能剛好落在面外一點點：朝外框形心依序內推 1／5／20 mm 重試（誤差＝該處坡度×內推量，
+            // 遠小於 2 mm 驗收門檻的量級，仍求不到才丟例外，絕不回 NaN 讓呼叫端靜默略過）。
+            var centroidX = outerLoop.Average(point => point.X);
+            var centroidY = outerLoop.Average(point => point.Y);
+            var nudgesFeet = new[]
+            {
+                0.0,
+                UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters),
+                UnitUtils.ConvertToInternalUnits(5.0, UnitTypeId.Millimeters),
+                UnitUtils.ConvertToInternalUnits(20.0, UnitTypeId.Millimeters)
+            };
+
+            double? IntersectVertical(double x, double y)
             {
                 var line = Line.CreateBound(new XYZ(x, y, zLow), new XYZ(x, y, zHigh));
-                if (face.Intersect(line, out var hits) == SetComparisonResult.Overlap && hits != null)
+                if (face.Intersect(line, out var hits) != SetComparisonResult.Overlap || hits == null)
                 {
-                    var lowest = double.NaN;
-                    foreach (IntersectionResult hit in hits)
-                    {
-                        var z = hit.XYZPoint.Z;
-                        if (double.IsNaN(lowest) || z < lowest)
-                        {
-                            lowest = z;
-                        }
-                    }
+                    return null;
+                }
 
-                    if (!double.IsNaN(lowest))
+                double? lowest = null;
+                foreach (IntersectionResult hit in hits)
+                {
+                    var z = hit.XYZPoint.Z;
+                    if (!lowest.HasValue || z < lowest.Value)
                     {
-                        return lowest;
+                        lowest = z;
                     }
                 }
 
-                var projection = face.Project(new XYZ(x, y, (zLow + zHigh) / 2.0));
-                return projection != null ? projection.XYZPoint.Z : double.NaN;
+                return lowest;
+            }
+
+            return (x, y) =>
+            {
+                var towardX = centroidX - x;
+                var towardY = centroidY - y;
+                var length = Math.Sqrt((towardX * towardX) + (towardY * towardY));
+                foreach (var nudge in nudgesFeet)
+                {
+                    var sampleX = nudge > 0 && length > 1e-12 ? x + (towardX / length * nudge) : x;
+                    var sampleY = nudge > 0 && length > 1e-12 ? y + (towardY / length * nudge) : y;
+                    var z = IntersectVertical(sampleX, sampleY);
+                    if (z.HasValue)
+                    {
+                        return z.Value;
+                    }
+                }
+
+                throw new InvalidOperationException(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "樓板 ID {0} 在 ({1:F3}, {2:F3}) m 處取不到非平面底面的板底高程（鉛直線與底面求交失敗），已中止整地。",
+                    floorId,
+                    UnitUtils.ConvertFromInternalUnits(x, UnitTypeId.Meters),
+                    UnitUtils.ConvertFromInternalUnits(y, UnitTypeId.Meters)));
             };
         }
 

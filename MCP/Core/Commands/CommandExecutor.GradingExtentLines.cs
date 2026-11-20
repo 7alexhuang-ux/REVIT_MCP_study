@@ -78,7 +78,9 @@ namespace RevitMCP.Core
             var minY = double.MaxValue;
             var maxX = double.MinValue;
             var maxY = double.MinValue;
-            foreach (var point in footprints.SelectMany(footprint => footprint.OuterLoop))
+            // 多朝下面的樓板：每個面的外框都納入包圍盒與主環判定（不只最大面）。
+            var footprintRegions = footprints.SelectMany(footprint => footprint.SplitRegions()).ToList();
+            foreach (var point in footprintRegions.SelectMany(region => region.OuterLoop))
             {
                 minX = Math.Min(minX, point.X);
                 minY = Math.Min(minY, point.Y);
@@ -150,7 +152,7 @@ namespace RevitMCP.Core
             // 其餘外圍殘環剔除；主環內的孔洞環須 ≥25 m² 才保留（小孔多為門檻附近的取樣噪點）。
             var xyToleranceForContain = UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters);
             var mainLoops = loops
-                .Where(loop => footprints.Any(footprint =>
+                .Where(loop => footprintRegions.Any(footprint =>
                     footprint.OuterLoop.Any(vertex => Polygon2D.Contains(loop, vertex, xyToleranceForContain))))
                 .ToList();
             var minHoleArea = UnitUtils.ConvertToInternalUnits(25.0, UnitTypeId.SquareMeters);
