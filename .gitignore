@@ -139,6 +139,8 @@ docs/fork-audit/
 /vault/
 /.obsidian/
 
+# Codex 隔離工作目錄
+.worktrees/
 __pycache__/
 
 # TABC 綠建材資料為第三方（財團法人臺灣建築中心）著作，不隨本 MIT 授權 repo 再散布。

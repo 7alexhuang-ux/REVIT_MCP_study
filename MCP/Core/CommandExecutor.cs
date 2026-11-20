@@ -978,6 +978,38 @@ namespace RevitMCP.Core
                     case "get_toposolid_points":
                         result = GetToposolidPoints(parameters);
                         break;
+
+                    case "list_grading_schemes":
+                        result = ListGradingSchemes(parameters);
+                        break;
+
+                    case "export_grading_comparison":
+                        result = ExportGradingComparison(parameters);
+                        break;
+
+                    case "solve_balanced_elevation":
+                        result = SolveBalancedElevation(parameters);
+                        break;
+
+                    case "create_grading_scheme_view":
+                        result = CreateGradingSchemeView(parameters);
+                        break;
+
+                    case "create_cutfill_heatmap":
+                        result = CreateCutfillHeatmap(parameters);
+                        break;
+
+                    case "annotate_grading_scheme":
+                        result = AnnotateGradingScheme(parameters);
+                        break;
+
+                    case "restore_grading_scheme":
+                        result = RestoreGradingScheme(parameters);
+                        break;
+
+                    case "export_earthwork_gridsheet":
+                        result = ExportEarthworkGridsheet(parameters);
+                        break;
 #endif
 
                     // === 施工架/隔間/門窗/RC填充 算量 + 圖案轉換 (PR #79/#81/#82, 作者 Jacky820507) ===
