@@ -141,7 +141,7 @@ Remove-Item -Recurse -Force "C:\Users\<YOUR_USERNAME>\Desktop\REVIT_MCP"
 | `mcp_config.json` | Antigravity 的 MCP Server 設定檔 | ✅ 必須 |
 | `RevitMCP.csproj` | C# 統一專案建置檔 (Revit 2022–2026, Nice3point SDK) | ✅ 必須 |
 | `package.json` | Node.js 專案設定 | 📖 參考 |
-| `install-addon-bom.ps1` | 自動安裝腳本 | 🔧 選用 |
+| `install-addon.ps1` | 自動安裝腳本（唯一的主要安裝器） | 🔧 選用 |
 
 ---
 
@@ -390,21 +390,25 @@ dir MCP\bin\Release.R24\RevitMCP.dll
 # 回到專案根目錄
 cd C:\Users\<YOUR_USERNAME>\Desktop\REVIT_MCP
 
-# 執行安裝腳本
-.\scripts\install-addon-bom.ps1
+# 執行安裝腳本（可用 -Version 直接指定版本，或不帶參數讓腳本偵測並詢問）
+.\scripts\install-addon.ps1 -Version 2024
 ```
 
-**互動流程**：
+**互動流程**（未指定 `-Version` 且偵測到多個 Revit 版本時）：
 ```
 請選擇 Revit 版本:
 1) 2022
 2) 2023
 3) 2024
-請輸入選項 (1-3): 3
+4) 2025
+5) 2026
+請輸入選項: 3
 
-正在複製檔案到 C:\ProgramData\Autodesk\Revit\Addins\2024\RevitMCP\...
+正在複製檔案到 %APPDATA%\Autodesk\Revit\Addins\2024\RevitMCP\...
 ✓ 安裝完成！
 ```
+
+> 其他常用參數：`-All`（對所有已安裝且已建置的版本逐一部署）、`-NonInteractive`（CI 用，以 exit code 回報）。
 
 #### 選項 B：手動部署
 

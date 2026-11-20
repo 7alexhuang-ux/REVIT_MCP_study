@@ -4,7 +4,7 @@ export const doorWindowLegendTools: Tool[] = [
     {
         name: "door-window-legend-tools",
         description:
-            "門窗圖例工具。mode=list 列出專案中已使用的門/窗型；mode=create 以 seed Legend 複製生成 A+ managed 圖例；mode=update 更新既有門窗圖例；mode=migrate 預覽或套用 legacy item 的 A+ ownership migration。",
+            "門窗圖例工具。mode=list 列出專案中已使用的門/窗型；mode=create 以 seed Legend 複製生成 A+ managed 圖例；mode=update 更新既有門窗圖例；mode=migrate 預覽或套用 legacy item 的 A+ ownership migration；mode=scaffold_template 一鍵自動搭建空白門窗圖例樣板視圖（自動畫格線、放佔位文字與圖例）。",
         inputSchema: {
             type: "object",
             properties: {
@@ -15,8 +15,8 @@ export const doorWindowLegendTools: Tool[] = [
                 },
                 mode: {
                     type: "string",
-                    enum: ["list", "create", "update", "migrate"],
-                    description: "list 列出型別；create 建立新 Legend；update 更新既有 Legend；migrate 預覽或套用 legacy migration。",
+                    enum: ["list", "create", "update", "migrate", "scaffold_template"],
+                    description: "list 列出型別；create 建立新 Legend；update 更新既有 Legend；migrate 預覽或套用 legacy migration；scaffold_template 自動搭建空白圖例樣板視圖。",
                 },
                 layoutDirection: {
                     type: "string",
@@ -31,7 +31,7 @@ export const doorWindowLegendTools: Tool[] = [
                 seedLegendViewId: {
                     type: "number",
                     description:
-                        "create 使用的 seed Legend 視圖 ID。若缺少，工具會要求先呼叫 list_seeds 讓使用者選擇。",
+                        "create/scaffold_template 使用的 seed Legend 視圖 ID。若缺少，工具會要求先呼叫 list_seeds 讓使用者選擇。",
                 },
                 legendViewId: {
                     type: "number",
@@ -56,6 +56,32 @@ export const doorWindowLegendTools: Tool[] = [
                     },
                     description:
                         "migrate apply=true 時可選，限定本次套用的 item key；ambiguous、overlap、unresolved 仍一律跳過。",
+                },
+                columns: {
+                    type: "number",
+                    minimum: 1,
+                    maximum: 20,
+                    default: 7,
+                    description:
+                        "scaffold_template 專用。每列格位數（欄數），範圍 1..20，預設 7。",
+                },
+                rows: {
+                    type: "number",
+                    minimum: 1,
+                    maximum: 20,
+                    default: 3,
+                    description:
+                        "scaffold_template 專用。列數，範圍 1..20，預設 3。",
+                },
+                templateName: {
+                    type: "string",
+                    description:
+                        "scaffold_template 專用。產生的空白樣板視圖名稱，預設 '01_門窗圖例表樣板'。",
+                },
+                flLineStyleName: {
+                    type: "string",
+                    description:
+                        "scaffold_template 專用。FFL 基準線使用的細部線型名稱，預設 '中級線0.3'。",
                 },
             },
             required: ["mode"],

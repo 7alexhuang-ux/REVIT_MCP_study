@@ -34,6 +34,14 @@ namespace RevitMCP.Core
         private DateTime _lastRejectLogUtc = DateTime.MinValue;
         private DateTime _lastRejectOriginLogUtc = DateTime.MinValue;
 
+        // 2026-10-22（補登 PR #71 fix 2）：序列化 SendAsync。
+        // 呼叫端（Application.OnCommandReceived）是「丟掉 Task 的射後不理」，而 ExternalEventManager
+        // 現在會在同一個 Execute 裡排空整個佇列 → 同時可能有 N 個回應在送，
+        // 單一 WebSocket 上重疊的 SendAsync 會丟 InvalidOperationException（concurrent send），
+        // 回應也可能交錯成壞掉的 frame。這個 semaphore 讓「序列化＋送出」一次只有一個在飛。
+        // 只在 SendResponseAsync 內持有，持有期間不會再去取 _connectionLock（見該方法註解）。
+        private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
+
         public event EventHandler<RevitCommandRequest> CommandReceived;
         public bool IsRunning => _isRunning;
         public bool IsConnected
@@ -414,17 +422,30 @@ namespace RevitMCP.Core
                 throw new InvalidOperationException("WebSocket 未連線");
             }
 
+            // 序列化＋送出必須互斥（見 _sendLock 宣告處）。
+            // 鎖序：_connectionLock 的快照已經在上面「取完就放掉」，等 _sendLock 時不持有任何
+            // monitor lock，持有 _sendLock 期間也不再取 _connectionLock——兩者從不嵌套，
+            // 因此不存在互等的可能。ConfigureAwait(false) 讓續段不回 Revit UI 的
+            // SynchronizationContext，避免 UI 執行緒正在排空命令佇列時續段排不進去。
+            await _sendLock.WaitAsync().ConfigureAwait(false);
             try
             {
                 string json = JsonConvert.SerializeObject(response);
                 byte[] bytes = Encoding.UTF8.GetBytes(json);
-                await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
+                await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None).ConfigureAwait(false);
                 Logger.Debug($"[Socket] 已發送回應 (RequestId: {response.RequestId})");
             }
             catch (Exception ex)
             {
                 Logger.Error($"[Socket] 發送回應失敗 (RequestId: {response.RequestId})", ex);
                 throw;
+            }
+            finally
+            {
+                // Stop() 會 Dispose 這個 semaphore；若剛好在送出途中停服務，Release 會丟
+                // ObjectDisposedException，這時服務已經要收掉了，吞掉即可（socket 也已 Abort）。
+                try { _sendLock.Release(); }
+                catch (ObjectDisposedException) { }
             }
         }
 
@@ -481,6 +502,13 @@ namespace RevitMCP.Core
             finally
             {
                 _isRunning = false;
+
+                // SocketService 是「一次用」實例：Application.StartMCPService 每次都 new 一個、
+                // Stop() 之後呼叫端立刻把參考設為 null，不會再 Start 同一個實例，
+                // 所以服務停止就是這個 semaphore 的釋放點（與 socket 的單一 disposer 原則一致）。
+                try { _sendLock.Dispose(); }
+                catch { }
+
                 Logger.Info("WebSocket 伺服器已完全停止");
             }
         }
