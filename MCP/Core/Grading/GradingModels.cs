@@ -155,6 +155,15 @@ namespace RevitMCP.Core.Grading
         public long FloorId { get; set; }
         public IReadOnlyList<Point2D> OuterLoop { get; set; }
 
+        /// <summary>
+        /// 細分（補點）前的原始外框；非平面面的外框會為貼合曲面補點（<see cref="OuterLoop"/> 是補點後的），
+        /// 邊坡率政策指紋與逐邊坡率要以原始邊比對，否則會綁到子邊或對不上。null＝外框未補點。
+        /// </summary>
+        public IReadOnlyList<Point2D> OriginalOuterLoop { get; set; }
+
+        /// <summary>邊坡率政策／指紋比對用的外框（原始邊）：OriginalOuterLoop，沒有則為 OuterLoop。</summary>
+        public IReadOnlyList<Point2D> OutlineLoop => OriginalOuterLoop ?? OuterLoop;
+
         /// <summary>內部開口（洞）的環；null 或空＝無洞。</summary>
         public IReadOnlyList<IReadOnlyList<Point2D>> Holes { get; set; }
 
@@ -195,6 +204,7 @@ namespace RevitMCP.Core.Grading
                 {
                     FloorId = FloorId,
                     OuterLoop = OuterLoop,
+                    OriginalOuterLoop = OriginalOuterLoop,
                     Holes = Holes,
                     BottomElevationAt = BottomElevationAt,
                     EdgePolicies = EdgePolicies,
@@ -328,7 +338,8 @@ namespace RevitMCP.Core.Grading
                 Distance: double.MaxValue);
             for (var regionIndex = 0; regionIndex < regions.Count; regionIndex++)
             {
-                var loop = regions[regionIndex].OuterLoop;
+                // 用原始外框（細分前）：回傳的邊要能對上邊坡率政策指紋，不能是補點後的子線段。
+                var loop = regions[regionIndex].OutlineLoop;
                 for (var edgeIndex = 0; edgeIndex < loop.Count; edgeIndex++)
                 {
                     var start = loop[edgeIndex];

@@ -102,6 +102,67 @@ namespace RevitMCP.Core.Grading
             return result;
         }
 
+        /// <summary>
+        /// 取最分散的三點定平面，回傳其餘點偏離該平面的最大量；可用點少於 4 個（沒有「其餘點」可比）回 0。
+        /// </summary>
+        private static double PlaneFitResidual(IReadOnlyList<(double X, double Y, double Z)> pts)
+        {
+            if (pts.Count < 4)
+            {
+                return 0.0;
+            }
+
+            var bestArea = 0.0;
+            var bestI = -1;
+            var bestJ = -1;
+            var bestK = -1;
+            for (var i = 0; i < pts.Count; i++)
+            {
+                for (var j = i + 1; j < pts.Count; j++)
+                {
+                    for (var k = j + 1; k < pts.Count; k++)
+                    {
+                        var area = Math.Abs(
+                            ((pts[j].X - pts[i].X) * (pts[k].Y - pts[i].Y))
+                            - ((pts[k].X - pts[i].X) * (pts[j].Y - pts[i].Y)));
+                        if (area > bestArea)
+                        {
+                            bestArea = area;
+                            bestI = i;
+                            bestJ = j;
+                            bestK = k;
+                        }
+                    }
+                }
+            }
+
+            if (bestI < 0 || bestArea < 1e-12)
+            {
+                return 0.0;
+            }
+
+            var a = pts[bestI];
+            var b = pts[bestJ];
+            var c = pts[bestK];
+            var det = ((b.X - a.X) * (c.Y - a.Y)) - ((c.X - a.X) * (b.Y - a.Y));
+            var worst = 0.0;
+            for (var index = 0; index < pts.Count; index++)
+            {
+                if (index == bestI || index == bestJ || index == bestK)
+                {
+                    continue;
+                }
+
+                var p = pts[index];
+                var u = (((p.X - a.X) * (c.Y - a.Y)) - ((c.X - a.X) * (p.Y - a.Y))) / det;
+                var v = (((b.X - a.X) * (p.Y - a.Y)) - ((p.X - a.X) * (b.Y - a.Y))) / det;
+                var planeZ = a.Z + (u * (b.Z - a.Z)) + (v * (c.Z - a.Z));
+                worst = Math.Max(worst, Math.Abs(p.Z - planeZ));
+            }
+
+            return worst;
+        }
+
         public static DensifyResult Build(
             Func<double, double, double> elevation,
             Func<Point2D, bool> isInside,
@@ -209,11 +270,40 @@ namespace RevitMCP.Core.Grading
                 var zt = Eval(xm, y1);
                 var zl = Eval(x0, ym);
 
-                var error = Math.Max(
-                    Math.Max(Residual(zc, z00, z11), Residual(zc, z10, z01)),
-                    Math.Max(
-                        Math.Max(Residual(zb, z00, z10), Residual(zr, z10, z11)),
-                        Math.Max(Residual(zt, z01, z11), Residual(zl, z00, z01))));
+                double error;
+                if (z00.HasValue && z10.HasValue && z11.HasValue && z01.HasValue
+                    && zc.HasValue && zb.HasValue && zr.HasValue && zt.HasValue && zl.HasValue)
+                {
+                    error = Math.Max(
+                        Math.Max(Residual(zc, z00, z11), Residual(zc, z10, z01)),
+                        Math.Max(
+                            Math.Max(Residual(zb, z00, z10), Residual(zr, z10, z11)),
+                            Math.Max(Residual(zt, z01, z11), Residual(zl, z00, z01))));
+                }
+                else
+                {
+                    // 跨板緣／洞緣的格子：只用落在區域內的取樣點估誤差（過三個最分散的點作平面，
+                    // 其餘點偏離平面的量；比完整格的中點誤差略保守）。全部落外（可用點 < 4）才當 0。
+                    var available = new List<(double X, double Y, double Z)>(9);
+                    void Collect(double px, double py, double? pz)
+                    {
+                        if (pz.HasValue)
+                        {
+                            available.Add((px, py, pz.Value));
+                        }
+                    }
+
+                    Collect(x0, y0, z00);
+                    Collect(x1, y0, z10);
+                    Collect(x1, y1, z11);
+                    Collect(x0, y1, z01);
+                    Collect(xm, ym, zc);
+                    Collect(xm, y0, zb);
+                    Collect(x1, ym, zr);
+                    Collect(xm, y1, zt);
+                    Collect(x0, ym, zl);
+                    error = PlaneFitResidual(available);
+                }
 
                 if (error <= tolerance)
                 {
@@ -259,6 +349,69 @@ namespace RevitMCP.Core.Grading
         }
     }
 
+    /// <summary>
+    /// XY 點的空間格網索引：「距任一已加入點 ≤ tolerance」的查詢由線性掃描 O(n) 降為常數（格寬＝容差，只查 3×3 格）。
+    /// 加密與板緣補點讓候選點數上看數千到數萬，原本對既有頂點與待加入點各掃一遍是 O(n²)。
+    /// </summary>
+    public sealed class PointGridIndex
+    {
+        private readonly double _tolerance;
+        private readonly double _cell;
+        private readonly Dictionary<(long, long), List<Point2D>> _cells = new Dictionary<(long, long), List<Point2D>>();
+
+        public PointGridIndex(double tolerance)
+        {
+            _tolerance = Math.Abs(tolerance);
+            _cell = Math.Max(_tolerance, 1e-9);
+        }
+
+        public int Count { get; private set; }
+
+        public void Add(double x, double y)
+        {
+            var key = KeyOf(x, y);
+            if (!_cells.TryGetValue(key, out var list))
+            {
+                list = new List<Point2D>();
+                _cells[key] = list;
+            }
+
+            list.Add(new Point2D(x, y));
+            Count++;
+        }
+
+        public bool HasNear(double x, double y)
+        {
+            var (cx, cy) = KeyOf(x, y);
+            var toleranceSquared = _tolerance * _tolerance;
+            for (var dx = -1L; dx <= 1; dx++)
+            {
+                for (var dy = -1L; dy <= 1; dy++)
+                {
+                    if (!_cells.TryGetValue((cx + dx, cy + dy), out var list))
+                    {
+                        continue;
+                    }
+
+                    foreach (var point in list)
+                    {
+                        var deltaX = point.X - x;
+                        var deltaY = point.Y - y;
+                        if ((deltaX * deltaX) + (deltaY * deltaY) <= toleranceSquared)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private (long, long) KeyOf(double x, double y) =>
+            ((long)Math.Floor(x / _cell), (long)Math.Floor(y / _cell));
+    }
+
     /// <summary>板緣取高程時的內推方向（純函式）。</summary>
     public static class BoundaryNudge
     {
@@ -267,6 +420,48 @@ namespace RevitMCP.Core.Grading
         /// 點在邊上（容差內）→ 該邊內法線；都不是回 false。方向為單位向量。
         /// </summary>
         public static bool TryInwardDirection(
+            IReadOnlyList<Point2D> loop,
+            Point2D point,
+            double tolerance,
+            out Point2D direction)
+        {
+            return TryInwardDirection(loop, null, point, tolerance, out direction);
+        }
+
+        /// <summary>
+        /// 含洞版本：點在外框上 → 朝外框內（進入板材）；點在洞環上 → 遠離洞（洞多邊形的外向，同樣是進入板材）。
+        /// 環形板的洞緣點若只看外框，會退回朝形心內推而推進洞裡。外框優先，再依序檢查各洞。
+        /// </summary>
+        public static bool TryInwardDirection(
+            IReadOnlyList<Point2D> outerLoop,
+            IReadOnlyList<IReadOnlyList<Point2D>> holes,
+            Point2D point,
+            double tolerance,
+            out Point2D direction)
+        {
+            if (TryLoopDirection(outerLoop, point, tolerance, out direction))
+            {
+                return true;
+            }
+
+            if (holes != null)
+            {
+                foreach (var hole in holes)
+                {
+                    if (TryLoopDirection(hole, point, tolerance, out var holeInward))
+                    {
+                        // 洞環的「多邊形內向」是進洞；板材在洞外，取反向。
+                        direction = new Point2D(-holeInward.X, -holeInward.Y);
+                        return true;
+                    }
+                }
+            }
+
+            direction = default(Point2D);
+            return false;
+        }
+
+        private static bool TryLoopDirection(
             IReadOnlyList<Point2D> loop,
             Point2D point,
             double tolerance,
