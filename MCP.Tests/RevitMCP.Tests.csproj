@@ -12,6 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\MCP\Core\Grading\GradingModels.cs" Link="Core\Grading\GradingModels.cs" />
+    <Compile Include="..\MCP\Core\Grading\SurfaceDensifier.cs" Link="Core\Grading\SurfaceDensifier.cs" />
     <Compile Include="..\MCP\Core\Grading\Polygon2D.cs" Link="Core\Grading\Polygon2D.cs" Condition="Exists('..\MCP\Core\Grading\Polygon2D.cs')" />
     <Compile Include="..\MCP\Core\Grading\SlopeClassifier.cs" Link="Core\Grading\SlopeClassifier.cs" Condition="Exists('..\MCP\Core\Grading\SlopeClassifier.cs')" />
     <Compile Include="..\MCP\Core\Grading\TransitionGeometry.cs" Link="Core\Grading\TransitionGeometry.cs" />

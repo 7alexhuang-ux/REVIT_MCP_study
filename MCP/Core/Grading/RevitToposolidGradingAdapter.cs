@@ -47,6 +47,19 @@ namespace RevitMCP.Core.Grading
         // 又遠小於表面抽樣驗收的板緣 margin（300 mm），使階差區落在驗收略過帶內。
         private const double StepInsetMillimeters = 30.0;
 
+        // 非平面板底內部加密：初始格距、自適應細分的線性內插中點誤差目標（遠低於 2 mm 驗收門檻，
+        // 留餘裕給三角剖分對角線方向與 Revit 重生的微小位移）、細分深度（最細格 = 格距 / 2^深度 ≈ 94 mm）、
+        // 單一區域點數上限、與板緣的最小距離（板緣已有邊界點，且貼緣處求交易失敗）。
+        private const double DensifyGridMillimeters = 1500.0;
+        private const double DensifyToleranceMillimeters = 0.5;
+        private const int DensifyMaxDepth = 4;
+        private const int DensifyMaxPointsPerRegion = 20000;
+        private const double DensifyBoundaryMarginMillimeters = 50.0;
+
+        // 非平面板緣補點：邊上自適應二分的最大層數與最短邊長（板緣補點使用相同的格距與誤差目標）。
+        private const int DensifyEdgeMaxDepth = 6;
+        private const double DensifyMinEdgeSegmentMillimeters = 100.0;
+
         // 銜接帶控制環密度：直邊最大弦長 1 m、凸角圓弧最大角步距 15°（貼合距離場坡腳、消除三角網過衝）。
         private static readonly double RingMaxChordFeet =
             UnitUtils.ConvertToInternalUnits(1000.0, UnitTypeId.Millimeters);
@@ -549,6 +562,58 @@ namespace RevitMCP.Core.Grading
                 pointsToAdd.Add(stepCandidate);
             }
 
+            // 彎曲（非平面）板底的內部加密：三角網只靠邊界點會以弦代弧（實機 317118 彎曲坡道偏差 16.9 mm）。
+            // 固定格距鋪點並自適應細分到線性內插中點誤差達標；格點扣洞、避開板緣、須落在地形範圍內。
+            using (_timeline.Measure("非平面板底內部加密"))
+            {
+                var gridStep = UnitUtils.ConvertToInternalUnits(DensifyGridMillimeters, UnitTypeId.Millimeters);
+                var densifyTolerance = UnitUtils.ConvertToInternalUnits(
+                    DensifyToleranceMillimeters, UnitTypeId.Millimeters);
+                var densifyMargin = UnitUtils.ConvertToInternalUnits(
+                    DensifyBoundaryMarginMillimeters, UnitTypeId.Millimeters);
+                foreach (var region in footprints.Where(fp => fp.RequiresInteriorDensification))
+                {
+                    var outer = region.OuterLoop;
+                    var densified = SurfaceDensifier.Build(
+                        region.BottomElevationAt,
+                        point => region.CoversOwnRegion(point, xyTolerance),
+                        point => region.NearestBoundary(point).Distance > densifyMargin,
+                        outer.Min(point => point.X),
+                        outer.Min(point => point.Y),
+                        outer.Max(point => point.X),
+                        outer.Max(point => point.Y),
+                        gridStep,
+                        densifyTolerance,
+                        DensifyMaxDepth,
+                        DensifyMaxPointsPerRegion);
+                    if (densified.HitLimit)
+                    {
+                        warnings.Add(
+                            $"樓板 ID {region.FloorId} 的非平面底面內部加密已達深度或點數上限，"
+                            + $"線性內插中點誤差最大 {UnitUtils.ConvertFromInternalUnits(densified.MaxResidual, UnitTypeId.Millimeters):F2} mm；"
+                            + "若表面抽樣驗收失敗請縮小該板範圍或改平面底面。");
+                    }
+
+                    foreach (var gridPoint in densified.Points)
+                    {
+                        var gridTerrainZ = IntersectTerrainTopZ(solids, gridPoint, rayBottomZ, rayTopZ);
+                        if (!gridTerrainZ.HasValue)
+                        {
+                            continue; // 規則 7：超出地形不處理。
+                        }
+
+                        var gridCandidate = new XYZ(gridPoint.X, gridPoint.Y, gridTerrainZ.Value);
+                        if (HasNearbyXY(existingPositions, gridCandidate, xyTolerance)
+                            || HasNearbyXY(pointsToAdd, gridCandidate, xyTolerance))
+                        {
+                            continue;
+                        }
+
+                        pointsToAdd.Add(gridCandidate);
+                    }
+                }
+            }
+
             boundarySampleScope.Dispose();
 
             if (pointsToAdd.Count > 0)
@@ -666,6 +731,7 @@ namespace RevitMCP.Core.Grading
                 var capTolerance = UnitUtils.ConvertToInternalUnits(
                     BurialToleranceMillimeters, UnitTypeId.Millimeters);
                 var cappedFloorIds = new SortedSet<long>();
+                var unreadableCapFloorIds = new SortedSet<long>();
                 var bandScope = _timeline.Measure("銜接帶頂點分類");
                 for (var positionIndex = 0; positionIndex < allPositions.Count; positionIndex++)
                 {
@@ -716,8 +782,18 @@ namespace RevitMCP.Core.Grading
                     // 不覆蓋政策：頂點落在外露非控制樓板投影內（洞內不算）→ 目標壓至板底以下。
                     foreach (var capFloor in capFloorFootprints)
                     {
-                        if (!capFloor.TryLowestBottomZ(sample, xyTolerance, out var floorBottomZ))
+                        double floorBottomZ;
+                        try
                         {
+                            if (!capFloor.TryLowestBottomZ(sample, xyTolerance, out floorBottomZ))
+                            {
+                                continue;
+                            }
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            // 非控制樓板只做壓蓋保護：取不到板底就略過該板（警告一次），不中止整批整地。
+                            unreadableCapFloorIds.Add(capFloor.FloorId);
                             continue;
                         }
 
@@ -745,6 +821,13 @@ namespace RevitMCP.Core.Grading
                     warnings.Add(
                         $"非控制樓板 ID {cappedFloorId} 位於放坡帶內：設計地形已壓至其底面以下、不覆蓋該板；"
                         + "如需連續放坡請將該板納入 floorIds 一併整地。");
+                }
+
+                foreach (var unreadableFloorId in unreadableCapFloorIds)
+                {
+                    warnings.Add(
+                        $"非控制樓板 ID {unreadableFloorId} 位於放坡帶內但取不到板底高程（非平面底面求交失敗），"
+                        + "已略過該板的壓蓋保護；請檢查整地後是否蓋過該板。");
                 }
             }
 
@@ -1456,6 +1539,7 @@ namespace RevitMCP.Core.Grading
                 foreach (var candidate in candidates)
                 {
                     var samples = new List<(double FloorBottomZ, double OriginalZ, double FieldTargetZ)>();
+                    var candidateUnreadable = false;
                     var extent = ComputeDisturbedExtent(new[] { candidate }, 0.0);
                     for (var x = extent.MinX + (sampleStep / 2); x <= extent.MaxX; x += sampleStep)
                     {
@@ -1463,8 +1547,17 @@ namespace RevitMCP.Core.Grading
                         {
                             var sample = new Point2D(x, y);
                             // 覆蓋判定含洞、含候選板的全部朝下面；落在洞內的取樣點不屬該板。
-                            if (!candidate.TryLowestBottomZ(sample, xyTolerance, out var candidateBottomZ))
+                            double candidateBottomZ;
+                            try
                             {
+                                if (!candidate.TryLowestBottomZ(sample, xyTolerance, out candidateBottomZ))
+                                {
+                                    continue;
+                                }
+                            }
+                            catch (InvalidOperationException)
+                            {
+                                candidateUnreadable = true;
                                 continue;
                             }
 
@@ -1512,6 +1605,14 @@ namespace RevitMCP.Core.Grading
                         }
                     }
 
+                    if (candidateUnreadable)
+                    {
+                        warnings.Add(
+                            $"非控制樓板 ID {candidate.FloorId} 取不到部分板底高程（非平面底面求交失敗），"
+                            + "已略過自動納入連續放坡；該板仍由壓蓋保護處理。");
+                        continue;
+                    }
+
                     if (!FloorBurialCheck.ShouldAutoInclude(samples, tolerance))
                     {
                         continue;
@@ -1521,9 +1622,21 @@ namespace RevitMCP.Core.Grading
                     // 判斷只用於「要不要自動納入」：整地主流程的重疊已改取最低板底、不再報錯，
                     // 但自動納入的非控制板若與控制板疊在同一處又不等高，納入會改變使用者沒選的板的處理，故仍退回壓蓋。
                     var candidateRegions = candidate.SplitRegions();
-                    if (candidateRegions.Any(region => working.Any(existing =>
-                        FootprintCoverage.HasElevationConflict(
-                            existing, region, xyTolerance, elevationTolerance))))
+                    bool conflicting;
+                    try
+                    {
+                        conflicting = candidateRegions.Any(region => working.Any(existing =>
+                            FootprintCoverage.HasElevationConflict(
+                                existing, region, xyTolerance, elevationTolerance)));
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        warnings.Add(
+                            $"非控制樓板 ID {candidate.FloorId} 取不到板底高程（非平面底面求交失敗），已略過自動納入連續放坡。");
+                        continue;
+                    }
+
+                    if (conflicting)
                     {
                         warnings.Add(
                             $"非控制樓板 ID {candidate.FloorId} 會被放坡覆蓋，但與控制樓板投影重疊且底面高程衝突，"
@@ -2039,15 +2152,35 @@ namespace RevitMCP.Core.Grading
                 return null;
             }
 
+            var elevation = BuildBottomElevationFunction(floorId, face, discretized[0], zLow, zHigh);
+            var outerLoop = discretized[0];
+            var holeLoops = discretized
+                .Skip(1)
+                .Where(points => Math.Abs(SignedArea(points)) >= MinimumBottomFaceAreaSquareFeet)
+                .ToList();
+            var nonPlanar = !(face is PlanarFace);
+            if (nonPlanar)
+            {
+                // 非平面：直邊兩端點間線性內插會以弦代弧，板緣先補點（弦長與自適應），
+                // 板緣頂點本身貼合曲面；內部另由 SurfaceDensifier.Build 在 ApplyGrading 加密。
+                var maxSegment = UnitUtils.ConvertToInternalUnits(DensifyGridMillimeters, UnitTypeId.Millimeters);
+                var tolerance = UnitUtils.ConvertToInternalUnits(DensifyToleranceMillimeters, UnitTypeId.Millimeters);
+                var minSegment = UnitUtils.ConvertToInternalUnits(DensifyMinEdgeSegmentMillimeters, UnitTypeId.Millimeters);
+                outerLoop = SurfaceDensifier.RefineLoop(
+                    outerLoop, elevation, maxSegment, tolerance, DensifyEdgeMaxDepth, minSegment);
+                holeLoops = holeLoops
+                    .Select(hole => SurfaceDensifier.RefineLoop(
+                        hole, elevation, maxSegment, tolerance, DensifyEdgeMaxDepth, minSegment))
+                    .ToList();
+            }
+
             return new FloorFootprint
             {
                 FloorId = floorId,
-                OuterLoop = discretized[0],
-                Holes = discretized
-                    .Skip(1)
-                    .Where(points => Math.Abs(SignedArea(points)) >= MinimumBottomFaceAreaSquareFeet)
-                    .ToList(),
-                BottomElevationAt = BuildBottomElevationFunction(floorId, face, discretized[0], zLow, zHigh)
+                OuterLoop = outerLoop,
+                Holes = holeLoops.Select(hole => (IReadOnlyList<Point2D>)hole).ToList(),
+                BottomElevationAt = elevation,
+                RequiresInteriorDensification = nonPlanar
             };
         }
 
@@ -2100,15 +2233,40 @@ namespace RevitMCP.Core.Grading
                 return lowest;
             }
 
+            var boundaryTolerance = UnitUtils.ConvertToInternalUnits(2.0, UnitTypeId.Millimeters);
             return (x, y) =>
             {
-                var towardX = centroidX - x;
-                var towardY = centroidY - y;
+                var direct = IntersectVertical(x, y);
+                if (direct.HasValue)
+                {
+                    return direct.Value;
+                }
+
+                // 內推方向：點在外框頂點／邊上時沿該頂點內向角平分線（邊上為內法線），
+                // 凹形（L／U 形）的凸角朝形心內推會指到面外；不在邊界上才退回朝形心。
+                double towardX;
+                double towardY;
+                if (BoundaryNudge.TryInwardDirection(outerLoop, new Point2D(x, y), boundaryTolerance, out var inward))
+                {
+                    towardX = inward.X;
+                    towardY = inward.Y;
+                }
+                else
+                {
+                    towardX = centroidX - x;
+                    towardY = centroidY - y;
+                }
+
                 var length = Math.Sqrt((towardX * towardX) + (towardY * towardY));
                 foreach (var nudge in nudgesFeet)
                 {
-                    var sampleX = nudge > 0 && length > 1e-12 ? x + (towardX / length * nudge) : x;
-                    var sampleY = nudge > 0 && length > 1e-12 ? y + (towardY / length * nudge) : y;
+                    if (nudge <= 0 || length <= 1e-12)
+                    {
+                        continue; // 第 0 次（不內推）已在上面試過。
+                    }
+
+                    var sampleX = x + (towardX / length * nudge);
+                    var sampleY = y + (towardY / length * nudge);
                     var z = IntersectVertical(sampleX, sampleY);
                     if (z.HasValue)
                     {
