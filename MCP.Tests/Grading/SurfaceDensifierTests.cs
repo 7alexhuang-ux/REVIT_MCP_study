@@ -309,6 +309,155 @@ namespace RevitMCP.Tests.Grading
         }
 
         [Test]
+        public void InwardDirection_OnHoleRing_PointsAwayFromHole_NotIntoIt()
+        {
+            // 環形板：外框 0..20、洞 5..15。洞緣點的「內向」要進入板材（遠離洞）。
+            var outer = Square(20);
+            var hole = new List<Point2D> { new Point2D(5, 5), new Point2D(15, 5), new Point2D(15, 15), new Point2D(5, 15) };
+            var holes = new List<IReadOnlyList<Point2D>> { hole };
+            var ring = new FloorFootprint { FloorId = 1, OuterLoop = outer, Holes = holes };
+            const double eps = 0.02;
+
+            // 洞緣邊上（左邊 x=5）：朝 -x（遠離洞）。
+            Assert.That(BoundaryNudge.TryInwardDirection(outer, holes, new Point2D(5, 10), 1e-6, out var onEdge), Is.True);
+            Assert.That(onEdge.X, Is.EqualTo(-1).Within(1e-9));
+            Assert.That(onEdge.Y, Is.EqualTo(0).Within(1e-9));
+            Assert.That(ring.CoversOwnRegion(new Point2D(5 + (eps * onEdge.X), 10), 1e-6), Is.True);
+
+            // 洞角（5,5）：朝 (-1,-1)/√2，落在板材內。
+            Assert.That(BoundaryNudge.TryInwardDirection(outer, holes, new Point2D(5, 5), 1e-6, out var corner), Is.True);
+            Assert.That(corner.X, Is.EqualTo(-Math.Sqrt(0.5)).Within(1e-9));
+            Assert.That(corner.Y, Is.EqualTo(-Math.Sqrt(0.5)).Within(1e-9));
+            Assert.That(ring.CoversOwnRegion(new Point2D(5 + (eps * corner.X), 5 + (eps * corner.Y)), 1e-6), Is.True);
+
+            // 外框邊上仍朝外框內；只看外框的舊版本對洞緣點回 false（改走形心備援會推進洞中央）。
+            Assert.That(BoundaryNudge.TryInwardDirection(outer, holes, new Point2D(10, 0), 1e-6, out var outerEdge), Is.True);
+            Assert.That(outerEdge.Y, Is.EqualTo(1).Within(1e-9));
+            Assert.That(BoundaryNudge.TryInwardDirection(outer, new Point2D(5, 10), 1e-6, out _), Is.False);
+        }
+
+        [Test]
+        public void OriginalOuterLoop_KeepsEdgePolicyMatching_AndOutlineEdge_OnOriginalEdges()
+        {
+            // 非平面板緣補點後（OuterLoop 被細分成 1.5 m 子線段），邊坡率政策與指紋仍要對原始邊。
+            var original = Square(30);
+            var refined = SurfaceDensifier.RefineLoop(
+                original, (x, y) => 0.0, maxSegment: 1.5, tolerance: 0.0005, maxDepth: 6, minSegment: 0.1);
+            Assert.That(refined.Count, Is.GreaterThan(original.Count));
+
+            var footprint = new FloorFootprint { FloorId = 5, OuterLoop = refined, OriginalOuterLoop = original };
+            var policies = new[] { EdgeSlopePolicies.FingerprintFromSegment(original[0], original[1], 12.0) };
+
+            var (ratesOriginal, unmatchedOriginal) =
+                EdgeSlopePolicies.MatchEdgeRates(footprint.OutlineLoop, policies, 2.0);
+            Assert.That(unmatchedOriginal, Is.Empty);
+            Assert.That(ratesOriginal.Count, Is.EqualTo(4));
+            Assert.That(ratesOriginal[0], Is.EqualTo(12.0));
+
+            // 反證：拿補點後的子線段去比對，政策對不上（被忽略）。
+            var (_, unmatchedRefined) = EdgeSlopePolicies.MatchEdgeRates(footprint.OuterLoop, policies, 2.0);
+            Assert.That(unmatchedRefined, Is.Not.Empty);
+
+            var field = new BoundaryRateField(footprint.OutlineLoop, ratesOriginal, 2.0);
+            Assert.That(field.RateAt(new Point2D(15, -0.5)), Is.EqualTo(12.0).Within(1e-9));
+
+            // 取邊（含 SplitRegions 後）回傳原始邊，指紋才對得上。
+            foreach (var region in footprint.SplitRegions())
+            {
+                Assert.That(region.OutlineLoop, Is.SameAs(original));
+            }
+
+            var edge = footprint.NearestOutlineEdge(new Point2D(15, -0.5), 1e-6);
+            Assert.That(edge.RegionIndex, Is.EqualTo(0));
+            Assert.That(edge.EdgeIndex, Is.EqualTo(0));
+            Assert.That(edge.Start.X, Is.EqualTo(0));
+            Assert.That(edge.End.X, Is.EqualTo(30));
+        }
+
+        [Test]
+        public void PointGridIndex_MatchesLinearScan_AndIsFast()
+        {
+            const double tolerance = 0.003;
+            var random = new Random(7);
+            var points = Enumerable.Range(0, 20000)
+                .Select(_ => new Point2D(random.NextDouble() * 200, random.NextDouble() * 200))
+                .ToList();
+            var index = new PointGridIndex(tolerance);
+            foreach (var point in points)
+            {
+                index.Add(point.X, point.Y);
+            }
+
+            Assert.That(index.Count, Is.EqualTo(points.Count));
+            for (var n = 0; n < 300; n++)
+            {
+                // 一半取已存在點附近（跨格邊界也要命中），一半取隨機點。
+                var probe = n % 2 == 0
+                    ? new Point2D(points[n * 7].X + (tolerance * 0.9 * ((n % 4) - 1.5) / 1.5), points[n * 7].Y)
+                    : new Point2D(random.NextDouble() * 200, random.NextDouble() * 200);
+                var expected = points.Any(p =>
+                    ((p.X - probe.X) * (p.X - probe.X)) + ((p.Y - probe.Y) * (p.Y - probe.Y)) <= tolerance * tolerance);
+                Assert.That(index.HasNear(probe.X, probe.Y), Is.EqualTo(expected), $"n={n}");
+            }
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var hits = 0;
+            for (var n = 0; n < 20000; n++)
+            {
+                if (index.HasNear(points[n].X, points[n].Y))
+                {
+                    hits++;
+                }
+            }
+
+            stopwatch.Stop();
+            Assert.That(hits, Is.EqualTo(20000));
+            Assert.That(stopwatch.ElapsedMilliseconds, Is.LessThan(1000), "2 萬次查詢（線性掃描約 4 億次比較）應遠低於 1 秒");
+        }
+
+        [Test]
+        public void PartialCellStraddlingBoundary_IsEstimatedFromInsidePoints_AndFlagsHitLimit()
+        {
+            // 只有跨邊界那一格（x∈[19.5,21]，邊界在 x=20.5）有曲率：其餘格為平面。
+            // 舊版本任何缺點的組合都當 0 誤差，這格既不細分也不警告；現在只用區域內的取樣點估誤差。
+            double Surface(double x, double y) => x >= 19.6 ? 0.1 * (y - 0.75) * (y - 0.75) : 0.0;
+
+            var result = SurfaceDensifier.Build(
+                Surface,
+                point => point.X <= 20.5 && point.Y >= 0 && point.Y <= 1.5,
+                point => true,
+                0, 0, 21, 1.5,
+                initialStep: 1.5, tolerance: 0.0005, maxDepth: 0, maxPoints: 1000);
+
+            Assert.That(result.HitLimit, Is.True, "跨邊界格誤差超標、已達深度上限，必須警告");
+            Assert.That(result.MaxResidual, Is.GreaterThan(0.0005));
+
+            // 同一格若允許細分則會細分（加入中心與邊中點）。
+            var refined = SurfaceDensifier.Build(
+                Surface,
+                point => point.X <= 20.5 && point.Y >= 0 && point.Y <= 1.5,
+                point => true,
+                0, 0, 21, 1.5,
+                initialStep: 1.5, tolerance: 0.0005, maxDepth: 3, maxPoints: 1000);
+            Assert.That(refined.Points.Count, Is.GreaterThan(result.Points.Count));
+        }
+
+        [Test]
+        public void FullyOutsideCell_IsZeroError_NoWarning()
+        {
+            var result = SurfaceDensifier.Build(
+                (x, y) => x * x,
+                point => point.X <= 1.0,
+                point => true,
+                0, 0, 6, 1.5,
+                initialStep: 1.5, tolerance: 0.0005, maxDepth: 0, maxPoints: 100);
+
+            // 只有 x≤1 的點可用；落在區域外的格（x≥1.5）可用點為 0，誤差當 0，不應警告。
+            // 第一格（x∈[0,1.5]）可用點只落在 x=0、0.75 兩個 x 位置（對 x 線性可完全擬合），誤差 0。
+            Assert.That(result.HitLimit, Is.False);
+        }
+
+        [Test]
         public void BuildStepRings_DoesNotAbort_WhenNonPlanarFaceCannotEvaluate()
         {
             var flat = new FloorFootprint

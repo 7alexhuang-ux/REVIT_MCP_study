@@ -501,6 +501,21 @@ namespace RevitMCP.Core.Grading
             var rayBottomZ = boundingBox.Min.Z - 10.0;
             var rayTopZ = boundingBox.Max.Z + 10.0;
             var pointsToAdd = new List<XYZ>();
+            // 候選點去重用空間格網索引（格寬＝容差），取代對既有頂點與待加入點的線性掃描（O(n²)）。
+            var existingIndex = BuildPointIndex(existingPositions, xyTolerance);
+            var addedIndex = new PointGridIndex(xyTolerance);
+            bool QueueCandidate(XYZ candidate)
+            {
+                if (existingIndex.HasNear(candidate.X, candidate.Y) || addedIndex.HasNear(candidate.X, candidate.Y))
+                {
+                    return false;
+                }
+
+                pointsToAdd.Add(candidate);
+                addedIndex.Add(candidate.X, candidate.Y);
+                return true;
+            }
+
             var boundarySampleScope = _timeline.Measure("邊界射線取樣");
             foreach (var footprint in footprints)
             {
@@ -516,14 +531,7 @@ namespace RevitMCP.Core.Grading
                     }
 
                     terrainHitCount++;
-                    var candidate = new XYZ(boundaryPoint.X, boundaryPoint.Y, terrainZ.Value);
-                    if (HasNearbyXY(existingPositions, candidate, xyTolerance)
-                        || HasNearbyXY(pointsToAdd, candidate, xyTolerance))
-                    {
-                        continue;
-                    }
-
-                    pointsToAdd.Add(candidate);
+                    QueueCandidate(new XYZ(boundaryPoint.X, boundaryPoint.Y, terrainZ.Value));
                 }
 
                 if (terrainHitCount == 0
@@ -537,29 +545,28 @@ namespace RevitMCP.Core.Grading
                 }
             }
 
+            boundarySampleScope.Dispose();
+
             // 階差環：相鄰／重疊的板底不同高時，較高板底一側在共邊旁加一圈緊貼的點（見 FootprintCoverage.BuildStepRings），
             // 讓階差接近垂直，避免地形從共邊斜到較高板內下一個頂點、挖出楔形。
-            var stepRings = FootprintCoverage.BuildStepRings(
-                footprints,
-                UnitUtils.ConvertToInternalUnits(StepInsetMillimeters, UnitTypeId.Millimeters),
-                xyTolerance,
-                elevationTolerance);
-            foreach (var stepPoint in stepRings.SelectMany(ring => ring).Where(point => point.HasValue).Select(point => point.Value))
+            IReadOnlyList<IReadOnlyList<Point2D?>> stepRings;
+            using (_timeline.Measure("階差環取樣"))
             {
-                var stepTerrainZ = IntersectTerrainTopZ(solids, stepPoint, rayBottomZ, rayTopZ);
-                if (!stepTerrainZ.HasValue)
+                stepRings = FootprintCoverage.BuildStepRings(
+                    footprints,
+                    UnitUtils.ConvertToInternalUnits(StepInsetMillimeters, UnitTypeId.Millimeters),
+                    xyTolerance,
+                    elevationTolerance);
+                foreach (var stepPoint in stepRings.SelectMany(ring => ring).Where(point => point.HasValue).Select(point => point.Value))
                 {
-                    continue; // 規則 7：超出地形不處理。
-                }
+                    var stepTerrainZ = IntersectTerrainTopZ(solids, stepPoint, rayBottomZ, rayTopZ);
+                    if (!stepTerrainZ.HasValue)
+                    {
+                        continue; // 規則 7：超出地形不處理。
+                    }
 
-                var stepCandidate = new XYZ(stepPoint.X, stepPoint.Y, stepTerrainZ.Value);
-                if (HasNearbyXY(existingPositions, stepCandidate, xyTolerance)
-                    || HasNearbyXY(pointsToAdd, stepCandidate, xyTolerance))
-                {
-                    continue;
+                    QueueCandidate(new XYZ(stepPoint.X, stepPoint.Y, stepTerrainZ.Value));
                 }
-
-                pointsToAdd.Add(stepCandidate);
             }
 
             // 彎曲（非平面）板底的內部加密：三角網只靠邊界點會以弦代弧（實機 317118 彎曲坡道偏差 16.9 mm）。
@@ -602,19 +609,10 @@ namespace RevitMCP.Core.Grading
                             continue; // 規則 7：超出地形不處理。
                         }
 
-                        var gridCandidate = new XYZ(gridPoint.X, gridPoint.Y, gridTerrainZ.Value);
-                        if (HasNearbyXY(existingPositions, gridCandidate, xyTolerance)
-                            || HasNearbyXY(pointsToAdd, gridCandidate, xyTolerance))
-                        {
-                            continue;
-                        }
-
-                        pointsToAdd.Add(gridCandidate);
+                        QueueCandidate(new XYZ(gridPoint.X, gridPoint.Y, gridTerrainZ.Value));
                     }
                 }
             }
-
-            boundarySampleScope.Dispose();
 
             if (pointsToAdd.Count > 0)
             {
@@ -667,15 +665,18 @@ namespace RevitMCP.Core.Grading
 
                 var positionsAfterBoundary = CollectVertexPositions(editor);
                 var ringPoints = new List<XYZ>();
+                var positionsAfterBoundaryIndex = BuildPointIndex(positionsAfterBoundary, xyTolerance);
+                var ringIndex = new PointGridIndex(xyTolerance);
                 foreach (var candidate in transitionRings.SelectMany(ring => ring).Concat(bandFill))
                 {
-                    if (HasNearbyXY(positionsAfterBoundary, candidate, xyTolerance)
-                        || HasNearbyXY(ringPoints, candidate, xyTolerance))
+                    if (positionsAfterBoundaryIndex.HasNear(candidate.X, candidate.Y)
+                        || ringIndex.HasNear(candidate.X, candidate.Y))
                     {
                         continue;
                     }
 
                     ringPoints.Add(candidate);
+                    ringIndex.Add(candidate.X, candidate.Y);
                 }
 
                 if (ringPoints.Count > 0)
@@ -1018,18 +1019,15 @@ namespace RevitMCP.Core.Grading
             return positions;
         }
 
-        private static bool HasNearbyXY(IReadOnlyList<XYZ> points, XYZ candidate, double tolerance)
+        private static PointGridIndex BuildPointIndex(IReadOnlyList<XYZ> points, double tolerance)
         {
-            var toleranceSquared = tolerance * tolerance;
+            var index = new PointGridIndex(tolerance);
             foreach (var point in points)
             {
-                if (XYDistanceSquared(point, candidate) <= toleranceSquared)
-                {
-                    return true;
-                }
+                index.Add(point.X, point.Y);
             }
 
-            return false;
+            return index;
         }
 
         private static double XYDistanceSquared(XYZ first, XYZ second)
@@ -1249,7 +1247,7 @@ namespace RevitMCP.Core.Grading
                 }
 
                 var (edgeRates, unmatched) = EdgeSlopePolicies.MatchEdgeRates(
-                    footprint.OuterLoop, policies, settings.RunPerRise);
+                    footprint.OutlineLoop, policies, settings.RunPerRise);
                 if (unmatched.Count > 0)
                 {
                     warnings.Add(
@@ -1260,7 +1258,7 @@ namespace RevitMCP.Core.Grading
                 if (edgeRates.Any(rate => Math.Abs(rate - settings.RunPerRise) > 1e-12))
                 {
                     fields[index] = new BoundaryRateField(
-                        footprint.OuterLoop, edgeRates, ToInternalMeters(BoundaryRateBlendMeters));
+                        footprint.OutlineLoop, edgeRates, ToInternalMeters(BoundaryRateBlendMeters));
                 }
             }
 
@@ -2152,12 +2150,14 @@ namespace RevitMCP.Core.Grading
                 return null;
             }
 
-            var elevation = BuildBottomElevationFunction(floorId, face, discretized[0], zLow, zHigh);
-            var outerLoop = discretized[0];
+            var originalOuterLoop = discretized[0];
+            var outerLoop = originalOuterLoop;
             var holeLoops = discretized
                 .Skip(1)
                 .Where(points => Math.Abs(SignedArea(points)) >= MinimumBottomFaceAreaSquareFeet)
                 .ToList();
+            var elevation = BuildBottomElevationFunction(
+                floorId, face, originalOuterLoop, holeLoops, zLow, zHigh);
             var nonPlanar = !(face is PlanarFace);
             if (nonPlanar)
             {
@@ -2178,6 +2178,8 @@ namespace RevitMCP.Core.Grading
             {
                 FloorId = floorId,
                 OuterLoop = outerLoop,
+                // 細分前的原始外框：邊坡率政策指紋與逐邊坡率比對都以原始邊為準（子線段歸回原邊）。
+                OriginalOuterLoop = nonPlanar ? originalOuterLoop : null,
                 Holes = holeLoops.Select(hole => (IReadOnlyList<Point2D>)hole).ToList(),
                 BottomElevationAt = elevation,
                 RequiresInteriorDensification = nonPlanar
@@ -2188,6 +2190,7 @@ namespace RevitMCP.Core.Grading
             long floorId,
             Face face,
             IReadOnlyList<Point2D> outerLoop,
+            IReadOnlyList<IReadOnlyList<Point2D>> holeLoops,
             double zLow,
             double zHigh)
         {
@@ -2246,7 +2249,9 @@ namespace RevitMCP.Core.Grading
                 // 凹形（L／U 形）的凸角朝形心內推會指到面外；不在邊界上才退回朝形心。
                 double towardX;
                 double towardY;
-                if (BoundaryNudge.TryInwardDirection(outerLoop, new Point2D(x, y), boundaryTolerance, out var inward))
+                // 洞緣上的點：「內向」是遠離洞（進入板材），不是朝外框內（會推進洞裡）。
+                if (BoundaryNudge.TryInwardDirection(
+                    outerLoop, holeLoops, new Point2D(x, y), boundaryTolerance, out var inward))
                 {
                     towardX = inward.X;
                     towardY = inward.Y;

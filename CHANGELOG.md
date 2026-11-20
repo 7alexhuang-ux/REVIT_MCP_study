@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+### 🔧 修正 — 整地：三審四點（洞緣內推、邊坡率原始邊、格網索引、跨界格誤差）（2026-11-20）
+
+- 洞緣內推：`BoundaryNudge.TryInwardDirection` 新增含洞版本；點在洞環上時「內向」＝遠離洞（進入板材），不再只看外框而退回朝形心內推（環形板形心常在洞中央，會推進洞裡、三次失敗丟例外中止）。`BuildBottomElevationFunction` 改傳洞環。
+- 邊坡率政策綁原始邊：`RefineLoop` 補點只改 `OuterLoop`；`FloorFootprint` 新增 `OriginalOuterLoop`／`OutlineLoop`（細分前原始外框，`SplitRegions` 保留）。`BuildBoundaryRateFields`（`MatchEdgeRates`、`BoundaryRateField`）與 `NearestOutlineEdge`（`set_floor_edge_slope` 指紋）改用 `OutlineLoop`，政策不會綁到子邊或因長度不符被忽略。
+- 效能：新增純函式 `PointGridIndex`（格寬＝容差，只查 3×3 格），取代 `HasNearbyXY` 對既有頂點與待加入點的 O(n²) 線性掃描（邊界、階差環、加密點、銜接帶外圈四處）。耗時階段：既有 Timing.Stages 現有獨立的「邊界射線取樣」「階差環取樣」「非平面板底內部加密」三筆（先前加密與階差環包在邊界射線取樣內）；板緣補點（`RefineLoop`）發生在樓板底面擷取階段。
+- 跨邊界格誤差：`SurfaceDensifier.Build` 對有取樣點落洞內／板外的格子，改只用區域內的點（過最分散三點作平面，量其餘點偏離）估誤差；可用點 <4 才當 0。跨界格誤差超標而到深度／點數上限，納入「達上限」警告統計。
+- 測試：NUnit 496 通過（新增 5 項：環形板洞緣內推、原始邊政策比對與取邊、格網索引對照線性掃描與速度、跨界格誤差與警告、全在區域外不警告）；R24 建置 0 錯誤。未連 Revit、未部署。
+
 ### 🔧 修正 — 整地：彎曲（非平面）板底內部加密與板緣補點，及複審三點（2026-11-20）
 
 - 實機失敗：315196＋314871 成功（CUT 7588.2／FILL 2693.8 m³）；加入 317118（彎曲坡道，XY 約 37×92 m）後表面抽樣偏離板底 16.9 mm 回滾。原因：非平面底面只有邊界點，三角網以弦代弧。
