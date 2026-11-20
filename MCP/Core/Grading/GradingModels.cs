@@ -39,6 +39,27 @@ namespace RevitMCP.Core.Grading
     {
         public long FloorId { get; set; }
         public IReadOnlyList<Point2D> OuterLoop { get; set; }
+
+        /// <summary>
+        /// Openings in the bottom face (e.g. an outdoor ring slab with the building cut out).
+        /// A point strictly inside a hole is not part of this footprint; a point on a hole's
+        /// edge is.
+        /// </summary>
+        public IReadOnlyList<IReadOnlyList<Point2D>> InnerLoops { get; set; }
+            = Array.Empty<IReadOnlyList<Point2D>>();
+
+        public IEnumerable<IReadOnlyList<Point2D>> AllLoops
+        {
+            get
+            {
+                yield return OuterLoop;
+                foreach (var hole in InnerLoops)
+                {
+                    yield return hole;
+                }
+            }
+        }
+
         public Func<double, double, double> BottomElevationAt { get; set; }
     }
 

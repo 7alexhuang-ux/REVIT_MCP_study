@@ -422,12 +422,15 @@ export const visualizationTools: Tool[] = [
     },
     {
         name: "get_view_graphics_diagnostics",
-        description: "唯讀診斷『這張圖現在為什麼長這樣』：依 Revit 覆寫優先序一次回報視覺型式 (DisplayStyle)、套用中的視圖樣板與它鎖住的參數、視圖篩選器（含是否抓到目標元素、是否把它隱藏）、指定元素的個別圖形覆寫、其品類覆寫與可見性，以及該元素材料的 Surface/Cut 填充樣式與顏色。Verdict 會列出『所有』命中的成因並依優先序排序（不是只回第一個），涵蓋填滿顏色、線色、線寬、半色調、透明度與隱藏，每筆附影響範圍與修正方式。用於接手他人模型時追查表現法被誰改掉，省去逐層手動比對。不開 Transaction、不修改模型。",
+        description: "唯讀診斷『這張圖現在為什麼長這樣』，涵蓋所有視覺型式（線框／隱藏線／著色／一致的顏色／擬真／光線追蹤）與所有會改變外觀的層級：視圖（視覺型式、圖形顯示選項：陰影／光源／背景／素描線／深度提示／曝光、工作共用顯示模式、暫時隱藏隔離與暫時視圖性質、剖面框、階段與階段篩選器、篩選器順序、連結顯示設定）、視圖樣板鎖住的全部參數、篩選器、元素（個別覆寫、在視圖中隱藏、工作集可見性、階段狀態表現法、設計選項、實例／類型材料參數含『依品類』）、品類與子品類（V/G 覆寫、可見性、物件樣式線色／線寬／品類材料）、材料圖形頁籤（著色顏色、透明度、表面／剖面填充）、材料外觀資產（擬真模式實際用的顏色、貼圖路徑、貼圖平均色與斑駁度、實際尺寸、色彩 Tint、風化）、油漆塗面，以及樓梯梯段／平台等子構件。ModeResolution 列出每種視覺型式下表面顏色由哪個來源決定。帶 elementIds 時另做多元素比對，回答『同材料為何顏色不同』。Verdict 依優先序列出所有命中的成因與修正方式。不開 Transaction、不修改模型。",
         inputSchema: {
             type: "object",
             properties: {
                 viewId: { type: "number", description: "要診斷的視圖 Element ID（省略 = 目前作用中的視圖）" },
                 elementId: { type: "number", description: "要追查的元素 Element ID（選填）。省略時只回報視圖層級資訊，不含元素覆寫與材料。" },
+                elementIds: { type: "array", items: { type: "number" }, description: "多元素比對（選填）：逐一比較實際材料（含子構件）、油漆塗面、個別覆寫，回答同材料為何長得不一樣。未帶 elementId 時以第一個元素做完整診斷。" },
+                listCategoryOverrides: { type: "boolean", description: "true = 另外回傳 CategoryOverrides：此視圖（或視圖樣板）V/G Model Categories 中所有有覆寫的品類與子品類，含線色／線寬／線型、填充圖案與可見性、半色調、透明度、詳細等級。用來比對兩張圖的 V/G 差異。" },
+                includeSiteReference: { type: "boolean", description: "true = 另外回傳 SiteReference：主檔與每個連結文件的專案基準點／測量點（內部座標 mm）、樓層內部與專案高程、連結 Transform、等高線標籤與高程點元素及其類型參數、Toposolid/Topography 高程參數。用來查等高線或高程標籤出現奇怪小數的原因。" },
             },
         },
     },

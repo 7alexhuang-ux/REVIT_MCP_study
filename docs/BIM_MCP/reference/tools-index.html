@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tools 索引（223 個）· BIM_MCP</title>
-<meta property="og:title" content="RevitMCP Tools 索引：223 個執行層工具">
-<meta property="og:description" content="223 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
+<title>Tools 索引（229 個）· BIM_MCP</title>
+<meta property="og:title" content="RevitMCP Tools 索引：229 個執行層工具">
+<meta property="og:description" content="229 個 MCP 工具 × 唯讀/寫入標註 × 來源模組。Tool 是執行層，方法在 Domain、編排在 Skill。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@300;400;600;700;800&display=swap">
@@ -89,17 +89,17 @@
 </nav>
 
 <header class="bim-hero">
-  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">223 個</span></div>
+  <div class="bim-hero-eyebrow">TOOLS INDEX <span class="accent">229 個</span></div>
   <h1 class="bim-hero-title">Tools · <span class="accent">執行層</span><br>模型上真正被動到的那一下</h1>
-  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 223 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
+  <p class="bim-hero-sub">Tool 是<strong>執行</strong>。它不決定方法，也不決定順序——方法在 <a href="domain-index.html">Domain</a>，順序在 <a href="skills-index.html">Skill</a>。這一頁把 229 個工具攤開，讓你看得到「有什麼」以及「哪些會動到模型」。</p>
 </header>
 
 <section class="bim-section">
   <h2 class="bim-section-title">先看懂三個標記</h2>
   <p>每張卡右上角的標記來自工具自己宣告的 <code>annotations</code>，不是這一頁另外標的——閘門 <code>9-1</code> 會驗證它們與程式碼一致。</p>
   <ul>
-    <li><strong>唯讀</strong>（97 個）——只讀模型；部分工具會寫出外部檔案。跑錯了不會修改 Revit 模型。</li>
-    <li><strong>會寫入</strong>（123 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
+    <li><strong>唯讀</strong>（101 個）——只讀模型；部分工具會寫出外部檔案。跑錯了不會修改 Revit 模型。</li>
+    <li><strong>會寫入</strong>（125 個）——會在 Transaction 裡改模型，但不刪除既有內容。可以 Undo，但會進 Revit 的復原堆疊。</li>
     <li><strong>破壞性</strong>（3 個）——刪除或不可逆地取代既有內容：<code>curate_mep_sizes · dedup_detail_elements_in_view · delete_element</code>。這份名單是白名單，程式碼裡多一個就會被閘門擋下。</li>
   </ul>
   <p style="color:var(--text-muted);font-size:13px;">「唯讀」是工具作者的宣告，不是執行時的沙箱。它告訴你這支工具<em>設計上</em>不寫入，不是保證它<em>不可能</em>寫入。</p>
@@ -112,8 +112,8 @@
       <tr><th>類</th><th>名稱</th><th class="num">數量</th><th>涵蓋</th></tr>
     </thead>
     <tbody>
-        <tr><td><strong>A</strong></td><td>基礎與查詢</td><td class="num">31</td><td>讀模型、找元素、問參數，也含少數寫入前置（載入共用參數）。</td></tr>
-        <tr><td><strong>B</strong></td><td>建模與構件</td><td class="num">47</td><td>產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</td></tr>
+        <tr><td><strong>A</strong></td><td>基礎與查詢</td><td class="num">35</td><td>讀模型、找元素、問參數，也含少數寫入前置（載入共用參數、載入族群）。</td></tr>
+        <tr><td><strong>B</strong></td><td>建模與構件</td><td class="num">49</td><td>產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</td></tr>
         <tr><td><strong>C</strong></td><td>房間與空間</td><td class="num">18</td><td>房間邊界、編號、面積、走廊、施工架周長。</td></tr>
         <tr><td><strong>D</strong></td><td>MEP 與碰撞</td><td class="num">17</td><td>風管系統、空間代表點、套管開孔、CSA 干涉。</td></tr>
         <tr><td><strong>E</strong></td><td>法規檢核</td><td class="num">13</td><td>排煙、偵煙、樓梯——有法源、有判準的檢查。</td></tr>
@@ -122,13 +122,13 @@
         <tr><td><strong>H</strong></td><td>視覺化</td><td class="num">30</td><td>上色、覆寫、隱藏顯示，也含材質與 Type 建構。</td></tr>
     </tbody>
   </table>
-  <p style="color:var(--text-muted);font-size:13px;">分類是 48 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 223。這一頁由 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
+  <p style="color:var(--text-muted);font-size:13px;">分類是 49 個來源模組的一個分割——每個模組恰好屬於一類，八類加總等於 229。這一頁由 <code>registerRevitTools()</code> 產生，不是手寫的。</p>
 </section>
 
 <section class="bim-section">
-  <h2 class="bim-section-title">223 個工具 · 依用途分組</h2>
+  <h2 class="bim-section-title">229 個工具 · 依用途分組</h2>
 
-    <div class="cat-header">A · 基礎與查詢（31 個）</div>
+    <div class="cat-header">A · 基礎與查詢（35 個）</div>
     <p class="cat-blurb">讀模型、找元素、問參數，多數工作的第一步；也包含少數寫入型前置工具（如載入共用參數檔 load_shared_parameters）。</p>
     <div class="tool-card" id="adjust_section_datums" data-tool="adjust_section_datums">
       <div>
@@ -280,6 +280,36 @@
         <div class="tool-desc">取得使用者目前在 Revit 中選取的所有元素的基本資訊（ID、名稱、品類）。若是視圖或剖面標記，會一併回傳 Origin (X,Y,Z) 供空間排序使用。</div>
       </div>
     </div>
+    <div class="tool-card" id="get_site_coordinates" data-tool="get_site_coordinates">
+      <div>
+        <div class="tool-name">get_site_coordinates</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">site-elevation-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">讀取內部原點、專案基準點、測量點的內部與共用座標（mm，未經顯示精度捨入），作用中位置的 E/W、N/S、高程與正北角度，以及每個樓層的內部／專案／共用高程與 Elevation Base。排查高程標籤帶奇怪小數或連結高程對不上時使用。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="get_toposolid_contour_settings" data-tool="get_toposolid_contour_settings">
+      <div>
+        <div class="tool-name">get_toposolid_contour_settings</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">site-elevation-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">讀取 Toposolid 的主體樓層、偏移與類型 Contour Display 每一列的 Start／Stop／Step（Revit 2024+），並分別假設從內部原點、專案基準點、測量點、主體樓層起算，算出第一條等高線的共用高程尾數，用來比對畫面上 X.048 這類標籤。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="get_toposolid_points" data-tool="get_toposolid_points">
+      <div>
+        <div class="tool-name">get_toposolid_points</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">site-elevation-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">讀取單一 Toposolid 的形狀點共用高程（Revit 2024+）：總數、最小／最大值、對等高線間距的尾數分佈與均勻抽樣點，用來判斷地形面本身是否整體偏移。</div>
+      </div>
+    </div>
     <div class="tool-card" id="list_categories" data-tool="list_categories">
       <div>
         <div class="tool-name">list_categories</div>
@@ -298,6 +328,16 @@
       </div>
       <div>
         <div class="tool-desc">列出這個 Revit 進程目前開啟的所有非連結文件，含標題、路徑、是否為作用文件、是否已修改。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="load_family" data-tool="load_family">
+      <div>
+        <div class="tool-name">load_family</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">base-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">從 .rfa 檔載入族群到目前專案。可用 typeNames 只載入指定類型（LoadFamilySymbol）；族群已存在時不視為失敗，直接回傳既有族群（AlreadyLoaded=true），overwrite=true 才覆蓋。回傳 FamilyId、FamilyName、AlreadyLoaded 與 Symbols（ElementId、Name、Category）。</div>
       </div>
     </div>
     <div class="tool-card" id="load_shared_parameters" data-tool="load_shared_parameters">
@@ -440,7 +480,7 @@
         <div class="tool-desc">將視圖縮放至指定元素，讓使用者可以快速定位。</div>
       </div>
     </div>
-    <div class="cat-header">B · 建模與構件（47 個）</div>
+    <div class="cat-header">B · 建模與構件（49 個）</div>
     <p class="cat-blurb">產生或修改實體構件：牆、柱、樑、帷幕、地形、IFC 同步。</p>
     <div class="tool-card" id="analyze_beam_penetration" data-tool="analyze_beam_penetration">
       <div>
@@ -725,6 +765,16 @@
         <div class="tool-desc">取得專案中已載入的家具類型清單。</div>
       </div>
     </div>
+    <div class="tool-card" id="get_join_status" data-tool="get_join_status">
+      <div>
+        <div class="tool-name">get_join_status</div>
+        <div class="tool-flags"><span class="tool-badge readonly">唯讀</span></div>
+        <div class="tool-module">wall-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">檢查一組元素兩兩之間的幾何接合狀態（唯讀）。逐對回報是否已接合、誰切誰、BoundingBox 間距、階段是否相同、是否有共同材料，並給出「接合了線卻沒消失」的成因判定（未接合 / 階段不同 / 材料不同 / 不共平面屬正常）。未給 elementIds 時用目前選取；上限 60 個元素。觸發條件：接合了邊界線還在、join geometry 沒效果、哪一對沒接上。</div>
+      </div>
+    </div>
     <div class="tool-card" id="get_line_styles" data-tool="get_line_styles">
       <div>
         <div class="tool-name">get_line_styles</div>
@@ -762,7 +812,17 @@
         <div class="tool-module">grading-tools</div>
       </div>
       <div>
-        <div class="tool-desc">依指定樓板底面的水平投影範圍整平 Toposolid；本次僅支援 footprint_only 模式。</div>
+        <div class="tool-desc">依指定樓板底面的水平投影範圍整平 Toposolid；本次僅支援 footprint_only 模式。樓板開口（例如外圈地坪挖空建築範圍）不計入投影；以形狀編輯點做出的斜板，折面每塊平面各自計算、平滑曲面則先三角化再逐片計算；多片樓板相鄰或重疊時，每一點取涵蓋該點之樓板中最低的底面，高程落差處自動加一排內縮控制點，重疊會列在 Warnings。</div>
+      </div>
+    </div>
+    <div class="tool-card" id="join_elements" data-tool="join_elements">
+      <div>
+        <div class="tool-name">join_elements</div>
+        <div class="tool-flags"><span class="tool-badge write">會寫入</span></div>
+        <div class="tool-module">wall-tools</div>
+      </div>
+      <div>
+        <div class="tool-desc">把一組元素中「相鄰但尚未接合」的配對逐對做幾何接合 (JoinGeometry)，補齊 Revit Multiple Join 不會處理的後續元素彼此之間的配對。未給 elementIds 時用目前選取；上限 60 個元素。單一交易，可用 Revit 復原；dryRun=true 只列出會接合的配對不寫入。回傳已接合 / 失敗（附原因）/ 原本已接合 / 不相鄰的統計。建議先用 get_join_status 檢查。</div>
       </div>
     </div>
     <div class="tool-card" id="join_wall_tops" data-tool="join_wall_tops">
@@ -2388,7 +2448,7 @@
     <a href="../index.html" class="bim-footer-btn">回 BIM_MCP 首頁</a>
   </div>
   <p>BIM_MCP · reference / tools-index</p>
-  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">223 個 MCP 工具完整索引，由 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
+  <p style="font-size:11px;color:var(--text-faint);margin-top:6px;">229 個 MCP 工具完整索引，由 registerRevitTools() 產生；唯讀/寫入標註取自工具自身 annotations。</p>
 </footer>
 
 <script src="../shared.js"></script>

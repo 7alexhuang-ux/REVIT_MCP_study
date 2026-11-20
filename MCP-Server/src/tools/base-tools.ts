@@ -120,6 +120,30 @@ export const baseTools: Tool[] = [
         },
     },
     {
+        name: "load_family",
+        description: "從 .rfa 檔載入族群到目前專案。可用 typeNames 只載入指定類型（LoadFamilySymbol）；族群已存在時不視為失敗，直接回傳既有族群（AlreadyLoaded=true），overwrite=true 才覆蓋。回傳 FamilyId、FamilyName、AlreadyLoaded 與 Symbols（ElementId、Name、Category）。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                familyPath: {
+                    type: "string",
+                    description: ".rfa 族群檔的絕對路徑 (如 C:/Families/Door_Single.rfa)",
+                },
+                typeNames: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "只載入這些類型名稱（逐一呼叫 LoadFamilySymbol）。省略 = 載入整個族群的所有類型",
+                },
+                overwrite: {
+                    type: "boolean",
+                    description: "true = 族群已存在時覆蓋既有版本與參數值；false = 保留專案內既有版本 (預設 false)",
+                    default: false,
+                },
+            },
+            required: ["familyPath"],
+        },
+    },
+    {
         name: "get_selected_elements",
         description: "取得使用者目前在 Revit 中選取的所有元素的基本資訊（ID、名稱、品類）。若是視圖或剖面標記，會一併回傳 Origin (X,Y,Z) 供空間排序使用。",
         inputSchema: { type: "object", properties: {} },
@@ -173,6 +197,8 @@ export const baseTools: Tool[] = [
             properties: {
                 elementId: { type: "number", description: "要選取的元素 ID (單選)" },
                 elementIds: { type: "array", items: { type: "number" }, description: "要選取的元素 ID 列表 (多選)" },
+                linkInstanceId: { type: "number", description: "選填：elementId(s) 屬於這個連結模型實體時填入，改以連結參照選取連結內的元素" },
+                toggleRevealHidden: { type: "boolean", description: "選填：true = 只切換目前視圖的「顯示隱藏元素」模式（燈泡），不做選取" },
             },
         },
     },

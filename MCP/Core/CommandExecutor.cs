@@ -122,6 +122,10 @@ namespace RevitMCP.Core
                         result = LoadSharedParameters(parameters);
                         break;
 
+                    case "load_family":
+                        result = LoadFamily(parameters);
+                        break;
+
                     case "create_green_material":
                         result = CreateGreenMaterial(parameters);
                         break;
@@ -422,6 +426,14 @@ namespace RevitMCP.Core
 
                     case "unjoin_element_joins":
                         result = UnjoinElementJoins(parameters);
+                        break;
+
+                    case "get_join_status":
+                        result = GetJoinStatus(parameters);
+                        break;
+
+                    case "join_elements":
+                        result = JoinElements(parameters);
                         break;
 
                     case "check_exterior_wall_openings":
@@ -835,9 +847,19 @@ namespace RevitMCP.Core
                         result = ClearPreviousAnnotations(parameters);
                         break;
 
+                    case "get_site_coordinates":
+                        result = GetSiteCoordinates(parameters);
+                        break;
+
 #if REVIT2024_OR_GREATER
                     case "grade_toposolid_to_floors":
                         result = GradeToposolidToFloors(parameters);
+                        break;
+                    case "get_toposolid_contour_settings":
+                        result = GetToposolidContourSettings(parameters);
+                        break;
+                    case "get_toposolid_points":
+                        result = GetToposolidPoints(parameters);
                         break;
 #endif
 
@@ -1686,9 +1708,12 @@ namespace RevitMCP.Core
             string furnitureTypeName = parameters["furnitureType"]?.Value<string>();
             string levelName = parameters["level"]?.Value<string>() ?? "Level 1";
             double rotation = parameters["rotation"]?.Value<double>() ?? 0;
-
-            // 轉換座標（公釐 → 英尺）
-            XYZ location = new XYZ(x / 304.8, y / 304.8, 0);
+            double? zMm = parameters["z"]?.Value<double?>();
+            double? offsetMm = parameters["offset"]?.Value<double?>();
+            if (zMm.HasValue && offsetMm.HasValue)
+            {
+                throw new Exception("z（世界座標）與 offset（相對樓層）只能擇一給定。");
+            }
 
             using (Transaction trans = new Transaction(doc, "放置家具"))
             {
@@ -1696,6 +1721,16 @@ namespace RevitMCP.Core
 
                 // 取得樓層
                 Level level = FindLevel(doc, levelName, true);
+
+                // Z 預設落在樓層標高（offset 0）。NewFamilyInstance 的 point.Z 語意族群相依（見
+                // CommandExecutor.FamilyPlacement.cs），這裡只當初始值，放置後再明確寫入樓層偏移參數並讀回驗證。
+                double targetOffsetFeet = zMm.HasValue
+                    ? zMm.Value / 304.8 - level.ProjectElevation
+                    : (offsetMm ?? 0) / 304.8;
+                double zWorldFeet = level.ProjectElevation + targetOffsetFeet;
+
+                // 轉換座標（公釐 → 英尺）
+                XYZ location = new XYZ(x / 304.8, y / 304.8, targetOffsetFeet);
 
                 // 取得家具類型
                 FamilySymbol furnitureSymbol = new FilteredElementCollector(doc)
@@ -1725,12 +1760,21 @@ namespace RevitMCP.Core
                     Autodesk.Revit.DB.Structure.StructuralType.NonStructural
                 );
 
-                // 旋轉
+                // 放置後先 Regenerate 再寫偏移參數，寫完再 Regenerate 一次後讀回驗證（單筆，共 2 次）
+                doc.Regenerate();
+                Parameter offsetParam = SetLevelOffsetParameter(furniture, targetOffsetFeet, out string offsetParamUsed, out string offsetError);
+
+                // 旋轉（只用 X/Y 定軸，Z 不影響結果）
                 if (Math.Abs(rotation) > 0.001)
                 {
                     Line axis = Line.CreateBound(location, location + XYZ.BasisZ);
                     ElementTransformUtils.RotateElement(doc, furniture.Id, axis, rotation * Math.PI / 180);
                 }
+
+                string regenerateError = null;
+                try { doc.Regenerate(); }
+                catch (Exception ex) { regenerateError = $"Regenerate 失敗: {ex.Message}"; }
+                ZVerification zCheck = VerifyPlacementZ(furniture, offsetParam, offsetParamUsed, offsetError ?? regenerateError, zWorldFeet, regenerateError == null);
 
                 trans.Commit();
 
@@ -1742,6 +1786,11 @@ namespace RevitMCP.Core
                     Level = level.Name,
                     LocationX = x,
                     LocationY = y,
+                    RequestedZMm = Math.Round(zWorldFeet * 304.8, 2),
+                    OffsetParameterUsed = zCheck.OffsetParameterUsed,
+                    OffsetFromLevelMm = zCheck.OffsetFromLevelMm,
+                    ZVerified = zCheck.ZVerified,
+                    ZError = zCheck.Error,
                     Rotation = rotation,
                     Message = $"成功放置家具，ID: {furniture.Id.GetIdValue()}"
                 };
@@ -2287,6 +2336,13 @@ namespace RevitMCP.Core
         /// </summary>
         private object SelectElement(JObject parameters)
         {
+            // 選填：只切換「顯示隱藏元素」模式（燈泡），不做選取。被隱藏的元素只有在此模式下才能選取並取消隱藏
+            if (parameters["toggleRevealHidden"]?.Value<bool>() == true)
+            {
+                _uiApp.PostCommand(RevitCommandId.LookupPostableCommandId(PostableCommand.ToggleRevealHiddenElementsMode));
+                return new { Success = true, Message = "已送出切換「顯示隱藏元素」模式的指令" };
+            }
+
             var elementIds = new List<ElementId>();
             
             // 支援單一 ID
@@ -2312,7 +2368,32 @@ namespace RevitMCP.Core
             }
 
             Document doc = _uiApp.ActiveUIDocument.Document;
-            
+
+            // 選填：elementId(s) 指的是連結模型裡的元素 → 以連結參照選取（等同 Tab 選到連結內元素）
+            IdType linkInstanceIdValue = parameters["linkInstanceId"]?.Value<IdType>() ?? 0;
+            if (linkInstanceIdValue > 0)
+            {
+                var linkInstance = doc.GetElement(new ElementId(linkInstanceIdValue)) as RevitLinkInstance;
+                var linkDoc = linkInstance?.GetLinkDocument();
+                if (linkDoc == null) throw new Exception($"找不到已載入的連結模型實體 ID: {linkInstanceIdValue}");
+
+                var refs = new List<Reference>();
+                foreach (var id in elementIds)
+                {
+                    var linked = linkDoc.GetElement(id);
+                    if (linked == null) throw new Exception($"連結模型中找不到元素 ID: {id.GetIdValue()}");
+                    refs.Add(new Reference(linked).CreateLinkReference(linkInstance));
+                }
+                _uiApp.ActiveUIDocument.Selection.SetReferences(refs);
+
+                return new
+                {
+                    Success = true,
+                    Count = refs.Count,
+                    Message = $"已選取連結模型中的 {refs.Count} 個元素"
+                };
+            }
+
             // 選取元素
             _uiApp.ActiveUIDocument.Selection.SetElementIds(elementIds);
 

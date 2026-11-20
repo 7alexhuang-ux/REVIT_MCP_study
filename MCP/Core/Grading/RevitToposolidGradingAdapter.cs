@@ -17,6 +17,9 @@ namespace RevitMCP.Core.Grading
         string WriteAssociation(Document doc, Toposolid design, long originalId, IReadOnlyList<long> floorIds);
         int ApplyFootprintOnly(Document doc, Toposolid design, IReadOnlyList<FloorFootprint> footprints);
         (double cutCubicMeters, double fillCubicMeters) ReadCutFill(Toposolid design);
+
+        /// <summary>Non-fatal findings collected while grading (e.g. overlapping slabs).</summary>
+        IReadOnlyList<string> Warnings { get; }
     }
 
     internal sealed class RevitToposolidGradingAdapter : IToposolidGradingAdapter
@@ -34,6 +37,9 @@ namespace RevitMCP.Core.Grading
             new Guid("9B4B16C7-4C9C-4B73-9D13-B44F88650D29");
 
         private readonly GradingTimeline _timeline;
+        private readonly List<string> _warnings = new List<string>();
+
+        public IReadOnlyList<string> Warnings => _warnings;
 
         public RevitToposolidGradingAdapter()
             : this(null)
@@ -103,7 +109,7 @@ namespace RevitMCP.Core.Grading
                     throw new ArgumentException("樓板集合不可包含 null。", nameof(floors));
                 }
 
-                footprints.Add(ExtractBottomFootprint(floor));
+                footprints.AddRange(ExtractBottomFootprintsOf(floor));
             }
 
             return footprints;
@@ -237,9 +243,13 @@ namespace RevitMCP.Core.Grading
 
             var xyTolerance = UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters);
             var elevationTolerance = UnitUtils.ConvertToInternalUnits(2.0, UnitTypeId.Millimeters);
-            using (_timeline.Measure("重疊衝突檢查"))
+            // Overlapping slabs are graded, not rejected: wherever several footprints cover a
+            // point, the terrain goes to the lowest bottom face (the excavation has to reach the
+            // deepest slab; a higher slab over that area sits on the lower one, not on soil).
+            // Overlaps at different elevations are reported back so the result is reviewable.
+            using (_timeline.Measure("重疊檢查"))
             {
-                EnsureNoConflictingOverlaps(footprints, xyTolerance, elevationTolerance);
+                _warnings.AddRange(DescribeConflictingOverlaps(footprints, xyTolerance, elevationTolerance).Distinct());
             }
 
             if (!editor.IsEnabled)
@@ -275,11 +285,25 @@ namespace RevitMCP.Core.Grading
             var rayBottomZ = boundingBox.Min.Z - 10.0;
             var rayTopZ = boundingBox.Max.Z + 10.0;
             var pointsToAdd = new List<XYZ>();
+
+            IReadOnlyList<(Point2D Start, Point2D End)> stepSegments;
+            using (_timeline.Measure("高程落差交界"))
+            {
+                stepSegments = BuildStepInsetSegments(footprints, xyTolerance, elevationTolerance);
+            }
+
             var boundarySampleScope = _timeline.Measure("邊界射線取樣");
+            // A floor may span several footprints (facets); it fails only if none of them
+            // reaches the terrain.
+            var floorsTouchingTerrain = new HashSet<long>();
             foreach (var footprint in footprints)
             {
                 var terrainHitCount = 0;
-                foreach (var boundaryPoint in footprint.OuterLoop)
+                var samplePoints = footprint.AllLoops.SelectMany(loop => loop)
+                    .Concat(stepSegments
+                        .SelectMany(segment => new[] { segment.Start, segment.End })
+                        .Where(point => FootprintContains(footprint, point, xyTolerance)));
+                foreach (var boundaryPoint in samplePoints)
                 {
                     var terrainZ = IntersectTerrainTopZ(solids, boundaryPoint, rayBottomZ, rayTopZ);
                     if (!terrainZ.HasValue)
@@ -299,14 +323,22 @@ namespace RevitMCP.Core.Grading
                     pointsToAdd.Add(candidate);
                 }
 
-                if (terrainHitCount == 0
-                    && !existingPositions.Any(position => Polygon2D.Contains(
-                        footprint.OuterLoop,
+                if (terrainHitCount > 0
+                    || existingPositions.Any(position => FootprintContains(
+                        footprint,
                         ToPoint2D(position),
                         xyTolerance)))
                 {
+                    floorsTouchingTerrain.Add(footprint.FloorId);
+                }
+            }
+
+            foreach (var floorId in footprints.Select(footprint => footprint.FloorId).Distinct())
+            {
+                if (!floorsTouchingTerrain.Contains(floorId))
+                {
                     throw new InvalidOperationException(
-                        $"樓板 ID {footprint.FloorId} 的投影範圍完全不與地形相交。");
+                        $"樓板 ID {floorId} 的投影範圍完全不與地形相交。");
                 }
             }
 
@@ -317,7 +349,16 @@ namespace RevitMCP.Core.Grading
                 using (_timeline.Measure("邊界點加入與重生"))
                 {
                     EnsurePointLimit(existingPositions.Count + pointsToAdd.Count);
+#if REVIT2025_OR_GREATER
                     editor.AddPoints(pointsToAdd);
+#else
+                    // Revit 2024.0 has no SlabShapeEditor.AddPoints (added in a later 2024 update);
+                    // DrawPoint exists from 2024.0 onward, so add the points one at a time.
+                    foreach (var point in pointsToAdd)
+                    {
+                        editor.DrawPoint(point);
+                    }
+#endif
                     doc.Regenerate();
                 }
             }
@@ -326,32 +367,22 @@ namespace RevitMCP.Core.Grading
             // 杜絕外部高處地形的三角形跨越樓板上空。
             using (_timeline.Measure("邊界摺線"))
             {
-                DrawBoundarySplitLines(editor, footprints, xyTolerance);
+                var splitSegments = footprints
+                    .SelectMany(footprint => footprint.AllLoops)
+                    .SelectMany(LoopEdges)
+                    .Concat(stepSegments)
+                    .ToList();
+                DrawBoundarySplitLines(editor, splitSegments, xyTolerance);
                 doc.Regenerate();
             }
 
-            // 分類全部頂點：XY 位於樓板投影內或邊界上者，目標高程為該處樓板底面。
+            // 分類全部頂點：XY 位於任一樓板投影內或邊界上者（開口內不算），
+            // 目標高程為涵蓋該點之樓板中最低的底面。
             var targets = new List<VertexTarget>();
             var classifyScope = _timeline.Measure("頂點分類");
             foreach (var position in CollectVertexPositions(editor))
             {
-                double? targetZ = null;
-                foreach (var footprint in footprints)
-                {
-                    if (!Polygon2D.Contains(footprint.OuterLoop, ToPoint2D(position), xyTolerance))
-                    {
-                        continue;
-                    }
-
-                    var bottomZ = footprint.BottomElevationAt(position.X, position.Y);
-                    if (targetZ.HasValue && Math.Abs(targetZ.Value - bottomZ) > elevationTolerance)
-                    {
-                        throw new InvalidOperationException("樓板投影重疊且目標高程衝突，已中止整地。");
-                    }
-
-                    targetZ = targetZ ?? bottomZ;
-                }
-
+                var targetZ = EnvelopeBottomAt(footprints, ToPoint2D(position), xyTolerance);
                 if (targetZ.HasValue)
                 {
                     targets.Add(new VertexTarget(position, targetZ.Value));
@@ -431,7 +462,7 @@ namespace RevitMCP.Core.Grading
         private static double VertexMatchTolerance =>
             UnitUtils.ConvertToInternalUnits(10.0, UnitTypeId.Millimeters);
 
-        private static void EnsureNoConflictingOverlaps(
+        private static IEnumerable<string> DescribeConflictingOverlaps(
             IReadOnlyList<FloorFootprint> footprints,
             double xyTolerance,
             double elevationTolerance)
@@ -442,19 +473,147 @@ namespace RevitMCP.Core.Grading
                 {
                     var first = footprints[firstIndex];
                     var second = footprints[secondIndex];
-                    if (!Polygon2D.Overlaps(first.OuterLoop, second.OuterLoop, xyTolerance))
+                    if (first.FloorId == second.FloorId
+                        || !FootprintsOverlap(first, second, xyTolerance))
                     {
                         continue;
                     }
 
+                    var (lowId, highId) = first.FloorId < second.FloorId
+                        ? (first.FloorId, second.FloorId)
+                        : (second.FloorId, first.FloorId);
                     if (HasConflictingElevation(first, second, xyTolerance, elevationTolerance)
                         || HasConflictingElevation(second, first, xyTolerance, elevationTolerance))
                     {
-                        throw new InvalidOperationException(
-                            $"樓板 ID {first.FloorId} 與 {second.FloorId} 的投影重疊且底面高程不同，請先處理衝突。");
+                        yield return $"樓板 ID {lowId} 與 {highId} 的投影重疊且底面高程不同；"
+                            + "重疊區已以較低的底面整地。";
                     }
                 }
             }
+        }
+
+        // Terrain target at a point: the lowest bottom face among all footprints that cover it
+        // (edges inclusive, openings excluded). Null when no footprint covers the point.
+        private static double? EnvelopeBottomAt(
+            IReadOnlyList<FloorFootprint> footprints,
+            Point2D point,
+            double xyTolerance)
+        {
+            double? lowest = null;
+            foreach (var footprint in footprints)
+            {
+                if (!FootprintContains(footprint, point, xyTolerance))
+                {
+                    continue;
+                }
+
+                var bottomZ = footprint.BottomElevationAt(point.X, point.Y);
+                lowest = lowest.HasValue ? Math.Min(lowest.Value, bottomZ) : bottomZ;
+            }
+
+            return lowest;
+        }
+
+        // Distance from the edge of a lower slab to the row of points that carries the
+        // neighbouring higher target. Must stay well above VertexMatchTolerance (10 mm) and
+        // below the 300 mm margin that surface verification skips next to edges.
+        private static double StepInsetDistance =>
+            UnitUtils.ConvertToInternalUnits(100.0, UnitTypeId.Millimeters);
+
+        // A terrain vertex on a footprint edge can hold only one Z. Where the target just
+        // across an edge is higher (adjacent shallower slab, or a higher slab overlapping this
+        // one), the edge vertices take the lower target and this builds a parallel row of
+        // points StepInsetDistance away on the higher side, so the step is a narrow strip
+        // rather than a slope spread across the whole higher slab.
+        private static IReadOnlyList<(Point2D Start, Point2D End)> BuildStepInsetSegments(
+            IReadOnlyList<FloorFootprint> footprints,
+            double xyTolerance,
+            double elevationTolerance)
+        {
+            var segments = new List<(Point2D Start, Point2D End)>();
+            var inset = StepInsetDistance;
+            foreach (var footprint in footprints)
+            {
+                foreach (var loop in footprint.AllLoops)
+                {
+                    for (var index = 0; index < loop.Count; index++)
+                    {
+                        var start = loop[index];
+                        var end = loop[(index + 1) % loop.Count];
+                        var edgeX = end.X - start.X;
+                        var edgeY = end.Y - start.Y;
+                        var length = Math.Sqrt(edgeX * edgeX + edgeY * edgeY);
+                        if (length <= inset)
+                        {
+                            continue;
+                        }
+
+                        var mid = new Point2D((start.X + end.X) / 2, (start.Y + end.Y) / 2);
+                        var edgeTarget = EnvelopeBottomAt(footprints, mid, xyTolerance);
+                        if (!edgeTarget.HasValue)
+                        {
+                            continue;
+                        }
+
+                        var normalX = -edgeY / length;
+                        var normalY = edgeX / length;
+                        foreach (var sign in new[] { 1.0, -1.0 })
+                        {
+                            var offsetX = sign * normalX * inset;
+                            var offsetY = sign * normalY * inset;
+                            var probe = new Point2D(mid.X + offsetX, mid.Y + offsetY);
+                            var sideTarget = EnvelopeBottomAt(footprints, probe, xyTolerance);
+                            if (!sideTarget.HasValue || sideTarget.Value <= edgeTarget.Value + elevationTolerance)
+                            {
+                                continue;
+                            }
+
+                            var insetStart = new Point2D(start.X + offsetX, start.Y + offsetY);
+                            var insetEnd = new Point2D(end.X + offsetX, end.Y + offsetY);
+                            if (EnvelopeBottomAt(footprints, insetStart, xyTolerance).HasValue
+                                && EnvelopeBottomAt(footprints, insetEnd, xyTolerance).HasValue)
+                            {
+                                segments.Add((insetStart, insetEnd));
+                            }
+                        }
+                    }
+                }
+            }
+
+            return segments;
+        }
+
+        private static bool FootprintContains(FloorFootprint footprint, Point2D point, double xyTolerance)
+        {
+            return Polygon2D.ContainsWithHoles(footprint.OuterLoop, footprint.InnerLoops, point, xyTolerance);
+        }
+
+        private static bool IsOnFootprintBoundary(FloorFootprint footprint, Point2D point, double xyTolerance)
+        {
+            return footprint.AllLoops.Any(loop => Polygon2D.IsOnBoundary(loop, point, xyTolerance));
+        }
+
+        // Area overlap between two footprints. Outer loops that overlap do not count when one
+        // footprint sits entirely inside an opening of the other (building raft inside the
+        // hole of the surrounding site slab).
+        private static bool FootprintsOverlap(FloorFootprint first, FloorFootprint second, double xyTolerance)
+        {
+            if (!Polygon2D.Overlaps(first.OuterLoop, second.OuterLoop, xyTolerance))
+            {
+                return false;
+            }
+
+            if (first.InnerLoops.Any(hole => Polygon2D.LiesWithin(second.OuterLoop, hole, xyTolerance)))
+            {
+                return false;
+            }
+
+            if (second.InnerLoops.Any(hole => Polygon2D.LiesWithin(first.OuterLoop, hole, xyTolerance)))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private static bool HasConflictingElevation(
@@ -463,9 +622,12 @@ namespace RevitMCP.Core.Grading
             double xyTolerance,
             double elevationTolerance)
         {
-            foreach (var point in sampled.OuterLoop)
+            foreach (var point in sampled.AllLoops.SelectMany(loop => loop))
             {
-                if (!Polygon2D.Contains(other.OuterLoop, point, xyTolerance))
+                // Points on the other footprint's edge are a shared boundary, not an overlap;
+                // the step between two adjacent slabs is resolved during vertex classification.
+                if (!FootprintContains(other, point, xyTolerance)
+                    || IsOnFootprintBoundary(other, point, xyTolerance))
                 {
                     continue;
                 }
@@ -533,12 +695,23 @@ namespace RevitMCP.Core.Grading
             return topZ;
         }
 
+        // SlabShapeVertex.IsValidObject is not in the Revit 2024.0 API; there the vertex
+        // array is read fresh from the editor each time, so a null check is sufficient.
+        private static bool IsUsableVertex(SlabShapeVertex vertex)
+        {
+#if REVIT2025_OR_GREATER
+            return vertex != null && vertex.IsValidObject;
+#else
+            return vertex != null;
+#endif
+        }
+
         private static List<XYZ> CollectVertexPositions(SlabShapeEditor editor)
         {
             var positions = new List<XYZ>();
             foreach (SlabShapeVertex vertex in editor.SlabShapeVertices)
             {
-                if (vertex != null && vertex.IsValidObject)
+                if (IsUsableVertex(vertex))
                 {
                     positions.Add(vertex.Position);
                 }
@@ -576,7 +749,7 @@ namespace RevitMCP.Core.Grading
             var vertices = new List<SlabShapeVertex>();
             foreach (SlabShapeVertex vertex in editor.SlabShapeVertices)
             {
-                if (vertex != null && vertex.IsValidObject)
+                if (IsUsableVertex(vertex))
                 {
                     vertices.Add(vertex);
                 }
@@ -641,28 +814,33 @@ namespace RevitMCP.Core.Grading
             return elevations;
         }
 
+        private static IEnumerable<(Point2D Start, Point2D End)> LoopEdges(IReadOnlyList<Point2D> loop)
+        {
+            for (var index = 0; index < loop.Count; index++)
+            {
+                yield return (loop[index], loop[(index + 1) % loop.Count]);
+            }
+        }
+
         private static void DrawBoundarySplitLines(
             SlabShapeEditor editor,
-            IReadOnlyList<FloorFootprint> footprints,
+            IReadOnlyList<(Point2D Start, Point2D End)> segments,
             double xyTolerance)
         {
             var vertices = new List<SlabShapeVertex>();
             foreach (SlabShapeVertex vertex in editor.SlabShapeVertices)
             {
-                if (vertex != null && vertex.IsValidObject)
+                if (IsUsableVertex(vertex))
                 {
                     vertices.Add(vertex);
                 }
             }
 
             var matchTolerance = VertexMatchTolerance;
-            foreach (var footprint in footprints)
+            foreach (var segment in segments)
             {
-                var loop = footprint.OuterLoop;
-                for (var index = 0; index < loop.Count; index++)
-                {
-                    var startVertex = FindNearestVertex(vertices, loop[index], matchTolerance);
-                    var endVertex = FindNearestVertex(vertices, loop[(index + 1) % loop.Count], matchTolerance);
+                    var startVertex = FindNearestVertex(vertices, segment.Start, matchTolerance);
+                    var endVertex = FindNearestVertex(vertices, segment.End, matchTolerance);
                     if (startVertex == null || endVertex == null)
                     {
                         // 邊界點可能因超出地形未建立（規則 7），跳過該段；完整性由表面抽樣驗收把關。
@@ -688,7 +866,6 @@ namespace RevitMCP.Core.Grading
                         // 既有摺線或退化線段會被 Revit 拒絕；缺段風險由表面抽樣驗收把關。
                         continue;
                     }
-                }
             }
         }
 
@@ -731,6 +908,9 @@ namespace RevitMCP.Core.Grading
 
             var boundaryMargin = UnitUtils.ConvertToInternalUnits(300, UnitTypeId.Millimeters);
             var sampleStep = UnitUtils.ConvertToInternalUnits(2000, UnitTypeId.Millimeters);
+            // Steps between slabs sit on any slab's edge, so the edge margin is measured to
+            // every loop of every footprint, not just the one being sampled.
+            var allLoops = footprints.SelectMany(item => item.AllLoops).ToList();
             foreach (var footprint in footprints)
             {
                 var loop = footprint.OuterLoop;
@@ -751,12 +931,12 @@ namespace RevitMCP.Core.Grading
                     for (var y = minY + sampleStep / 2; y <= maxY; y += sampleStep)
                     {
                         var sample = new Point2D(x, y);
-                        if (!Polygon2D.Contains(loop, sample, xyTolerance))
+                        if (!FootprintContains(footprint, sample, xyTolerance))
                         {
                             continue;
                         }
 
-                        if (DistanceToBoundary(loop, sample) < boundaryMargin)
+                        if (allLoops.Any(boundary => DistanceToBoundary(boundary, sample) < boundaryMargin))
                         {
                             continue;
                         }
@@ -768,7 +948,8 @@ namespace RevitMCP.Core.Grading
                             continue;
                         }
 
-                        var bottomZ = footprint.BottomElevationAt(x, y);
+                        var bottomZ = EnvelopeBottomAt(footprints, sample, xyTolerance)
+                            ?? footprint.BottomElevationAt(x, y);
                         if (Math.Abs(surfaceZ.Value - bottomZ) > elevationTolerance)
                         {
                             var deviationMillimeters = UnitUtils.ConvertFromInternalUnits(
@@ -838,10 +1019,15 @@ namespace RevitMCP.Core.Grading
                 UnitUtils.ConvertFromInternalUnits(fill, UnitTypeId.CubicMeters));
         }
 
-        private static FloorFootprint ExtractBottomFootprint(Floor floor)
+        // A plain floor has one planar bottom face. A floor whose shape points were edited
+        // (warped / multi-slope) has a bottom made of several planar facets; each facet becomes
+        // its own footprint with its own plane, and the lowest-bottom envelope stitches them
+        // back together (shared facet edges have equal Z, so no step strip is generated).
+        private static IReadOnlyList<FloorFootprint> ExtractBottomFootprintsOf(Floor floor)
         {
             var geometry = floor.get_Geometry(new Options());
             var bottomFaces = new List<PlanarFace>();
+            var curvedFacets = new List<FloorFootprint>();
             if (geometry != null)
             {
                 foreach (var geometryObject in geometry)
@@ -853,37 +1039,111 @@ namespace RevitMCP.Core.Grading
 
                     foreach (Face face in solid.Faces)
                     {
-                        if (face is PlanarFace planarFace && planarFace.FaceNormal.Z < BottomFaceNormalZMaximum)
+                        if (face is PlanarFace planarFace)
                         {
-                            bottomFaces.Add(planarFace);
+                            if (planarFace.FaceNormal.Z < BottomFaceNormalZMaximum)
+                            {
+                                bottomFaces.Add(planarFace);
+                            }
+
+                            continue;
+                        }
+
+                        var box = face.GetBoundingBox();
+                        var centerNormal = face.ComputeNormal(new UV(
+                            (box.Min.U + box.Max.U) / 2,
+                            (box.Min.V + box.Max.V) / 2));
+                        if (centerNormal.Z < BottomFaceNormalZMaximum)
+                        {
+                            // Shape-edited floors with "Curved Edge Condition" produce a smooth
+                            // (non-planar) bottom. Revit's own triangulation turns it into planar
+                            // triangles, each graded as its own facet.
+                            curvedFacets.AddRange(BuildTriangleFootprints(floor, face));
                         }
                     }
                 }
             }
 
-            if (bottomFaces.Count != 1)
+            var footprints = bottomFaces.Select(face => BuildFootprint(floor, face)).ToList();
+            footprints.AddRange(curvedFacets);
+            if (footprints.Count == 0)
             {
                 throw new InvalidOperationException(
-                    $"樓板 ID {floor.Id.Value} 沒有可用的單一平面底面");
+                    $"樓板 ID {floor.Id.Value} 沒有可用的底面（底面坡度須在約 15° 以內）。");
             }
 
-            var bottomFace = bottomFaces[0];
+            return footprints;
+        }
+
+        private static IEnumerable<FloorFootprint> BuildTriangleFootprints(Floor floor, Face face)
+        {
+            var mesh = face.Triangulate();
+            if (mesh == null)
+            {
+                throw new InvalidOperationException(
+                    $"樓板 ID {floor.Id.Value} 的曲面底面無法三角化。");
+            }
+
+            for (var index = 0; index < mesh.NumTriangles; index++)
+            {
+                var triangle = mesh.get_Triangle(index);
+                var first = triangle.get_Vertex(0);
+                var second = triangle.get_Vertex(1);
+                var third = triangle.get_Vertex(2);
+                var normal = (second - first).CrossProduct(third - first);
+                if (normal.GetLength() <= 1e-12)
+                {
+                    continue;
+                }
+
+                normal = normal.Normalize();
+                if (normal.Z > 0)
+                {
+                    // Triangle winding is not guaranteed; the face is a bottom face, so the
+                    // facet normal must point down.
+                    normal = normal.Negate();
+                }
+
+                if (normal.Z >= BottomFaceNormalZMaximum)
+                {
+                    // Steeper than ~15°: same limit as planar bottom faces.
+                    continue;
+                }
+
+                var origin = first;
+                var facetNormal = normal;
+                yield return new FloorFootprint
+                {
+                    FloorId = floor.Id.Value,
+                    OuterLoop = new List<Point2D> { ToPoint2D(first), ToPoint2D(second), ToPoint2D(third) },
+                    BottomElevationAt = (x, y) => origin.Z
+                        - ((facetNormal.X * (x - origin.X) + facetNormal.Y * (y - origin.Y)) / facetNormal.Z)
+                };
+            }
+        }
+
+        private static FloorFootprint BuildFootprint(Floor floor, PlanarFace bottomFace)
+        {
             var loops = bottomFace.GetEdgesAsCurveLoops();
             if (loops == null || loops.Count == 0)
             {
                 throw new InvalidOperationException(
-                    $"樓板 ID {floor.Id.Value} 沒有可用的單一平面底面");
+                    $"樓板 ID {floor.Id.Value} 的底面沒有可用的邊界。");
             }
 
-            var outerLoop = loops
+            // The largest loop is the outer boundary; every other loop of a single planar
+            // face is an opening. Ignoring the openings made a ring slab around a building
+            // look like it covered the building's slab and was rejected as an overlap.
+            var orderedLoops = loops
                 .Select(DiscretizeLoop)
                 .Where(points => points.Count >= 3)
                 .OrderByDescending(points => Math.Abs(SignedArea(points)))
-                .FirstOrDefault();
+                .ToList();
+            var outerLoop = orderedLoops.FirstOrDefault();
             if (outerLoop == null)
             {
                 throw new InvalidOperationException(
-                    $"樓板 ID {floor.Id.Value} 沒有可用的單一平面底面");
+                    $"樓板 ID {floor.Id.Value} 的底面沒有可用的邊界。");
             }
 
             var origin = bottomFace.Origin;
@@ -892,6 +1152,7 @@ namespace RevitMCP.Core.Grading
             {
                 FloorId = floor.Id.Value,
                 OuterLoop = outerLoop,
+                InnerLoops = orderedLoops.Skip(1).ToList(),
                 BottomElevationAt = (x, y) => origin.Z
                     - ((normal.X * (x - origin.X) + normal.Y * (y - origin.Y)) / normal.Z)
             };

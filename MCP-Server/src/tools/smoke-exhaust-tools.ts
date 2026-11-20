@@ -9,7 +9,7 @@ import { Tool } from "@modelcontextprotocol/sdk/types.js";
 export const smokeExhaustTools: Tool[] = [
     {
         name: "check_smoke_exhaust_windows",
-        description: "排煙窗檢討：檢查天花板下 80cm 內可開啟窗面積是否 ≥ 區劃面積 2%。窗型採推射/外推、推開/平開、橫拉、固定的明確分類，並可傳入專案係數與未知窗型假設；假設值會保留人工確認標記。法源：建技規§101① + 消防§188。",
+        description: "排煙窗檢討：檢查天花板下 80cm 內可開啟窗面積是否 ≥ 區劃面積 2%。計入窗品類（Windows）與帷幕牆玻璃嵌板（Source=CurtainPanel，嵌板中心距房間邊界 ≤ 300mm 即歸屬；實心/空嵌板、牆與門嵌板不計）。窗型採推射/外推、推開/平開、橫拉、固定的明確分類，並可傳入專案係數與未知窗型假設；假設值會保留人工確認標記。法源：建技規§101① + 消防§188。",
         inputSchema: {
             type: "object",
             properties: {

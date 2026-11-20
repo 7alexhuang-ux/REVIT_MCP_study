@@ -2,8 +2,8 @@
 name: smoke-exhaust-review
 description: "在 Revit 中自動檢討建築物排煙窗是否符合法規要求，涵蓋無開口樓層判定、無窗居室判定、排煙窗有效面積計算、改善建議、視覺化標註、Excel 報告匯出。"
 metadata:
-  version: "1.3"
-  updated: "2026-09-17"
+  version: "1.4"
+  updated: "2026-11-04"
   created: "2026-03-18"
   contributors:
     - "Alex Huang"
@@ -103,6 +103,18 @@ Step 2（無窗居室判定）與 Step 5（排煙窗計算）檢查的是同一�
    - 帶內面積 = 寬 × 帶內高度
    - 有效面積 = 帶內面積 × 開啟折減係數
 4. 加總有效面積 ≥ 區劃面積 × 2% → 合規
+
+### 帷幕牆窗（Curtain Wall Panels）
+
+條窗、帶窗常以帷幕牆（Walls 品類，例如 `M_Storefront`）建模，不是 Windows 品類，`FindInserts` 找不到。`check_smoke_exhaust_windows` 另行收集帷幕牆嵌板：
+
+- **計入**：玻璃系統嵌板（Curtain Panels 品類）與窗族群嵌板（Windows 品類）。
+- **不計**：實心／空嵌板（名稱含 solid、empty、實心、空嵌板）、以牆作嵌板（如鋁板外遮板 `Aluminium Sheet`）、門嵌板。
+- **歸屬**：嵌板中心（平面）距房間任一邊界線 ≤ 300 mm，且垂足落在該邊界線段內。同時涵蓋「帷幕牆本身是邊界」「嵌入 RC 牆」「與 RC 牆重疊」三種建模方式。
+- **尺寸**：寬度取嵌板寬度參數（扣除豎框後的淨嵌板），窗台／窗頂取嵌板實際幾何相對房間樓層的高度。因此帷幕牆窗的帶內面積是**淨玻璃面積**，比以帷幕牆總長 × 高計算的標稱值保守。
+- 回傳的每筆窗戶都有 `Source` 欄位，值為 `Window` 或 `CurtainPanel`；帷幕牆嵌板的 `Note` 開頭標註「帷幕牆嵌板」。
+- 系統嵌板名稱（如 `Glazed`）通常無法判定開啟方式，依 `unknownWindowAssumption` 暫定並保留人工確認旗標。
+- 外側若另有遮板、格柵類帷幕牆，工具不計入，也不會扣減內側窗面積；是否阻礙排煙須人工確認。
 
 ### 天花板高度來源路由
 

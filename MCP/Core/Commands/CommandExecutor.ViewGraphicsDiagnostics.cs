@@ -50,9 +50,23 @@ namespace RevitMCP.Core
                     throw new Exception($"找不到元素 ID {elementIdParam.Value}");
             }
 
+            // --- 多元素比對（選填）：回答「同材料為何長得不一樣」---
+            var compareElements = new List<Element>();
+            if (parameters["elementIds"] is JArray idArray)
+            {
+                foreach (var token in idArray)
+                {
+                    var el = doc.GetElement(token.Value<IdType>().ToElementId());
+                    if (el == null) throw new Exception($"找不到元素 ID {token}");
+                    compareElements.Add(el);
+                }
+                if (target == null && compareElements.Count > 0) target = compareElements[0];
+            }
+
             var result = new Dictionary<string, object>();
 
             result["View"] = DescribeDiagView(doc, view);
+            result["ViewLayers"] = DescribeDiagViewLayers(doc, view);
             result["Filters"] = DescribeDiagFilters(doc, view, target);
 
             if (target != null)
@@ -66,8 +80,23 @@ namespace RevitMCP.Core
                 };
                 result["ElementOverride"] = DescribeDiagOverride(doc, SafeGetElementOverrides(view, target.Id));
                 result["CategoryOverride"] = DescribeDiagCategoryOverride(doc, view, target.Category);
+                result["ElementLayers"] = DescribeDiagElementLayers(doc, view, target);
                 result["Materials"] = DescribeDiagMaterials(doc, target);
+                result["SubComponents"] = DescribeDiagSubComponents(doc, target);
+                result["PaintedFaces"] = DescribeDiagPaintedFaces(doc, target);
+                result["ModeResolution"] = BuildDiagModeResolution(DiagAllMaterials(result));
             }
+
+            if (compareElements.Count > 1)
+                result["Comparison"] = BuildDiagComparison(doc, view, compareElements);
+
+            // 選填：列出此視圖所有「有覆寫」的模型品類與子品類（V/G Model Categories 每一格）
+            if (parameters["listCategoryOverrides"]?.Value<bool>() == true)
+                result["CategoryOverrides"] = DescribeDiagAllCategoryOverrides(doc, view);
+
+            // 選填：高程基準（主檔與每個連結的專案基準點／測量點／內部原點）＋ 等高線標籤與高程點
+            if (parameters["includeSiteReference"]?.Value<bool>() == true)
+                result["SiteReference"] = DescribeDiagSiteReference(doc);
 
             result["Verdict"] = BuildDiagVerdict(view, target, result);
             return result;
@@ -109,6 +138,7 @@ namespace RevitMCP.Core
                     info["ViewTemplateId"] = view.ViewTemplateId.GetIdValue();
                     info["ViewTemplateName"] = template?.Name ?? "Unknown";
                     info["ControlledByTemplate"] = DescribeDiagTemplateControl(template);
+                    info["AllControlledByTemplate"] = DescribeDiagAllTemplateControlled(doc, template);
                 }
                 else
                 {
@@ -237,6 +267,168 @@ namespace RevitMCP.Core
         }
 
         /// <summary>
+        /// 高程基準診斷：回答「等高線／高程標籤為什麼多出奇怪的小數」。
+        /// 逐一列出主檔與各連結文件的基準點（內部座標 mm），以及等高線標籤、高程點等標註的元素與類型參數。
+        /// </summary>
+        private Dictionary<string, object> DescribeDiagSiteReference(Document doc)
+        {
+            var result = new Dictionary<string, object>();
+            var docs = new List<KeyValuePair<string, Document>> { new KeyValuePair<string, Document>("Host: " + doc.Title, doc) };
+            var linkTransforms = new Dictionary<string, object>();
+            foreach (var li in new FilteredElementCollector(doc).OfClass(typeof(RevitLinkInstance)).Cast<RevitLinkInstance>())
+            {
+                var ld = li.GetLinkDocument();
+                if (ld == null) continue;
+                docs.Add(new KeyValuePair<string, Document>("Link: " + ld.Title, ld));
+                try
+                {
+                    var o = li.GetTotalTransform().Origin;
+                    linkTransforms[ld.Title] = new { OriginMm = new { X = Math.Round(o.X * 304.8, 1), Y = Math.Round(o.Y * 304.8, 1), Z = Math.Round(o.Z * 304.8, 1) } };
+                }
+                catch { }
+            }
+            result["LinkTransforms"] = linkTransforms;
+
+            var perDoc = new List<object>();
+            foreach (var kv in docs)
+            {
+                var d = kv.Value;
+                var entry = new Dictionary<string, object> { ["Document"] = kv.Key };
+
+                var points = new List<object>();
+                foreach (var bp in new FilteredElementCollector(d).OfClass(typeof(BasePoint)).Cast<BasePoint>())
+                {
+                    try
+                    {
+                        var p = bp.Position;
+                        var sp = bp.SharedPosition;
+                        points.Add(new
+                        {
+                            Kind = bp.IsShared ? "SurveyPoint" : "ProjectBasePoint",
+                            PositionMm = new { X = Math.Round(p.X * 304.8, 1), Y = Math.Round(p.Y * 304.8, 1), Z = Math.Round(p.Z * 304.8, 1) },
+                            SharedPositionMm = new { X = Math.Round(sp.X * 304.8, 1), Y = Math.Round(sp.Y * 304.8, 1), Z = Math.Round(sp.Z * 304.8, 1) }
+                        });
+                    }
+                    catch { }
+                }
+                entry["BasePoints"] = points;
+
+                var levels = new List<object>();
+                foreach (var lv in new FilteredElementCollector(d).OfClass(typeof(Level)).Cast<Level>())
+                {
+                    try { levels.Add(new { lv.Name, InternalElevationMm = Math.Round(lv.Elevation * 304.8, 1), ProjectElevationMm = Math.Round(lv.ProjectElevation * 304.8, 1) }); }
+                    catch { }
+                }
+                entry["Levels"] = levels;
+
+                // 等高線標籤、高程點、地形相關標註：以品類名稱比對，避免依賴特定 BuiltInCategory
+                var annots = new List<object>();
+                var typeSeen = new HashSet<IdType>();
+                var typeParams = new List<object>();
+                foreach (var el in new FilteredElementCollector(d).WhereElementIsNotElementType())
+                {
+                    string cat = el.Category?.Name ?? "";
+                    if (cat.IndexOf("Contour", StringComparison.OrdinalIgnoreCase) < 0 &&
+                        cat.IndexOf("Spot Elevation", StringComparison.OrdinalIgnoreCase) < 0 &&
+                        cat.IndexOf("等高線", StringComparison.Ordinal) < 0 &&
+                        cat.IndexOf("高程點", StringComparison.Ordinal) < 0)
+                        continue;
+                    if (annots.Count >= 50) break;
+
+                    annots.Add(new
+                    {
+                        ElementId = el.Id.GetIdValue(),
+                        Category = cat,
+                        el.Name,
+                        OwnerView = el.OwnerViewId != ElementId.InvalidElementId ? d.GetElement(el.OwnerViewId)?.Name : null,
+                        Parameters = DiagDumpParameters(el)
+                    });
+
+                    var tid = el.GetTypeId();
+                    if (tid != ElementId.InvalidElementId && typeSeen.Add(tid.GetIdValue()))
+                    {
+                        var t = d.GetElement(tid);
+                        if (t != null)
+                            typeParams.Add(new { TypeId = tid.GetIdValue(), TypeName = t.Name, Category = cat, Parameters = DiagDumpParameters(t) });
+                    }
+                }
+                entry["ContourAndSpotAnnotations"] = annots;
+                entry["AnnotationTypes"] = typeParams;
+
+                // 地形本身的基準：每個 Toposolid / Topography 的高程相關參數
+                var topos = new List<object>();
+                foreach (var el in new FilteredElementCollector(d).WhereElementIsNotElementType())
+                {
+                    string cat = el.Category?.Name ?? "";
+                    if (cat != "Toposolid" && cat != "Topography") continue;
+                    if (topos.Count >= 40) break;
+                    topos.Add(new { ElementId = el.Id.GetIdValue(), Category = cat, el.Name, Parameters = DiagDumpParameters(el) });
+                }
+                entry["Terrain"] = topos;
+
+                perDoc.Add(entry);
+            }
+            result["Documents"] = perDoc;
+            result["Note"] = "PositionMm 為該文件內部座標（mm）；標籤顯示值 = 內部高程 − 所選基準點高程。若等高線間距為整數公尺而標籤多出固定小數，比對各基準點 Z 的尾數即可對上。";
+            return result;
+        }
+
+        /// <summary>
+        /// 把元素參數攤平成 名稱→顯示值（AsValueString 優先）
+        /// </summary>
+        private Dictionary<string, object> DiagDumpParameters(Element el)
+        {
+            var d = new Dictionary<string, object>();
+            foreach (Parameter p in el.Parameters)
+            {
+                try
+                {
+                    string name = p.Definition?.Name;
+                    if (string.IsNullOrEmpty(name) || d.ContainsKey(name)) continue;
+                    object v;
+                    switch (p.StorageType)
+                    {
+                        case StorageType.String: v = p.AsString(); break;
+                        case StorageType.Integer: v = p.AsValueString() ?? p.AsInteger().ToString(); break;
+                        case StorageType.Double: v = p.AsValueString() ?? p.AsDouble().ToString(); break;
+                        case StorageType.ElementId:
+                            var eid = p.AsElementId();
+                            v = p.AsValueString() ?? (eid == ElementId.InvalidElementId ? null : el.Document.GetElement(eid)?.Name);
+                            break;
+                        default: v = null; break;
+                    }
+                    d[name] = v;
+                }
+                catch { }
+            }
+            return d;
+        }
+
+        /// <summary>
+        /// 掃過全部模型品類與子品類，只回傳在此視圖有 V/G 覆寫的那些（可對視圖樣板使用）
+        /// </summary>
+        private List<Dictionary<string, object>> DescribeDiagAllCategoryOverrides(Document doc, View view)
+        {
+            var list = new List<Dictionary<string, object>>();
+            foreach (Category cat in doc.Settings.Categories)
+            {
+                if (cat.CategoryType != CategoryType.Model) continue;
+
+                var cats = new List<Category> { cat };
+                try { cats.AddRange(cat.SubCategories.Cast<Category>()); } catch { }
+
+                foreach (var c in cats)
+                {
+                    var d = DescribeDiagCategoryOverride(doc, view, c);
+                    if (d == null || !(d["HasAnyOverride"] is bool has) || !has) continue;
+                    if (c.Id != cat.Id) d["CategoryName"] = cat.Name + " › " + c.Name;
+                    list.Add(d);
+                }
+            }
+            return list;
+        }
+
+        /// <summary>
         /// 把 OverrideGraphicSettings 攤平成可讀欄位，並判斷到底有沒有覆寫
         /// </summary>
         private Dictionary<string, object> DescribeDiagOverride(Document doc, OverrideGraphicSettings ogs)
@@ -310,6 +502,42 @@ namespace RevitMCP.Core
             }
             catch { }
 
+            try
+            {
+                int w = ogs.CutLineWeight;
+                d["CutLineWeight"] = w == OverrideGraphicSettings.InvalidPenNumber ? (object)null : w;
+                if (w != OverrideGraphicSettings.InvalidPenNumber) hasAny = true;
+            }
+            catch { }
+
+            Action<string, ElementId> addLinePattern = (key, id) =>
+            {
+                if (id != null && id != ElementId.InvalidElementId)
+                {
+                    d[key] = doc.GetElement(id)?.Name ?? id.GetIdValue().ToString();
+                    hasAny = true;
+                }
+                else
+                {
+                    d[key] = null;
+                }
+            };
+            try { addLinePattern("ProjectionLinePattern", ogs.ProjectionLinePatternId); } catch { }
+            try { addLinePattern("CutLinePattern", ogs.CutLinePatternId); } catch { }
+
+            try { d["SurfaceForegroundPatternVisible"] = ogs.IsSurfaceForegroundPatternVisible; if (!ogs.IsSurfaceForegroundPatternVisible) hasAny = true; } catch { }
+            try { d["SurfaceBackgroundPatternVisible"] = ogs.IsSurfaceBackgroundPatternVisible; if (!ogs.IsSurfaceBackgroundPatternVisible) hasAny = true; } catch { }
+            try { d["CutForegroundPatternVisible"] = ogs.IsCutForegroundPatternVisible; if (!ogs.IsCutForegroundPatternVisible) hasAny = true; } catch { }
+            try { d["CutBackgroundPatternVisible"] = ogs.IsCutBackgroundPatternVisible; if (!ogs.IsCutBackgroundPatternVisible) hasAny = true; } catch { }
+
+            try
+            {
+                var dl = ogs.DetailLevel;
+                d["DetailLevel"] = dl == ViewDetailLevel.Undefined ? null : dl.ToString();
+                if (dl != ViewDetailLevel.Undefined) hasAny = true;
+            }
+            catch { }
+
             d["HasAnyOverride"] = hasAny;
             return d;
         }
@@ -368,11 +596,16 @@ namespace RevitMCP.Core
 
                 try { m["UseRenderAppearanceForShading"] = mat.UseRenderAppearanceForShading; }
                 catch { }
+                try { m["Transparency"] = mat.Transparency; } catch { }
+                try { m["Smoothness"] = mat.Smoothness; } catch { }
+                try { m["Shininess"] = mat.Shininess; } catch { }
 
                 AddDiagMaterialPattern(doc, m, "SurfaceForeground", mat.SurfaceForegroundPatternId, mat.SurfaceForegroundPatternColor);
                 AddDiagMaterialPattern(doc, m, "SurfaceBackground", mat.SurfaceBackgroundPatternId, mat.SurfaceBackgroundPatternColor);
                 AddDiagMaterialPattern(doc, m, "CutForeground", mat.CutForegroundPatternId, mat.CutForegroundPatternColor);
                 AddDiagMaterialPattern(doc, m, "CutBackground", mat.CutBackgroundPatternId, mat.CutBackgroundPatternColor);
+
+                m["Appearance"] = DescribeDiagAppearance(doc, mat);
 
                 list.Add(m);
             }
@@ -427,18 +660,29 @@ namespace RevitMCP.Core
             {
                 string tmpl = viewInfo.TryGetValue("ViewTemplateName", out var tmplObj) ? tmplObj as string : null;
                 string via = string.IsNullOrEmpty(tmpl) ? "" : $"，且由視圖樣板 '{tmpl}' 控制（在視圖上改不動）";
+                string styleName = viewInfo["DisplayStyle"] as string;
+                string colorSource = DiagIsAppearanceStyle(styleName)
+                    ? "此模式畫的是材料『外觀』頁籤（彩現資產：顏色、貼圖、色彩、風化），不是圖形頁籤的著色顏色；見各材料 Appearance 與 ModeResolution。"
+                    : styleName == "FlatColors"
+                        ? "此模式用材料著色顏色平塗，不受光源影響。"
+                        : "此模式用材料著色顏色（或勾選『使用彩現外觀』時用外觀資產）再乘上光源明暗。";
                 causes.Add(MakeDiagCause(
                     1,
                     "視覺型式 (Display Style)",
                     "整個視圖",
-                    $"視覺型式 = {viewInfo["DisplayStyle"]}{via}。此模式下所有表面都會著色，與材料或覆寫無關。",
+                    $"視覺型式 = {styleName}{via}。{colorSource}",
                     string.IsNullOrEmpty(tmpl)
                         ? "把視覺型式改回 Hidden Line。"
                         : $"先解除或修改視圖樣板 '{tmpl}'，再改視覺型式。"));
             }
 
+            // 工作共用顯示、暫時模式等視圖層級成因（優先序 0，蓋過一切）
+            causes.AddRange(BuildDiagLayerCauses(
+                result.TryGetValue("ViewLayers", out var vl) ? vl as Dictionary<string, object> : null, null, null));
+
             if (target == null)
             {
+                causes = causes.OrderBy(c => (int)c["Priority"]).ToList();
                 return new Dictionary<string, object>
                 {
                     ["PrimaryCause"] = causes.Count > 0 ? causes[0]["Source"] : null,
@@ -543,6 +787,29 @@ namespace RevitMCP.Core
                 }
             }
 
+            // --- 元素其餘層級：隱藏、工作集、階段、依品類材料、子品類 ---
+            causes.AddRange(BuildDiagLayerCauses(null,
+                result.TryGetValue("ElementLayers", out var el) ? el as Dictionary<string, object> : null, target));
+
+            // --- 油漆：面上塗了別的材料（含樓梯子構件）---
+            var painted = DiagAllPaintedFaces(result);
+            if (painted.Count > 0)
+            {
+                causes.Add(MakeDiagCause(
+                    2,
+                    "油漆 (Paint)",
+                    "這個元素的特定面，全部視圖",
+                    $"有 {painted.Count} 個面被油漆工具塗了材料："
+                    + string.Join("、", painted.Select(p => p.TryGetValue("PaintedMaterialName", out var n) ? n : null).Where(n => n != null).Distinct())
+                    + "——這些面不使用類型的材料。",
+                    "修改 > 移除油漆，點選該面。"));
+            }
+
+            // --- 外觀資產：擬真類視覺型式下的實際取色來源 ---
+            causes.AddRange(BuildDiagAppearanceCauses(viewInfo?["DisplayStyle"] as string, DiagAllMaterials(result)));
+
+            causes = causes.OrderBy(c => (int)c["Priority"]).ToList();
+
             string summary;
             if (causes.Count == 0)
             {
@@ -563,6 +830,29 @@ namespace RevitMCP.Core
                 ["Causes"] = causes,
                 ["Summary"] = summary
             };
+        }
+
+        /// <summary>
+        /// 元素本身 + 子構件（樓梯梯段／平台）的所有材料，依名稱去重。
+        /// </summary>
+        private List<Dictionary<string, object>> DiagAllMaterials(Dictionary<string, object> result)
+        {
+            var all = new List<Dictionary<string, object>>();
+            if (result.TryGetValue("Materials", out var m) && m is List<Dictionary<string, object>> mats) all.AddRange(mats);
+            if (result.TryGetValue("SubComponents", out var s) && s is List<Dictionary<string, object>> subs)
+                foreach (var sub in subs)
+                    if (sub["Materials"] is List<Dictionary<string, object>> sm) all.AddRange(sm);
+            return all.GroupBy(x => x["MaterialId"]).Select(g => g.First()).ToList();
+        }
+
+        private List<Dictionary<string, object>> DiagAllPaintedFaces(Dictionary<string, object> result)
+        {
+            var all = new List<Dictionary<string, object>>();
+            if (result.TryGetValue("PaintedFaces", out var p) && p is List<Dictionary<string, object>> pf) all.AddRange(pf);
+            if (result.TryGetValue("SubComponents", out var s) && s is List<Dictionary<string, object>> subs)
+                foreach (var sub in subs)
+                    if (sub["PaintedFaces"] is List<Dictionary<string, object>> sp) all.AddRange(sp);
+            return all;
         }
 
         private Dictionary<string, object> MakeDiagCause(int priority, string source, string scope, string detail, string fix)

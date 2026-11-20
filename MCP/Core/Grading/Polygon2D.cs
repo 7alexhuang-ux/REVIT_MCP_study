@@ -43,6 +43,82 @@ namespace RevitMCP.Core.Grading
             return inside;
         }
 
+        /// <summary>
+        /// Point-in-region test for a polygon with holes. Points on the outer edge or on a
+        /// hole's edge count as inside; points strictly inside a hole do not.
+        /// </summary>
+        public static bool ContainsWithHoles(
+            IReadOnlyList<Point2D> outer,
+            IEnumerable<IReadOnlyList<Point2D>> holes,
+            Point2D point,
+            double tolerance)
+        {
+            if (!Contains(outer, point, tolerance))
+            {
+                return false;
+            }
+
+            if (holes == null)
+            {
+                return true;
+            }
+
+            foreach (var hole in holes)
+            {
+                if (hole == null || hole.Count < 3)
+                {
+                    continue;
+                }
+
+                if (!IsOnBoundary(hole, point, Math.Abs(tolerance)) && Contains(hole, point, tolerance))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// True when <paramref name="inner"/> lies inside <paramref name="container"/>
+        /// (touching or sharing edges allowed): every vertex is inside or on the container's
+        /// boundary and no edge pair crosses strictly.
+        /// </summary>
+        public static bool LiesWithin(
+            IReadOnlyList<Point2D> inner,
+            IReadOnlyList<Point2D> container,
+            double tolerance)
+        {
+            if (inner == null || container == null || inner.Count < 3 || container.Count < 3)
+            {
+                return false;
+            }
+
+            tolerance = Math.Abs(tolerance);
+            foreach (var vertex in inner)
+            {
+                if (!Contains(container, vertex, tolerance))
+                {
+                    return false;
+                }
+            }
+
+            for (var i = 0; i < inner.Count; i++)
+            {
+                var start = inner[i];
+                var end = inner[(i + 1) % inner.Count];
+                for (var j = 0; j < container.Count; j++)
+                {
+                    if (StrictlyIntersects(start, end, container[j], container[(j + 1) % container.Count], tolerance))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
         public static bool Overlaps(
             IReadOnlyList<Point2D> first,
             IReadOnlyList<Point2D> second,
@@ -153,7 +229,7 @@ namespace RevitMCP.Core.Grading
             return interiorNormalDot > 0;
         }
 
-        private static bool IsOnBoundary(
+        public static bool IsOnBoundary(
             IReadOnlyList<Point2D> polygon,
             Point2D point,
             double tolerance)

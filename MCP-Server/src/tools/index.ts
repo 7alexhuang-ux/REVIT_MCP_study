@@ -59,9 +59,10 @@ import { documentTools } from "./document-tools.js";
 import { cameraTools } from "./camera-tools.js";
 import { cameraManagerTools } from "./camera-manager-tools.js";
 import { materialGraphicsTools } from "./material-graphics-tools.js";
+import { siteElevationTools } from "./site-elevation-tools.js";
 
 /**
- * 診斷與環境層工具：擷取畫面、填充樣式查詢、視圖範圍、連結顯示設定、文件操作、相機位置、材質圖形。
+ * 診斷與環境層工具：擷取畫面、填充樣式查詢、視圖範圍、連結顯示設定、文件操作、相機位置、材質圖形、場地高程基準。
  * 這些不綁特定專業領域（排查「為什麼看不到」「為什麼設了沒反應」到處都會用到），
  * 所以每個 profile 都要有，不隨 architect/mep/structural 切換而消失。
  */
@@ -73,6 +74,7 @@ const DIAGNOSTIC_TOOLS = [
     documentTools,
     cameraTools,
     materialGraphicsTools,
+    siteElevationTools,
 ];
 
 /**

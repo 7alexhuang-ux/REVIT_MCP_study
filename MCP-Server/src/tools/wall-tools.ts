@@ -161,6 +161,27 @@ export const wallTools: Tool[] = [
         },
     },
     {
+        name: "get_join_status",
+        description: "檢查一組元素兩兩之間的幾何接合狀態（唯讀）。逐對回報是否已接合、誰切誰、BoundingBox 間距、階段是否相同、是否有共同材料，並給出「接合了線卻沒消失」的成因判定（未接合 / 階段不同 / 材料不同 / 不共平面屬正常）。未給 elementIds 時用目前選取；上限 60 個元素。觸發條件：接合了邊界線還在、join geometry 沒效果、哪一對沒接上。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                elementIds: { type: "array", items: { type: "number" }, description: "要檢查的 Element ID 列表（選填，省略 = 目前選取）" },
+            },
+        },
+    },
+    {
+        name: "join_elements",
+        description: "把一組元素中「相鄰但尚未接合」的配對逐對做幾何接合 (JoinGeometry)，補齊 Revit Multiple Join 不會處理的後續元素彼此之間的配對。未給 elementIds 時用目前選取；上限 60 個元素。單一交易，可用 Revit 復原；dryRun=true 只列出會接合的配對不寫入。回傳已接合 / 失敗（附原因）/ 原本已接合 / 不相鄰的統計。建議先用 get_join_status 檢查。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                elementIds: { type: "array", items: { type: "number" }, description: "要接合的 Element ID 列表（選填，省略 = 目前選取）" },
+                dryRun: { type: "boolean", description: "true = 只預覽會接合哪些配對，不修改模型", default: false },
+            },
+        },
+    },
+    {
         name: "join_wall_tops",
         description: "將指定樓層的牆，其頂部與上方的樓板、天花板、結構樑做幾何接合 (JoinGeometry)。回傳成功接合/已接合跳過/失敗的統計與各樓層明細。常用於樓層牆體建模後的批次頂接合。",
         inputSchema: {
@@ -212,12 +233,14 @@ export const wallTools: Tool[] = [
     },
     {
         name: "place_furniture",
-        description: "在指定位置放置家具實例。",
+        description: "在指定位置放置家具實例。Z 預設落在樓層標高（offset 0）；放置後會明確寫入樓層偏移參數並讀回 LocationPoint 驗證，回傳 OffsetParameterUsed、OffsetFromLevelMm、ZVerified（誤差 < 1mm）。",
         inputSchema: {
             type: "object",
             properties: {
                 x: { type: "number", description: "X 座標（公釐）" },
                 y: { type: "number", description: "Y 座標（公釐）" },
+                z: { type: "number", description: "世界座標 Z（公釐，選填）。與 offset 擇一。" },
+                offset: { type: "number", description: "相對樓層標高的偏移（公釐，選填，預設 0）。與 z 擇一。" },
                 furnitureType: { type: "string", description: "家具類型名稱" },
                 level: { type: "string", description: "樓層名稱", default: "Level 1" },
                 rotation: { type: "number", description: "旋轉角度（度）", default: 0 },

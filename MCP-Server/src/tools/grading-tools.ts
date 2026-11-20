@@ -4,7 +4,7 @@ import { Tool } from "@modelcontextprotocol/sdk/types.js";
 export const gradingTools: Tool[] = [
     {
         name: "grade_toposolid_to_floors",
-        description: "依指定樓板底面的水平投影範圍整平 Toposolid；本次僅支援 footprint_only 模式。",
+        description: "依指定樓板底面的水平投影範圍整平 Toposolid；本次僅支援 footprint_only 模式。樓板開口（例如外圈地坪挖空建築範圍）不計入投影；以形狀編輯點做出的斜板，折面每塊平面各自計算、平滑曲面則先三角化再逐片計算；多片樓板相鄰或重疊時，每一點取涵蓋該點之樓板中最低的底面，高程落差處自動加一排內縮控制點，重疊會列在 Warnings。",
         inputSchema: {
             type: "object",
             properties: {

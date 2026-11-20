@@ -10,6 +10,10 @@ export const linkDisplayTools: Tool[] = [
                 viewId: {
                     type: "number",
                     description: "目標視圖的 ElementId（省略 = 目前作用中的視圖）"
+                },
+                visibleCategory: {
+                    type: "string",
+                    description: "選填：品類名稱（如 Toposolid）。回傳每個連結在此主檔視圖中該品類實際可見與不可見的元素清單"
                 }
             },
             required: []
@@ -40,6 +44,15 @@ export const linkDisplayTools: Tool[] = [
                     type: "array",
                     items: { type: "string" },
                     description: "以連結類型名稱的子字串比對（不分大小寫），例如 TOPO"
+                },
+                linkedViewId: {
+                    type: "number",
+                    description: "連結檔裡要參照的視圖 ID（byLinkView / custom 用）；可用 get_link_display_settings 的 LinkPlanViews 查"
+                },
+                applyTo: {
+                    type: "string",
+                    enum: ["instance", "type"],
+                    description: "寫入 VV → Revit Links 的哪一列：instance = 連結實例列（預設），type = 連結類型上層列"
                 }
             },
             required: []

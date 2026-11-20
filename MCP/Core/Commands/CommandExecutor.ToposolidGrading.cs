@@ -160,7 +160,7 @@ namespace RevitMCP.Core
                 FillCubicMeters = fillCubicMeters,
                 ModifiedPointCount = modifiedPointCount,
                 AssociationId = associationId,
-                Warnings = new string[0]
+                Warnings = adapter.Warnings.ToArray()
             };
 
             var timing = new

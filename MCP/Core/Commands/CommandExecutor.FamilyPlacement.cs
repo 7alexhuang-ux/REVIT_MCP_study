@@ -126,6 +126,10 @@ namespace RevitMCP.Core
                             PlacedPointSource = (object)null,
                             PlacedBBoxCenter = (object)null,
                             LevelName = (object)null,
+                            OffsetParameterUsed = (object)null,
+                            OffsetFromLevelMm = (object)null,
+                            ZVerified = false,
+                            ZError = (object)null,
                             ParametersSet = new List<object>()
                         });
                         failureCount++;
@@ -184,27 +188,18 @@ namespace RevitMCP.Core
             string levelName = placement["levelName"]?.Value<string>();
             Level level = ResolveLevelForPlacement(doc, levelName, zWorldFeet, zMm);
 
-            // 2026-08-14 在單一模型、單一批設備族群上實測到 NewFamilyInstance(XYZ, FamilySymbol, Level,
-            // StructuralType) 的 point.Z 被當成相對該樓層標高的偏移，不是世界座標：對照 GROUND FLOOR
-            // （標高 30480mm）傳 z=33123.2，實際落點卻是世界 Z=63603.2（多了 30480）；SECOND FLOOR 傳
-            // z=0，實際落點卻是世界 Z=34544。Revit API 文件把這個 overload 的 location 參數定義為
-            // "The physical location where the instance is to be placed."，未記載偏移語意；同一份
-            // remarks 說明 Beams 等多端點族群「插入方式與單點族群相同」（"inserted in the same manner as
-            // single point instances"），但插入後其端點需改由 Element.Location 調整——亦即 Location 的
-            // 語意本來就隨族群型式而異，故本行為極可能是族群／放置型式相依，不是這個 API 方法本身的固定
-            // 性質。本工具不綁品類，遇到未實測過的族群務必先放一件核對（見 domain/space-centroid-placement.md
-            // 第三節）。這裡把呼叫端給的世界座標換算成偏移值，讓 get_space_centroid 的輸出可以直接餵進來，
-            // 不必再由呼叫端手動扣除樓層標高。
+            // NewFamilyInstance(XYZ, FamilySymbol, Level, StructuralType) 的 point.Z 語意是族群相依的：
+            // 2026-08-14 設備族群實測被當成「相對樓層的偏移」；2026-10-22 RPC 配景族群（Revit 2024）傳
+            // 「世界 Z - 標高 = 0」卻得到 Offset from Host = 304.8mm。換算後餵進去仍不可靠，所以 Z 不再
+            // 依賴這個 overload：建立後由 SetLevelOffsetParameter 明確寫入樓層偏移參數，再讀回
+            // LocationPoint.Z 驗證（ZVerified）。這裡仍傳換算後的偏移只是讓初始落點盡量接近，最終值以參數為準。
             // 用 Level.ProjectElevation 而非 Level.Elevation：後者受 Elevation Base 型別參數
             // （Project／Shared）影響，在使用 shared coordinates 的專案可能回傳 shared 原點基準的值；
-            // get_space_centroid 讀的是 internal（project）座標系，兩邊必須用同一個基準相減，
-            // 否則在那類專案會整層偏移——這正是本次要修的同型錯誤，不能用「看起來也是標高」的屬性頂替。
-            double zForPlacementFeet = zWorldFeet - level.ProjectElevation;
-            XYZ pointFeet = new XYZ(xMm / 304.8, yMm / 304.8, zForPlacementFeet);
-            // pointFeet 只餵 NewFamilyInstance（Z 是換算後的樓層相對偏移）；requestedWorldFeet 是同一筆
-            // 輸入的世界座標版本，只供下面 PlacedPoint 的回退分支使用——兩者不可互換。若讓 pointFeet 外流到
-            // PlacedPoint，PlacedPointSource='RequestedFallback' 分支會同時偏離「世界座標」（PlacedPoint 的
-            // 宣告語意）與「呼叫端給的值」（RequestedFallback 的宣告語意），變成兩者皆非的第三種值。
+            // get_space_centroid 讀的是 internal（project）座標系，兩邊必須用同一個基準相減。
+            double targetOffsetFeet = zWorldFeet - level.ProjectElevation;
+            XYZ pointFeet = new XYZ(xMm / 304.8, yMm / 304.8, targetOffsetFeet);
+            // pointFeet 只餵 NewFamilyInstance；requestedWorldFeet 是同一筆輸入的世界座標版本，只供下面
+            // PlacedPoint 的回退分支使用——兩者不可互換（PlacedPoint 宣告為世界座標）。
             XYZ requestedWorldFeet = new XYZ(xMm / 304.8, yMm / 304.8, zWorldFeet);
 
             double rotationDeg = placement["rotation"]?.Value<double>() ?? 0;
@@ -218,11 +213,11 @@ namespace RevitMCP.Core
             // LocationPoint 非 null，但 .Point 尚未反映新建元件的實際位置）；同批 AHU 沒有這個問題，
             // 是族群相依的行為，當時差點因此誤刪三台放對的機器。
             // 在讀 LocationPoint（下面的旋轉軸）之前先補一次 Regenerate，順便修好「旋轉軸用到未重生
-            // LocationPoint」的潛在錯位。這是本筆 placement 在「放置後」路徑上的 Regenerate；
-            // ApplyPlacementParameters 內設完全部參數後另有一次（一次性，見該方法註解）。上限為每筆 2 次，
-            // 再加上每個未啟用族群類型首次啟用時的 1 次（見上方 symbol.Activate() 處，每個 distinct
-            // symbol 只會發生一次，不隨 placement 筆數累加）——不得在任何逐參數或逐筆的內層迴圈中額外呼叫
-            // Regenerate，30 秒 MCP timeout 且逾時後交易可能已提交的教訓見同一方法註解，呼叫端請沿用
+            // LocationPoint」的潛在錯位。Regenerate 預算：每筆固定 2 次——這一次，加上
+            // ApplyPlacementParameters 內的一次（forceRegenerate=true，同時承擔樓層偏移參數與實例參數
+            // 的讀回，不為偏移參數另開一次），再加上每個未啟用族群類型首次啟用時的 1 次（見上方
+            // symbol.Activate() 處，不隨 placement 筆數累加）——不得在任何逐參數或逐筆的內層迴圈中額外呼叫
+            // Regenerate，30 秒 MCP timeout 且逾時後交易可能已提交，呼叫端請沿用
             // domain/space-centroid-placement.md 的分批估算。
             doc.Regenerate();
 
@@ -240,7 +235,12 @@ namespace RevitMCP.Core
                 ElementTransformUtils.RotateElement(doc, instance.Id, axis, rotationDeg * Math.PI / 180.0);
             }
 
-            List<object> parametersSet = ApplyPlacementParameters(doc, instance, placement["parameters"] as JObject);
+            // 明確寫入樓層偏移參數（Z 的唯一可靠來源，見上方 targetOffsetFeet 處）。先於使用者 parameters
+            // 寫入：若呼叫端在 parameters 裡也指定了同一個偏移參數，以呼叫端的值為準，ZVerified 會如實反映。
+            Parameter offsetParam = SetLevelOffsetParameter(instance, targetOffsetFeet, out string offsetParamUsed, out string offsetError);
+
+            List<object> parametersSet = ApplyPlacementParameters(doc, instance, placement["parameters"] as JObject, true, out string regenerateError);
+            ZVerification zCheck = VerifyPlacementZ(instance, offsetParam, offsetParamUsed, offsetError ?? regenerateError, zWorldFeet, regenerateError == null);
 
             // 旋轉完成後重新讀一次實際落點：旋轉理論上不移動位置，但一律「讀回真實狀態」而非假設，
             // 與整支工具「不靜默、不猜測」的原則一致。
@@ -300,8 +300,96 @@ namespace RevitMCP.Core
                 PlacedPointSource = placedPointSource,
                 PlacedBBoxCenter = placedBBoxCenter,
                 LevelName = level.Name,
+                OffsetParameterUsed = zCheck.OffsetParameterUsed,
+                OffsetFromLevelMm = zCheck.OffsetFromLevelMm,
+                ZVerified = zCheck.ZVerified,
+                ZError = zCheck.Error,
                 ParametersSet = parametersSet
             };
+        }
+
+        // 依序嘗試的樓層偏移參數：工作平面式族群（如 RPC 配景）的 "Offset from Host"、
+        // 非工作平面式族群的 "Elevation from Level"、柱類的 "Base Offset"。
+        private static readonly BuiltInParameter[] LevelOffsetParameterCandidates =
+        {
+            BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM,
+            BuiltInParameter.INSTANCE_ELEVATION_PARAM,
+            BuiltInParameter.FAMILY_BASE_LEVEL_OFFSET_PARAM
+        };
+
+        private sealed class ZVerification
+        {
+            public string OffsetParameterUsed;
+            public double? OffsetFromLevelMm;
+            public bool ZVerified;
+            public string Error;
+        }
+
+        /// <summary>
+        /// 把實例的樓層偏移參數設為 targetOffsetFeet：取第一個存在、非唯讀、Double 型別且 Set 成功的候選參數。
+        /// 不呼叫 Regenerate（由呼叫端統一做一次）。全部候選都不可用時回 null 並在 error 說明。
+        /// </summary>
+        private static Parameter SetLevelOffsetParameter(FamilyInstance instance, double targetOffsetFeet, out string parameterUsed, out string error)
+        {
+            parameterUsed = null;
+            error = null;
+            var tried = new List<string>();
+
+            foreach (BuiltInParameter bip in LevelOffsetParameterCandidates)
+            {
+                Parameter p = instance.get_Parameter(bip);
+                if (p == null || p.IsReadOnly || p.StorageType != StorageType.Double)
+                    continue;
+
+                if (p.Set(targetOffsetFeet))
+                {
+                    parameterUsed = bip.ToString();
+                    return p;
+                }
+                tried.Add(bip.ToString());
+            }
+
+            error = tried.Count > 0
+                ? $"樓層偏移參數 Set 失敗（{string.Join(", ", tried)}），Z 未經明確設定。"
+                : "找不到可寫入的樓層偏移參數（INSTANCE_FREE_HOST_OFFSET_PARAM / INSTANCE_ELEVATION_PARAM / FAMILY_BASE_LEVEL_OFFSET_PARAM），Z 未經明確設定。";
+            return null;
+        }
+
+        /// <summary>
+        /// 在 Regenerate 之後讀回偏移參數與 LocationPoint.Z，判斷是否落在要求的世界 Z（容差 1mm）。
+        /// regenerated=false（Regenerate 失敗）時讀回值不可信，ZVerified 一律 false。
+        /// </summary>
+        private static ZVerification VerifyPlacementZ(FamilyInstance instance, Parameter offsetParam, string offsetParamUsed, string error, double zWorldFeet, bool regenerated)
+        {
+            var result = new ZVerification { OffsetParameterUsed = offsetParamUsed, Error = error };
+            if (!regenerated)
+                return result;
+
+            try
+            {
+                if (offsetParam != null)
+                    result.OffsetFromLevelMm = Math.Round(offsetParam.AsDouble() * 304.8, 2);
+
+                LocationPoint lp = instance.Location as LocationPoint;
+                if (lp == null)
+                {
+                    result.Error = result.Error ?? "讀不到 LocationPoint，無法驗證 Z。";
+                }
+                else
+                {
+                    double diffMm = Math.Abs(lp.Point.Z - zWorldFeet) * 304.8;
+                    result.ZVerified = diffMm < 1.0;
+                    if (!result.ZVerified && result.Error == null)
+                        result.Error = $"LocationPoint.Z 與要求的世界 Z 相差 {Math.Round(diffMm, 2)}mm。";
+                }
+            }
+            catch (Exception ex)
+            {
+                result.ZVerified = false;
+                result.Error = result.Error ?? $"讀回 Z 失敗: {ex.Message}";
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -442,12 +530,22 @@ namespace RevitMCP.Core
         /// 這唯一一次 Regenerate() 本身若拋例外，不會向上傳播丟掉整批結果：改成把 pendingReadback
         /// 內的每一筆標記為失敗，Set 階段就已判定失敗、已有明確錯誤訊息的 slots 保持不受影響。
         /// 單一參數設定失敗不影響其他參數或該筆放置本身的成功狀態。回傳順序與輸入的 parameters 屬性順序一致。
+        /// forceRegenerate=true 時即使沒有參數要讀回也做這一次 Regenerate（承擔呼叫端先前寫入的樓層偏移參數），
+        /// Regenerate 失敗訊息經 regenerateError 回傳（成功為 null）。
         /// </summary>
-        private List<object> ApplyPlacementParameters(Document doc, FamilyInstance instance, JObject parametersToken)
+        private List<object> ApplyPlacementParameters(Document doc, FamilyInstance instance, JObject parametersToken, bool forceRegenerate, out string regenerateError)
         {
+            regenerateError = null;
             var results = new List<object>();
             if (parametersToken == null)
+            {
+                if (forceRegenerate)
+                {
+                    try { doc.Regenerate(); }
+                    catch (Exception ex) { regenerateError = $"Regenerate 失敗: {ex.Message}"; }
+                }
                 return results;
+            }
 
             List<JProperty> propList = parametersToken.Properties().ToList();
             var slots = new object[propList.Count];
@@ -489,7 +587,7 @@ namespace RevitMCP.Core
                 }
             }
 
-            if (pendingReadback.Count > 0)
+            if (pendingReadback.Count > 0 || forceRegenerate)
             {
                 bool regenerateOk = true;
                 try
@@ -498,6 +596,7 @@ namespace RevitMCP.Core
                 }
                 catch (Exception ex)
                 {
+                    regenerateError = $"Regenerate 失敗: {ex.Message}";
                     // Regenerate() 本身可能因參數值造成族群無法重生而拋例外（例如 InvalidOperationException）。
                     // 這裡不向上拋——若拋出去，外層 catch 會把整個 slots 陣列（含 Set 階段就已判定失敗、且已有
                     // 明確錯誤訊息的參數筆）一起丟棄，變成只剩一句籠統的 Regenerate 錯誤。

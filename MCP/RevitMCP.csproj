@@ -15,9 +15,21 @@
     </Configurations>
   </PropertyGroup>
 
+  <!--
+    Revit API reference version. Default: latest patch of the target year.
+    R24 is pinned to the 2024.0 baseline: a DLL compiled against 2024.3 calls methods
+    (e.g. SlabShapeEditor.AddPoints) that Revit 2024.0 does not have, and fails only at
+    runtime with MissingMethodException. Compiling against the oldest supported patch
+    makes the compiler catch those calls instead.
+  -->
+  <PropertyGroup>
+    <RevitApiPackageVersion>$(RevitVersion).*</RevitApiPackageVersion>
+    <RevitApiPackageVersion Condition="'$(RevitVersion)' == '2024'">2024.0.0</RevitApiPackageVersion>
+  </PropertyGroup>
+
   <ItemGroup>
-    <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="$(RevitVersion).*" />
-    <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="$(RevitVersion).*" />
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="$(RevitApiPackageVersion)" />
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="$(RevitApiPackageVersion)" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="ClosedXML" Version="0.102.3" />
   </ItemGroup>

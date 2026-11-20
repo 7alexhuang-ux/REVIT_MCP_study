@@ -91,7 +91,14 @@ namespace RevitMCP.Core
                     DisplaySetting = mode,
                     LinkedViewName = linkedViewName,
                     HiddenInView = link.IsHidden(view),
-                    HostFiltersApply = mode == "ByHostView"
+                    HostFiltersApply = mode == "ByHostView",
+                    // VV → Revit Links 每列的完整內容：實例列與類型列（上層列）各自讀
+                    InstanceRow = DescribeLinkRow(doc, view, link.Id),
+                    TypeRow = type != null ? DescribeLinkRow(doc, view, type.Id) : null,
+                    // 連結檔裡可當 Linked view 的平面視圖（id → 名稱），供 set_link_display_settings 的 linkedViewId 使用
+                    LinkPlanViews = ListLinkPlanViews(link),
+                    // 選填：此主檔視圖中，該連結內指定品類「實際可見」與「不可見」的元素
+                    CategoryVisibility = DescribeLinkedCategoryVisibility(doc, view, link, parameters["visibleCategory"]?.Value<string>())
                 });
             }
 
@@ -104,6 +111,114 @@ namespace RevitMCP.Core
                 Note = "HostFiltersApply=false 時，主檔的視圖篩選器與類別覆寫不會作用在該連結的元素上。",
                 Links = rows
             };
+        }
+
+        /// <summary>
+        /// 用 FilteredElementCollector(host, viewId, linkId) 取得連結元素在主檔視圖中的實際可見清單，
+        /// 與連結檔中同品類的全部元素比對，列出「在連結裡存在、但此視圖看不到」的元素。
+        /// </summary>
+        private object DescribeLinkedCategoryVisibility(Document doc, View view, RevitLinkInstance link, string categoryName)
+        {
+            if (string.IsNullOrWhiteSpace(categoryName)) return null;
+            var ld = link.GetLinkDocument();
+            if (ld == null) return "(連結未載入)";
+
+            var all = new FilteredElementCollector(ld).WhereElementIsNotElementType()
+                .Where(e => e.Category != null && string.Equals(e.Category.Name, categoryName, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            HashSet<IdType> visible;
+            try
+            {
+                visible = new HashSet<IdType>(new FilteredElementCollector(doc, view.Id, link.Id)
+                    .WhereElementIsNotElementType()
+                    .Where(e => e.Category != null && string.Equals(e.Category.Name, categoryName, StringComparison.OrdinalIgnoreCase))
+                    .Select(e => e.Id.GetIdValue()));
+            }
+            catch (Exception ex)
+            {
+                return $"(讀取失敗: {ex.Message})";
+            }
+
+            Func<Element, object> row = e => new
+            {
+                ElementId = e.Id.GetIdValue(),
+                e.Name,
+                TypeName = ld.GetElement(e.GetTypeId())?.Name
+            };
+
+            return new
+            {
+                Category = categoryName,
+                TotalInLink = all.Count,
+                VisibleCount = all.Count(e => visible.Contains(e.Id.GetIdValue())),
+                Visible = all.Where(e => visible.Contains(e.Id.GetIdValue())).Select(row).ToList(),
+                NotVisible = all.Where(e => !visible.Contains(e.Id.GetIdValue())).Select(row).ToList()
+            };
+        }
+
+        private List<object> ListLinkPlanViews(RevitLinkInstance link)
+        {
+            var list = new List<object>();
+            var ld = link.GetLinkDocument();
+            if (ld == null) return list;
+            foreach (var v in new FilteredElementCollector(ld).OfClass(typeof(ViewPlan)).Cast<ViewPlan>())
+            {
+                if (v.IsTemplate) continue;
+                list.Add(new { ViewId = v.Id.GetIdValue(), v.Name, ViewType = v.ViewType.ToString() });
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// 讀 VV → Revit Links 單一列（實例或類型）：顯示設定的全部欄位與半色調
+        /// </summary>
+        private Dictionary<string, object> DescribeLinkRow(Document doc, View view, ElementId id)
+        {
+            var row = new Dictionary<string, object>();
+
+            try
+            {
+                RevitLinkGraphicsSettings s = view.GetLinkOverrides(id);
+                if (s == null)
+                {
+                    row["DisplaySettings"] = "(無覆寫)";
+                }
+                else
+                {
+                    var fields = new Dictionary<string, object>();
+                    foreach (var p in typeof(RevitLinkGraphicsSettings).GetProperties())
+                    {
+                        if (!p.CanRead || p.GetIndexParameters().Length > 0) continue;
+                        try
+                        {
+                            object v = p.GetValue(s);
+                            if (v is ElementId eid)
+                            {
+                                if (eid == ElementId.InvalidElementId) v = null;
+                                else v = eid.GetIdValue();
+                            }
+                            else if (v != null && !(v is string) && !v.GetType().IsPrimitive && !v.GetType().IsEnum)
+                            {
+                                v = v.ToString();
+                            }
+                            fields[p.Name] = v;
+                        }
+                        catch (Exception ex) { fields[p.Name] = $"(讀取失敗: {ex.Message})"; }
+                    }
+                    row["DisplaySettings"] = fields;
+                }
+            }
+            catch (Exception ex)
+            {
+                row["DisplaySettings"] = $"(讀取失敗: {ex.Message})";
+            }
+
+            try { row["Halftone"] = view.GetElementOverrides(id).Halftone; }
+            catch (Exception ex) { row["Halftone"] = $"(讀取失敗: {ex.Message})"; }
+
+            row["Underlay"] = "(Revit API 未開放讀取)";
+            return row;
         }
 
         private object SetLinkDisplaySettings(JObject parameters)
@@ -142,6 +257,10 @@ namespace RevitMCP.Core
             var applied = new List<object>();
             var failed = new List<object>();
 
+            // 選填：連結檔裡要參照的視圖（ByLinkView / Custom 用）與套用列（instance = 實例列，type = 類型上層列）
+            IdType linkedViewIdValue = parameters["linkedViewId"]?.Value<IdType>() ?? 0;
+            bool applyToType = string.Equals(parameters["applyTo"]?.Value<string>(), "type", StringComparison.OrdinalIgnoreCase);
+
             using (var tx = new Transaction(doc, "設定連結顯示方式"))
             {
                 tx.Start();
@@ -153,12 +272,20 @@ namespace RevitMCP.Core
 
                     try
                     {
-                        RevitLinkGraphicsSettings settings = view.GetLinkOverrides(link.Id)
+                        ElementId rowId = applyToType && type != null ? type.Id : link.Id;
+                        RevitLinkGraphicsSettings settings = view.GetLinkOverrides(rowId)
                                                              ?? new RevitLinkGraphicsSettings();
                         settings.LinkVisibilityType = mode;
-                        view.SetLinkOverrides(link.Id, settings);
+                        if (linkedViewIdValue > 0)
+                        {
+                            var linkDoc = link.GetLinkDocument();
+                            var lv = linkDoc?.GetElement(new ElementId(linkedViewIdValue)) as View;
+                            if (lv == null) throw new Exception($"連結檔裡找不到視圖 ID {linkedViewIdValue}");
+                            settings.LinkedViewId = lv.Id;
+                        }
+                        view.SetLinkOverrides(rowId, settings);
 
-                        applied.Add(new { LinkInstanceId = link.Id.GetIdValue(), LinkTypeName = name });
+                        applied.Add(new { LinkInstanceId = link.Id.GetIdValue(), LinkTypeName = name, Row = applyToType ? "type" : "instance" });
                     }
                     catch (Exception ex)
                     {

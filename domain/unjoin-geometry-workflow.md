@@ -93,6 +93,21 @@ StructuralFraming, StructuralFoundation, Roofs, Ceilings
 - 要保留「全解除」狀態 → 直接存檔，幾何狀態會隨 `.rvt` 寫入
 - 要永久還原 → 在 Revit UI 手動逐對 Join Geometry（繁瑣），或存檔前先 rejoin
 
+## 反向問題：接合了，交界線卻沒消失
+
+解除接合的反面。使用者選了幾個元素做 Join Geometry，交界線還在時，依序檢查：
+
+| 順序 | 成因 | 判斷方式 | 處理 |
+|------|------|----------|------|
+| 1 | **其實沒接到** — 接合是兩兩成對的；Revit 的 Multiple Join 只把第一個元素與後面每個接合，後面那幾個彼此不會互接 | `get_join_status` 的 `Verdict = 未接合（相鄰）` | `join_elements` 補接 |
+| 2 | **階段不同** — Phase Created / Demolished 不一致 | `SamePhase = false` | 統一階段（設計決定，工具不代改） |
+| 3 | **材料不同** — 沒有共同材料 | `SharedMaterials` 為空 | 統一材料（設計決定，工具不代改） |
+| 4 | **兩個面不共平面** — 例如梁寬小於柱寬、牆面內縮於柱面 | 前三項都通過，線落在有高低差的位置 | 正常的轉角邊，不是問題 |
+
+**流程：** `get_join_status`（唯讀）→ 有「未接合（相鄰）」才跑 `join_elements`（可先 `dryRun=true`）→ 再跑一次 `get_join_status` 確認。
+
+**限制：** 相鄰與否以 BoundingBox 判斷（容差 1 mm），斜向或 L 形元素可能被誤判為相鄰，`join_elements` 對這種配對會回報失敗而非硬接；材料比對不含塗料（Paint）；連結模型內的元素無法接合。
+
 ## 驗證策略
 
 ### 策略 1：跑第二次（必做）

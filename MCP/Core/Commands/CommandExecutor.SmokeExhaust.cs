@@ -80,6 +80,99 @@ namespace RevitMCP.Core
             return ("unknown", 0, true, "無法從族群名稱判定開啟方式，需人工確認");
         }
 
+        private class CurtainPanelOpening
+        {
+            public IdType Id;
+            public IdType HostWallId;
+            public string FamilyName;
+            public string TypeName;
+            public XYZ Center;
+            public double ZMin;
+            public double ZMax;
+            public double WidthFeet;
+        }
+
+        /// <summary>
+        /// 收集文件中所有帷幕牆的可透光嵌板（玻璃系統嵌板、窗族群嵌板）。
+        /// 以牆或門作為嵌板、實心／空嵌板一律排除。座標與高度皆為模型座標（ft）。
+        /// </summary>
+        private List<CurtainPanelOpening> CollectCurtainPanelOpenings(Document doc)
+        {
+            var list = new List<CurtainPanelOpening>();
+            string[] opaque = { "solid", "empty", "實心", "空嵌板", "空白" };
+            var curtainWalls = new FilteredElementCollector(doc)
+                .OfClass(typeof(Wall))
+                .Cast<Wall>()
+                .Where(w => w.CurtainGrid != null);
+
+            foreach (Wall cw in curtainWalls)
+            {
+                ICollection<ElementId> panelIds;
+                try { panelIds = cw.CurtainGrid.GetPanelIds(); }
+                catch { continue; }
+
+                foreach (ElementId pid in panelIds)
+                {
+                    if (!(doc.GetElement(pid) is FamilyInstance fi)) continue;   // 以牆作嵌板者不是 FamilyInstance
+                    IdType catId = fi.Category?.Id.GetIdValue() ?? 0;
+                    bool isSystemPanel = catId == (IdType)(int)BuiltInCategory.OST_CurtainWallPanels;
+                    bool isWindowPanel = catId == (IdType)(int)BuiltInCategory.OST_Windows;
+                    if (!isSystemPanel && !isWindowPanel) continue;               // 門嵌板等不計
+
+                    string familyName = fi.Symbol?.FamilyName ?? "";
+                    string typeName = fi.Symbol?.Name ?? fi.Name ?? "";
+                    if (ContainsAny((familyName + " " + typeName).ToLower(), opaque)) continue;
+
+                    BoundingBoxXYZ bb = fi.get_BoundingBox(null);
+                    if (bb == null) continue;
+
+                    double widthFeet = fi.get_Parameter(BuiltInParameter.CURTAIN_WALL_PANELS_WIDTH)?.AsDouble() ?? 0;
+                    if (widthFeet <= 0)
+                        widthFeet = Math.Sqrt(Math.Pow(bb.Max.X - bb.Min.X, 2) + Math.Pow(bb.Max.Y - bb.Min.Y, 2));
+                    if (widthFeet <= 0) continue;
+
+                    list.Add(new CurtainPanelOpening
+                    {
+                        Id = pid.GetIdValue(),
+                        HostWallId = cw.Id.GetIdValue(),
+                        FamilyName = familyName,
+                        TypeName = typeName,
+                        Center = (bb.Min + bb.Max) / 2,
+                        ZMin = bb.Min.Z,
+                        ZMax = bb.Max.Z,
+                        WidthFeet = widthFeet
+                    });
+                }
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// 嵌板中心（投影到平面）是否落在邊界線範圍內，且與邊界線距離 ≤ tol（ft）。
+        /// 直線段要求垂足落在線段內，避免轉角處被相鄰房間的垂直邊界誤收。
+        /// </summary>
+        private bool PanelLiesOnSegment(Curve curve, XYZ center, double tol)
+        {
+            if (curve == null) return false;
+            XYZ s = curve.GetEndPoint(0);
+            XYZ q = new XYZ(center.X, center.Y, s.Z);
+            if (curve is Line line)
+            {
+                XYZ e = line.GetEndPoint(1);
+                XYZ d = e - s;
+                double len = d.GetLength();
+                if (len < 1e-9) return false;
+                XYZ dir = d / len;
+                double t = (q - s).DotProduct(dir);
+                if (t < 0 || t > len) return false;
+                return (q - (s + dir * t)).GetLength() <= tol;
+            }
+            IntersectionResult ir = curve.Project(q);
+            if (ir == null || ir.Distance > tol) return false;
+            XYZ e1 = curve.GetEndPoint(1);
+            return ir.XYZPoint.DistanceTo(s) > 1e-6 && ir.XYZPoint.DistanceTo(e1) > 1e-6;
+        }
+
         private bool ContainsAny(string source, string[] keywords)
         {
             foreach (var kw in keywords)
@@ -257,6 +350,10 @@ namespace RevitMCP.Core
 
             SpatialElementBoundaryOptions boundaryOptions = new SpatialElementBoundaryOptions();
 
+            // 帷幕牆嵌板（Walls 品類，FindInserts 找不到）：整份文件收集一次，逐房以邊界線位置歸屬。
+            // 只收玻璃系統嵌板與窗族群嵌板；實心／空嵌板、以牆或門作嵌板者不計。
+            var curtainPanels = CollectCurtainPanelOpenings(doc);
+
             foreach (Room room in rooms)
             {
                 totalRooms++;
@@ -428,6 +525,7 @@ namespace RevitMCP.Core
                                         windowResults.Add(new
                                         {
                                             WindowId = insertId.GetIdValue(),
+                                            Source = "Window",
                                             FamilyName = fi.Symbol.FamilyName,
                                             TypeName = fi.Symbol.Name,
                                             Width = Math.Round(width, 1),
@@ -470,6 +568,95 @@ namespace RevitMCP.Core
                                 }
                             }
                         }
+                    }
+                }
+
+                // 帷幕牆嵌板：嵌板中心（平面）距任一邊界線 ≤ 300mm 且落在該邊界線範圍內即歸屬本房間。
+                // 同時涵蓋「帷幕牆本身是邊界」「嵌入 RC 牆」「與 RC 牆重疊」三種建模方式。
+                if (segments != null && curtainPanels.Count > 0)
+                {
+                    // 嵌板 BoundingBox 為內部座標；Level.Elevation 相對於樓層類型的高程基準（可能是專案基準點），
+                    // 兩者比較必須用 ProjectElevation（相對內部原點）。本案專案基準點在內部 Z=-3048mm，用錯會差 10ft。
+                    double levelInternalZ = level.ProjectElevation;
+                    double roomTopFeet = levelInternalZ + ceilingHeight / FEET_TO_MM;
+                    const double panelTol = 300.0 / 304.8;
+                    foreach (var p in curtainPanels)
+                    {
+                        if (processedWindowIds.Contains(p.Id)) continue;
+                        if (p.ZMax <= levelInternalZ || p.ZMin >= roomTopFeet) continue;
+
+                        bool onBoundary = false;
+                        foreach (IList<BoundarySegment> segmentList in segments)
+                        {
+                            foreach (BoundarySegment segment in segmentList)
+                            {
+                                if (PanelLiesOnSegment(segment.GetCurve(), p.Center, panelTol)) { onBoundary = true; break; }
+                            }
+                            if (onBoundary) break;
+                        }
+                        if (!onBoundary) continue;
+                        processedWindowIds.Add(p.Id);
+
+                        double width = p.WidthFeet * FEET_TO_MM;
+                        double sillHeight = (p.ZMin - levelInternalZ) * FEET_TO_MM;
+                        double headHeight = (p.ZMax - levelInternalZ) * FEET_TO_MM;
+                        double height = headHeight - sillHeight;
+
+                        double headHeightCapped = Math.Min(headHeight, smokeZoneTop);
+                        bool isInSmokeZone = headHeightCapped > smokeZoneBottom;
+                        double heightInZone = 0;
+                        double areaInZone = 0;
+                        if (isInSmokeZone)
+                        {
+                            double effectiveBottom = Math.Max(sillHeight, smokeZoneBottom);
+                            heightInZone = Math.Max(headHeightCapped - effectiveBottom, 0);
+                            areaInZone = (width / 1000.0) * (heightInZone / 1000.0);
+                        }
+
+                        var (operationType, openingRatio, needsConfirm, note) =
+                            GetWindowOperationType(p.FamilyName, p.TypeName,
+                                casementOpeningRatio, slidingOpeningRatio, projectedOpeningRatio, unknownWindowAssumption);
+                        note = "帷幕牆嵌板" + (string.IsNullOrEmpty(note) ? "" : "；" + note);
+                        if (needsConfirm) hasConfirmNeeded = true;
+                        double effectiveArea = areaInZone * openingRatio;
+
+                        if (colorize) colorizeList.Add((p.Id, operationType, openingRatio, needsConfirm));
+
+                        windowResults.Add(new
+                        {
+                            WindowId = p.Id,
+                            Source = "CurtainPanel",
+                            FamilyName = p.FamilyName,
+                            TypeName = p.TypeName,
+                            Width = Math.Round(width, 1),
+                            Height = Math.Round(height, 1),
+                            SillHeight = Math.Round(sillHeight, 1),
+                            HeadHeight = Math.Round(headHeight, 1),
+                            HeadHeightCapped = Math.Round(headHeightCapped, 1),
+                            IsInSmokeZone = isInSmokeZone,
+                            HeightInZone = Math.Round(heightInZone, 1),
+                            AreaInZone = Math.Round(areaInZone, 4),
+                            OperationType = operationType,
+                            OperationSource = "familyName",
+                            OpeningRatio = openingRatio,
+                            EffectiveArea = Math.Round(effectiveArea, 4),
+                            NeedsManualConfirm = needsConfirm,
+                            Note = note,
+                            HostWallId = p.HostWallId
+                        });
+
+                        sumEffectiveArea += Math.Round(effectiveArea, 4);
+                        if (isInSmokeZone) countInSmokeZone++;
+                        if (Math.Round(effectiveArea, 4) > 0) countEffective++;
+                        if (needsConfirm) countNeedsConfirm++;
+                        if (operationType == "fixed" && Math.Round(areaInZone, 4) > 0)
+                        {
+                            fixedWindowsInZoneCount++;
+                            fixedWindowsInZonePotentialGain += Math.Round(areaInZone, 4);
+                        }
+                        if (!isInSmokeZone && headHeight > smokeZoneBottom - 300) nearZoneWindowsCount++;
+                        windowDetailsList.Add((p.Id, p.FamilyName, p.TypeName, operationType, Math.Round(areaInZone, 4), headHeight, isInSmokeZone, width, heightInZone));
+                        allWindowDetails.Add((p.Id, Math.Round(areaInZone, 4), isInSmokeZone, width, heightInZone));
                     }
                 }
 
