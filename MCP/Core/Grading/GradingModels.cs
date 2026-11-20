@@ -163,6 +163,12 @@ namespace RevitMCP.Core.Grading
         /// <summary>板的邊坡率政策（V3-S2；無政策＝null/空，放坡時全邊用預設坡率）。</summary>
         public IReadOnlyList<EdgeSlopePolicy> EdgePolicies { get; set; }
 
+        /// <summary>
+        /// 本面是非平面（彎曲）底面：地形三角網只靠邊界點會以弦代弧，整地時需在內部加密控制點
+        /// （見 <see cref="SurfaceDensifier"/>）。平面面的頂點都在同一平面上，不需要。
+        /// </summary>
+        public bool RequiresInteriorDensification { get; set; }
+
         /// <summary>同一片樓板的其他朝下面（各為單一區域、無 ExtraRegions）；null 或空＝只有一個面。</summary>
         public IReadOnlyList<FloorFootprint> ExtraRegions { get; set; }
 
@@ -191,7 +197,8 @@ namespace RevitMCP.Core.Grading
                     OuterLoop = OuterLoop,
                     Holes = Holes,
                     BottomElevationAt = BottomElevationAt,
-                    EdgePolicies = EdgePolicies
+                    EdgePolicies = EdgePolicies,
+                    RequiresInteriorDensification = RequiresInteriorDensification
                 }
             };
             if (ExtraRegions != null)
@@ -480,20 +487,38 @@ namespace RevitMCP.Core.Grading
                         for (var index = 0; index < loop.Count; index++)
                         {
                             var vertex = loop[index];
-                            if (!TryLowestBottomRegion(footprints, vertex, xyTolerance, out var vertexZ, out _))
-                            {
-                                continue;
-                            }
-
                             var q = new Point2D(
                                 vertex.X + (side * inset * directions[index].X),
                                 vertex.Y + (side * inset * directions[index].Y));
-                            if (!TryLowestBottomRegion(footprints, q, xyTolerance, out _, out var source))
+                            double vertexZ;
+                            double qZ;
+                            FloorFootprint source;
+                            try
                             {
+                                if (!TryLowestBottomRegion(footprints, vertex, xyTolerance, out vertexZ, out _)
+                                    || !TryLowestBottomRegion(footprints, q, xyTolerance, out qZ, out source))
+                                {
+                                    continue;
+                                }
+                            }
+                            catch (InvalidOperationException)
+                            {
+                                // 非平面底面在此點求高程失敗：階差環只是輔助，不因此中止整批；
+                                // 缺環的風險由表面抽樣驗收把關（驗收失敗會回滾）。
                                 continue;
                             }
 
-                            var extended = source.BottomElevationAt(vertex.X, vertex.Y);
+                            double extended;
+                            try
+                            {
+                                extended = source.BottomElevationAt(vertex.X, vertex.Y);
+                            }
+                            catch (InvalidOperationException)
+                            {
+                                // 非平面面延伸到頂點（面外）求不到：改用偏移點本身的高程比較。
+                                extended = qZ;
+                            }
+
                             if (double.IsNaN(extended) || extended - vertexZ <= elevationTolerance)
                             {
                                 continue;
