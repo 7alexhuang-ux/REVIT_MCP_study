@@ -179,10 +179,27 @@ namespace RevitMCP.Core
                         $"樓板 {floorId}：偵測到內環（孔洞），目前工具只用外環計算，面積可能偏高，內孔面積未扣除。");
                 }
 
+                // 多朝下面（斜板、改過形狀的板）：每個面各自檢查後合併，不可只算最大面。
+                // 疊圖標籤落點仍用最大面外框（loopMeters）。
                 var loopMeters = footprint.OuterLoop
                     .Select(ParcelUnitConversion.FeetPointToMeters)
                     .ToList();
-                var result = ParcelLimitCheck.CheckFloor(floorId, loopMeters, cellSummaries);
+                var regionResults = footprint.SplitRegions()
+                    .Select(region => ParcelLimitCheck.CheckFloor(
+                        floorId,
+                        region.OuterLoop.Select(ParcelUnitConversion.FeetPointToMeters).ToList(),
+                        cellSummaries))
+                    .ToList();
+                if (regionResults.Count > 1)
+                {
+                    warnings.Add(
+                        $"樓板 {floorId}：有 {regionResults.Count} 個朝下面，已各面分別檢查後合併面積；"
+                        + "疊圖標籤只標在最大面。");
+                }
+
+                var result = regionResults.Count == 1
+                    ? regionResults[0]
+                    : ParcelLimitCheck.MergeFloorResults(floorId, regionResults);
                 floorResults.Add(result);
                 floorLoopsMeters[floorId] = loopMeters;
 

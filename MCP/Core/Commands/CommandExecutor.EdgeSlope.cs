@@ -46,11 +46,17 @@ namespace RevitMCP.Core
                 ?? throw new ArgumentException("請提供邊參考點 y（公尺，專案內部原點座標）。");
 
             var footprint = adapter.ExtractBottomFootprints(new[] { floor })[0];
-            var loop = footprint.OuterLoop;
             var sample = new Point2D(
                 UnitUtils.ConvertToInternalUnits(xMeters, UnitTypeId.Meters),
                 UnitUtils.ConvertToInternalUnits(yMeters, UnitTypeId.Meters));
-            var detailed = Polygon2D.NearestBoundaryPointDetailed(loop, sample);
+            // 多朝下面的樓板：在全部面的外緣（略過面與面共用的內部邊）找最近邊。
+            var detailed = footprint.NearestOutlineEdge(
+                sample, UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters));
+            if (detailed.RegionIndex < 0)
+            {
+                throw new InvalidOperationException($"樓板 {floorId} 找不到可設定坡率的外緣邊。");
+            }
+
             var maxSnapFeet = UnitUtils.ConvertToInternalUnits(3.0, UnitTypeId.Meters);
             if (detailed.Distance > maxSnapFeet)
             {
@@ -58,8 +64,16 @@ namespace RevitMCP.Core
                     $"參考點離板邊 {UnitUtils.ConvertFromInternalUnits(detailed.Distance, UnitTypeId.Meters):0.0}m，過遠（上限 3m）；請點在目標邊附近。");
             }
 
-            var edgeStart = loop[detailed.EdgeIndex];
-            var edgeEnd = loop[(detailed.EdgeIndex + 1) % loop.Count];
+            // 邊坡率政策只對「最大面」外框的邊生效（放坡時政策只匹配主面輪廓）；
+            // 選到其他朝下面的邊會存了卻永遠不生效，明確拒絕而非靜默。
+            if (detailed.RegionIndex != 0)
+            {
+                throw new InvalidOperationException(
+                    $"樓板 {floorId} 有多個朝下面，最近的邊在非最大面的外框上；邊坡率政策目前只支援最大面的外框邊，請改點最大面外框的邊。");
+            }
+
+            var edgeStart = detailed.Start;
+            var edgeEnd = detailed.End;
             var fingerprint = EdgeSlopePolicies.FingerprintFromSegment(edgeStart, edgeEnd, 1.0);
             var newPolicy = new StoredEdgePolicy
             {

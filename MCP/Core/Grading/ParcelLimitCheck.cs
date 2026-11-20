@@ -133,6 +133,61 @@ namespace RevitMCP.Core.Grading
         }
 
         /// <summary>
+        /// 同一片樓板有多個朝下面（斜板、改過形狀的板）時，各面分別做 <see cref="CheckFloor"/> 後合併：
+        /// 面積各項相加；同一坵塊的重疊面積相加，佔樓板比例以合併後樓板總面積重算。
+        /// 各面不重疊是前提（同一片板的朝下面在平面上互不重疊）。
+        /// </summary>
+        public static ParcelFloorLimitResult MergeFloorResults(
+            long floorId,
+            IReadOnlyList<ParcelFloorLimitResult> regionResults)
+        {
+            if (regionResults == null || regionResults.Count == 0)
+            {
+                throw new ArgumentException("至少需要一個區域結果。", nameof(regionResults));
+            }
+
+            var floorArea = regionResults.Sum(result => result.FloorAreaSquareMeters);
+            var merged = new Dictionary<string, ParcelCellOverlap>();
+            var order = new List<string>();
+            foreach (var overlap in regionResults.SelectMany(result => result.MatchedCells ?? new List<ParcelCellOverlap>()))
+            {
+                if (merged.TryGetValue(overlap.CellLabel, out var existing))
+                {
+                    existing.OverlapAreaSquareMeters += overlap.OverlapAreaSquareMeters;
+                }
+                else
+                {
+                    order.Add(overlap.CellLabel);
+                    merged[overlap.CellLabel] = new ParcelCellOverlap
+                    {
+                        CellLabel = overlap.CellLabel,
+                        Restriction = overlap.Restriction,
+                        SlopePercent = overlap.SlopePercent,
+                        OverlapAreaSquareMeters = overlap.OverlapAreaSquareMeters,
+                    };
+                }
+            }
+
+            var matched = order.Select(label => merged[label]).ToList();
+            foreach (var overlap in matched)
+            {
+                overlap.OverlapFractionOfFloor = floorArea > 0 ? overlap.OverlapAreaSquareMeters / floorArea : 0;
+            }
+
+            return new ParcelFloorLimitResult
+            {
+                FloorId = floorId,
+                FloorAreaSquareMeters = floorArea,
+                CoveredAreaSquareMeters = regionResults.Sum(result => result.CoveredAreaSquareMeters),
+                OpenSpaceOnlyOverlapAreaSquareMeters =
+                    regionResults.Sum(result => result.OpenSpaceOnlyOverlapAreaSquareMeters),
+                ExcludedOverlapAreaSquareMeters =
+                    regionResults.Sum(result => result.ExcludedOverlapAreaSquareMeters),
+                MatchedCells = matched,
+            };
+        }
+
+        /// <summary>
         /// 樓板輪廓的「標籤安全落點」：優先用面積質心；質心落在板外（常見於 U 形等極端凹多邊形）
         /// 時，退回最近邊界點並沿該邊內法線方向內推一小段，確保落點在板內而非剛好壓在邊上。
         /// 兩者都失敗（退化多邊形）時回傳頂點平均（舊行為）作最後備援。

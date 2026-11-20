@@ -115,19 +115,166 @@ namespace RevitMCP.Tests.Grading
         }
 
         [Test]
-        public void VerticalFace_PlaneZ_IsNaN_AndIgnoredByCoverage()
+        public void VerticalFace_PlaneZ_IsNaN()
         {
             Assert.That(double.IsNaN(FootprintCoverage.PlaneZ(0, 0, 0, 1, 0, 0, 1, 1)), Is.True);
+        }
 
+        [Test]
+        public void NaNBottomInsideProjection_Throws_WithFloorIdAndPoint_NotSilentlySkipped()
+        {
             var broken = new FloorFootprint
             {
-                FloorId = 1,
+                FloorId = 4242,
                 OuterLoop = Rect(0, 0, 10, 10),
                 BottomElevationAt = (x, y) => double.NaN
             };
             var good = Flat(2, Rect(0, 0, 10, 10), 1);
-            Assert.That(FootprintCoverage.TryLowestBottomZ(new[] { broken, good }, new Point2D(5, 5), Tolerance, out var z), Is.True);
-            Assert.That(z, Is.EqualTo(1).Within(1e-9));
+
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                FootprintCoverage.TryLowestBottomZ(new[] { broken, good }, new Point2D(5, 5), Tolerance, out _));
+            Assert.That(ex.Message, Does.Contain("4242"));
+            Assert.That(ex.Message, Does.Contain("5.000"));
+
+            // 點在板投影外時不會呼叫高程函式，不受影響。
+            Assert.That(
+                FootprintCoverage.TryLowestBottomZ(new[] { broken }, new Point2D(50, 50), Tolerance, out _), Is.False);
+        }
+
+        [Test]
+        public void StepRings_BasementFlushWithOpening_PutsHigherSidePointsBesideSharedEdge()
+        {
+            // 地下室板外框剛好等於一樓開口：共邊頂點取較低板底（-2），
+            // 一樓板側緊貼共邊一圈點必須存在（目標＝一樓板底 0），否則地形從共邊斜到下一個頂點挖出楔形。
+            var ground = Flat(315196, Rect(0, 0, 20, 20), 0, Rect(5, 5, 15, 15));
+            var basement = Flat(314871, Rect(5, 5, 15, 15), -2);
+            var floors = new[] { ground, basement };
+            const double inset = 0.03;
+
+            var rings = FootprintCoverage.BuildStepRings(floors, inset, Tolerance, 0.005);
+
+            var points = rings.SelectMany(ring => ring).Where(p => p.HasValue).Select(p => p.Value).ToList();
+            Assert.That(points, Is.Not.Empty);
+            foreach (var q in points)
+            {
+                Assert.That(FootprintCoverage.TryLowestBottomZ(floors, q, Tolerance, out var z), Is.True);
+                Assert.That(z, Is.EqualTo(0).Within(1e-9), "階差環點落在較高的一樓板側，目標＝一樓板底");
+                Assert.That(basement.CoversOwnRegion(q, Tolerance), Is.False, "不可落進較低的地下室板內");
+                // 緊貼共邊：距洞緣（＝地下室外框）≤ inset，遠小於一般頂點間距。
+                Assert.That(ground.NearestBoundary(q).Distance, Is.LessThanOrEqualTo(inset + 1e-9));
+            }
+
+            // 共邊四個角、每邊兩端都有環點：環連續，可刻成封閉摺線。
+            Assert.That(rings.Any(ring => ring.All(p => p.HasValue)), Is.True);
+        }
+
+        [Test]
+        public void StepRings_StepBetweenFacesOfSameFloor_RaisesHigherFaceOnly()
+        {
+            var floor = Flat(7, Rect(0, 0, 10, 10), 0);
+            floor.ExtraRegions = new[] { Flat(7, Rect(10, 0, 20, 10), -1.5) };
+            var regions = floor.SplitRegions();
+
+            var rings = FootprintCoverage.BuildStepRings(regions, 0.03, Tolerance, 0.005);
+            var points = rings.SelectMany(ring => ring).Where(p => p.HasValue).Select(p => p.Value).ToList();
+
+            Assert.That(points, Is.Not.Empty);
+            Assert.That(points.All(p => p.X < 10), Is.True, "只在較高（左）面加環");
+            Assert.That(points.Any(p => p.X > 9.9), Is.True, "環點貼在共邊旁");
+        }
+
+        [Test]
+        public void StepRings_StackedOverlap_AddsPointsOutsideLowerSlabInsideUpperSlab()
+        {
+            var upper = Flat(1, Rect(0, 0, 20, 20), 3);
+            var lower = Flat(2, Rect(5, 5, 15, 15), -1);
+            var floors = new[] { upper, lower };
+
+            var rings = FootprintCoverage.BuildStepRings(floors, 0.03, Tolerance, 0.005);
+            var points = rings.SelectMany(ring => ring).Where(p => p.HasValue).Select(p => p.Value).ToList();
+
+            Assert.That(points, Is.Not.Empty);
+            Assert.That(points.All(p => !lower.CoversOwnRegion(p, Tolerance)), Is.True);
+            Assert.That(points.All(p => upper.CoversOwnRegion(p, Tolerance)), Is.True);
+        }
+
+        [Test]
+        public void StepRings_SingleFlatOrSlopedSlab_NoStepRing()
+        {
+            var flat = Flat(1, Rect(0, 0, 10, 10), 0);
+            Assert.That(FootprintCoverage.BuildStepRings(new[] { flat }, 0.03, Tolerance, 0.005), Is.Empty);
+
+            // 單一斜板：邊界內外偏移點與邊界在同一平面上，不是階差。
+            var sloped = new FloorFootprint
+            {
+                FloorId = 2,
+                OuterLoop = Rect(0, 0, 10, 10),
+                BottomElevationAt = (x, y) => 0.2 * x
+            };
+            Assert.That(FootprintCoverage.BuildStepRings(new[] { sloped }, 0.03, Tolerance, 0.005), Is.Empty);
+        }
+
+        [Test]
+        public void NearestOutlineEdge_SkipsEdgeSharedByTwoFaces_AndReportsRegion()
+        {
+            var floor = Flat(7, Rect(0, 0, 10, 10), 0);
+            floor.ExtraRegions = new[] { Flat(7, Rect(10, 0, 20, 10), -1.5) };
+
+            // 參考點在共邊上：共邊是內部邊，應改選最近的外緣邊。
+            var edge = floor.NearestOutlineEdge(new Point2D(10, 4), Tolerance);
+            Assert.That(edge.RegionIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(edge.Start.X == 10 && edge.End.X == 10, Is.False, "不可選到共用的內部邊");
+
+            // 點在右面外緣旁 → 選到右面（RegionIndex 1）的邊。
+            var right = floor.NearestOutlineEdge(new Point2D(20.5, 5), Tolerance);
+            Assert.That(right.RegionIndex, Is.EqualTo(1));
+            Assert.That(right.Distance, Is.EqualTo(0.5).Within(1e-9));
+
+            // 單一面＝等同外框最近邊。
+            var single = Flat(1, Rect(0, 0, 10, 10), 0).NearestOutlineEdge(new Point2D(5, -1), Tolerance);
+            Assert.That(single.RegionIndex, Is.EqualTo(0));
+            Assert.That(single.Distance, Is.EqualTo(1).Within(1e-9));
+        }
+
+        [Test]
+        public void MergeFloorResults_SumsAreasAndMergesCellsByLabel()
+        {
+            var first = new ParcelFloorLimitResult
+            {
+                FloorId = 1,
+                FloorAreaSquareMeters = 60,
+                CoveredAreaSquareMeters = 60,
+                OpenSpaceOnlyOverlapAreaSquareMeters = 10,
+                ExcludedOverlapAreaSquareMeters = 5,
+                MatchedCells = new List<ParcelCellOverlap>
+                {
+                    new ParcelCellOverlap { CellLabel = "A1", Restriction = ParcelRestriction.OpenSpaceOnly, OverlapAreaSquareMeters = 10 },
+                    new ParcelCellOverlap { CellLabel = "B2", Restriction = ParcelRestriction.ExcludedFromOpenSpace, OverlapAreaSquareMeters = 5 }
+                }
+            };
+            var second = new ParcelFloorLimitResult
+            {
+                FloorId = 1,
+                FloorAreaSquareMeters = 40,
+                CoveredAreaSquareMeters = 30,
+                OpenSpaceOnlyOverlapAreaSquareMeters = 6,
+                ExcludedOverlapAreaSquareMeters = 0,
+                MatchedCells = new List<ParcelCellOverlap>
+                {
+                    new ParcelCellOverlap { CellLabel = "A1", Restriction = ParcelRestriction.OpenSpaceOnly, OverlapAreaSquareMeters = 6 }
+                }
+            };
+
+            var merged = ParcelLimitCheck.MergeFloorResults(1, new[] { first, second });
+
+            Assert.That(merged.FloorAreaSquareMeters, Is.EqualTo(100));
+            Assert.That(merged.CoveredAreaSquareMeters, Is.EqualTo(90));
+            Assert.That(merged.OpenSpaceOnlyOverlapAreaSquareMeters, Is.EqualTo(16));
+            Assert.That(merged.ExcludedOverlapAreaSquareMeters, Is.EqualTo(5));
+            Assert.That(merged.MatchedCells.Count, Is.EqualTo(2));
+            var a1 = merged.MatchedCells.Single(cell => cell.CellLabel == "A1");
+            Assert.That(a1.OverlapAreaSquareMeters, Is.EqualTo(16));
+            Assert.That(a1.OverlapFractionOfFloor, Is.EqualTo(0.16).Within(1e-12));
         }
 
         [Test]

@@ -103,11 +103,17 @@ namespace RevitMCP.Core
                 ?? throw new ArgumentException("slope 需要低側邊參考點 y（公尺）。");
 
             var footprint = adapter.ExtractBottomFootprints(new[] { floor })[0];
-            var loop = footprint.OuterLoop;
             var sample = new Point2D(
                 UnitUtils.ConvertToInternalUnits(xMeters, UnitTypeId.Meters),
                 UnitUtils.ConvertToInternalUnits(yMeters, UnitTypeId.Meters));
-            var detailed = Polygon2D.NearestBoundaryPointDetailed(loop, sample);
+            // 多朝下面的樓板（已改過形狀）：在全部面的外緣（略過面與面共用的內部邊）找最近邊當低側邊。
+            var detailed = footprint.NearestOutlineEdge(
+                sample, UnitUtils.ConvertToInternalUnits(1.0, UnitTypeId.Millimeters));
+            if (detailed.RegionIndex < 0)
+            {
+                throw new InvalidOperationException("樓板找不到可當低側邊的外緣邊。");
+            }
+
             var maxSnapFeet = UnitUtils.ConvertToInternalUnits(3.0, UnitTypeId.Meters);
             if (detailed.Distance > maxSnapFeet)
             {
@@ -115,8 +121,8 @@ namespace RevitMCP.Core
                     $"低側邊參考點離板邊 {UnitUtils.ConvertFromInternalUnits(detailed.Distance, UnitTypeId.Meters):0.0}m，過遠（上限 3m）。");
             }
 
-            var edgeStart = loop[detailed.EdgeIndex];
-            var edgeEnd = loop[(detailed.EdgeIndex + 1) % loop.Count];
+            var edgeStart = detailed.Start;
+            var edgeEnd = detailed.End;
 
             var editor = floor.GetSlabShapeEditor();
             editor.ResetSlabShape(); // 先回平板，確保寫入語意為「相對平板抬升」。

@@ -255,11 +255,17 @@ namespace RevitMCP.Core.Grading
             if (CoversOwnRegion(point, tolerance) && BottomElevationAt != null)
             {
                 var value = BottomElevationAt(point.X, point.Y);
-                if (!double.IsNaN(value) && !double.IsInfinity(value))
+                if (double.IsNaN(value) || double.IsInfinity(value))
                 {
-                    z = value;
-                    found = true;
+                    // 點在板投影內卻取不到板底：不得靜默略過（會讓該點掉進銜接帶、驗收又跳過，結果錯卻回報成功）。
+                    throw new InvalidOperationException(string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "樓板 ID {0} 在投影內 ({1:F3}, {2:F3}) 英呎處取不到板底高程，已中止整地。",
+                        FloorId, point.X, point.Y));
                 }
+
+                z = value;
+                found = true;
             }
 
             if (ExtraRegions != null)
@@ -299,6 +305,59 @@ namespace RevitMCP.Core.Grading
             }
 
             return (bestPoint, bestDistance, onHole);
+        }
+
+        /// <summary>
+        /// 全部朝下面外框（聯集外緣）上離 sample 最近的邊：各面外框的邊，略過兩面共用的內部邊
+        /// （邊中點同時落在另一面內）。RegionIndex 對應 <see cref="SplitRegions"/> 順序（0＝主面）；
+        /// 找不到（無任何邊）時 RegionIndex＝-1。單一朝下面時等同外框最近邊。
+        /// </summary>
+        public (int RegionIndex, int EdgeIndex, Point2D Start, Point2D End, double Distance) NearestOutlineEdge(
+            Point2D sample,
+            double tolerance)
+        {
+            var regions = SplitRegions();
+            var best = (RegionIndex: -1, EdgeIndex: -1, Start: default(Point2D), End: default(Point2D),
+                Distance: double.MaxValue);
+            for (var regionIndex = 0; regionIndex < regions.Count; regionIndex++)
+            {
+                var loop = regions[regionIndex].OuterLoop;
+                for (var edgeIndex = 0; edgeIndex < loop.Count; edgeIndex++)
+                {
+                    var start = loop[edgeIndex];
+                    var end = loop[(edgeIndex + 1) % loop.Count];
+                    if (regions.Count > 1)
+                    {
+                        var middle = new Point2D((start.X + end.X) / 2.0, (start.Y + end.Y) / 2.0);
+                        var shared = false;
+                        for (var other = 0; other < regions.Count && !shared; other++)
+                        {
+                            shared = other != regionIndex && regions[other].CoversOwnRegion(middle, tolerance);
+                        }
+
+                        if (shared)
+                        {
+                            continue;
+                        }
+                    }
+
+                    var edgeX = end.X - start.X;
+                    var edgeY = end.Y - start.Y;
+                    var lengthSquared = (edgeX * edgeX) + (edgeY * edgeY);
+                    var t = lengthSquared > 0
+                        ? Math.Max(0, Math.Min(1, (((sample.X - start.X) * edgeX) + ((sample.Y - start.Y) * edgeY)) / lengthSquared))
+                        : 0.0;
+                    var dx = sample.X - (start.X + (t * edgeX));
+                    var dy = sample.Y - (start.Y + (t * edgeY));
+                    var distance = Math.Sqrt((dx * dx) + (dy * dy));
+                    if (distance < best.Distance)
+                    {
+                        best = (regionIndex, edgeIndex, start, end, distance);
+                    }
+                }
+            }
+
+            return best;
         }
 
         /// <summary>本面面積＝外框面積減洞面積。不含 ExtraRegions。</summary>
@@ -360,6 +419,99 @@ namespace RevitMCP.Core.Grading
             }
 
             return originZ - (((normalX * (x - originX)) + (normalY * (y - originY))) / normalZ);
+        }
+
+        /// <summary>
+        /// 同 <see cref="TryLowestBottomZ"/>，另回傳給出最低板底的那個 footprint。
+        /// footprints 須已攤平成單一區域（不含 ExtraRegions，見 <see cref="FloorFootprint.SplitRegions"/>）。
+        /// </summary>
+        public static bool TryLowestBottomRegion(
+            IReadOnlyList<FloorFootprint> footprints,
+            Point2D point,
+            double tolerance,
+            out double z,
+            out FloorFootprint source)
+        {
+            z = 0;
+            source = null;
+            foreach (var footprint in footprints)
+            {
+                if (footprint.TryLowestBottomZ(point, tolerance, out var candidate)
+                    && (source == null || candidate < z))
+                {
+                    z = candidate;
+                    source = footprint;
+                }
+            }
+
+            return source != null;
+        }
+
+        /// <summary>
+        /// 階差環：相鄰或重疊的板底不同高時，較高板底的一側在共邊旁需要一圈緊貼的控制點，
+        /// 否則地形會從共邊（取較低板底）斜到較高板內下一個頂點，挖出楔形、表面驗收失敗。
+        /// 對每個外框／洞緣頂點 v，沿角平分線往兩側各偏 inset，若偏移點 q 的最低板底所屬區域，
+        /// 延伸到 v 時比 v 的最低板底高出 elevationTolerance 以上，就在 q 放點（目標高程由一般頂點分類取得，
+        /// 即 q 處最低板底）。用「延伸到 v 的同一平面」比較，故單一斜板邊界不會被誤判為階差。
+        /// 回傳環（沿該環頂點順序；null＝該頂點不需要），呼叫端把非 null 點加進地形並刻相鄰點間的摺線。
+        /// footprints 須已攤平成單一區域。
+        /// </summary>
+        public static IReadOnlyList<IReadOnlyList<Point2D?>> BuildStepRings(
+            IReadOnlyList<FloorFootprint> footprints,
+            double inset,
+            double xyTolerance,
+            double elevationTolerance)
+        {
+            var rings = new List<IReadOnlyList<Point2D?>>();
+            foreach (var footprint in footprints)
+            {
+                foreach (var loop in footprint.AllLoops())
+                {
+                    if (loop == null || loop.Count < 3)
+                    {
+                        continue;
+                    }
+
+                    var directions = Polygon2D.OutwardDirections(loop);
+                    foreach (var side in new[] { 1.0, -1.0 })
+                    {
+                        var ring = new Point2D?[loop.Count];
+                        var any = false;
+                        for (var index = 0; index < loop.Count; index++)
+                        {
+                            var vertex = loop[index];
+                            if (!TryLowestBottomRegion(footprints, vertex, xyTolerance, out var vertexZ, out _))
+                            {
+                                continue;
+                            }
+
+                            var q = new Point2D(
+                                vertex.X + (side * inset * directions[index].X),
+                                vertex.Y + (side * inset * directions[index].Y));
+                            if (!TryLowestBottomRegion(footprints, q, xyTolerance, out _, out var source))
+                            {
+                                continue;
+                            }
+
+                            var extended = source.BottomElevationAt(vertex.X, vertex.Y);
+                            if (double.IsNaN(extended) || extended - vertexZ <= elevationTolerance)
+                            {
+                                continue;
+                            }
+
+                            ring[index] = q;
+                            any = true;
+                        }
+
+                        if (any)
+                        {
+                            rings.Add(ring);
+                        }
+                    }
+                }
+            }
+
+            return rings;
         }
 
         public static bool AnyCovers(IEnumerable<FloorFootprint> footprints, Point2D point, double tolerance)
